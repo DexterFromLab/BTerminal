@@ -20,7 +20,19 @@ CONFIG_DIR = os.path.expanduser("~/.config/bterminal")
 SESSIONS_FILE = os.path.join(CONFIG_DIR, "sessions.json")
 CLAUDE_SESSIONS_FILE = os.path.join(CONFIG_DIR, "claude_sessions.json")
 SSH_PATH = "/usr/bin/ssh"
-CLAUDE_PATH = "/home/bartek/.local/bin/claude"
+
+def _find_claude_path():
+    for p in [
+        os.path.expanduser("~/.local/bin/claude"),
+        "/usr/local/bin/claude",
+        "/usr/bin/claude",
+    ]:
+        if os.path.isfile(p) and os.access(p, os.X_OK):
+            return p
+    import shutil
+    return shutil.which("claude") or "claude"
+
+CLAUDE_PATH = _find_claude_path()
 
 FONT = "Monospace 11"
 SCROLLBACK_LINES = 10000

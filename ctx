@@ -1,0 +1,461 @@
+#!/usr/bin/env python3
+"""
+ctx — Cross-session context manager for Claude Code.
+
+Stores project contexts and shared data in SQLite for instant access.
+Usage: ctx <command> [args]
+"""
+
+import sqlite3
+import sys
+import os
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+
+DB_PATH = Path.home() / ".claude-context" / "context.db"
+
+
+def get_db():
+    db = sqlite3.connect(str(DB_PATH))
+    db.row_factory = sqlite3.Row
+    db.execute("PRAGMA journal_mode=WAL")
+    return db
+
+
+def init_db():
+    db = get_db()
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS sessions (
+            name TEXT PRIMARY KEY,
+            description TEXT,
+            work_dir TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS contexts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project TEXT NOT NULL,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            updated_at TEXT DEFAULT (datetime('now')),
+            UNIQUE(project, key)
+        );
+
+        CREATE TABLE IF NOT EXISTS shared (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS summaries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE VIRTUAL TABLE IF NOT EXISTS contexts_fts USING fts5(
+            project, key, value, content=contexts, content_rowid=id
+        );
+
+        CREATE VIRTUAL TABLE IF NOT EXISTS shared_fts USING fts5(
+            key, value, content=shared
+        );
+
+        -- Triggers to keep FTS in sync
+        CREATE TRIGGER IF NOT EXISTS contexts_ai AFTER INSERT ON contexts BEGIN
+            INSERT INTO contexts_fts(rowid, project, key, value)
+            VALUES (new.id, new.project, new.key, new.value);
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS contexts_ad AFTER DELETE ON contexts BEGIN
+            INSERT INTO contexts_fts(contexts_fts, rowid, project, key, value)
+            VALUES ('delete', old.id, old.project, old.key, old.value);
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS contexts_au AFTER UPDATE ON contexts BEGIN
+            INSERT INTO contexts_fts(contexts_fts, rowid, project, key, value)
+            VALUES ('delete', old.id, old.project, old.key, old.value);
+            INSERT INTO contexts_fts(rowid, project, key, value)
+            VALUES (new.id, new.project, new.key, new.value);
+        END;
+    """)
+    db.close()
+
+
+# ─── Commands ───────────────────────────────────────────────────────────
+
+def cmd_init(args):
+    """Register a new project. Usage: ctx init <project> <description> [work_dir]"""
+    if len(args) < 2:
+        print("Usage: ctx init <project> <description> [work_dir]")
+        sys.exit(1)
+    name, desc = args[0], args[1]
+    work_dir = args[2] if len(args) > 2 else None
+    db = get_db()
+    db.execute(
+        "INSERT OR REPLACE INTO sessions (name, description, work_dir) VALUES (?, ?, ?)",
+        (name, desc, work_dir),
+    )
+    db.commit()
+    db.close()
+    print(f"Project '{name}' registered.")
+
+
+def cmd_get(args):
+    """Get full context for a project (shared + project-specific + recent summaries)."""
+    if len(args) < 1:
+        print("Usage: ctx get <project>")
+        sys.exit(1)
+    project = args[0]
+    db = get_db()
+
+    # Session info
+    session = db.execute("SELECT * FROM sessions WHERE name = ?", (project,)).fetchone()
+
+    # Shared context
+    shared = db.execute("SELECT key, value FROM shared ORDER BY key").fetchall()
+
+    # Project context
+    contexts = db.execute(
+        "SELECT key, value FROM contexts WHERE project = ? ORDER BY key", (project,)
+    ).fetchall()
+
+    # Recent summaries (last 5)
+    summaries = db.execute(
+        "SELECT summary, created_at FROM summaries WHERE project = ? ORDER BY created_at DESC LIMIT 5",
+        (project,),
+    ).fetchall()
+
+    # Output
+    print("=" * 60)
+    if session:
+        print(f"PROJECT: {session['name']} — {session['description']}")
+        if session["work_dir"]:
+            print(f"DIR: {session['work_dir']}")
+    else:
+        print(f"PROJECT: {project} (not registered, use: ctx init)")
+    print("=" * 60)
+
+    if shared:
+        print("\n--- Shared Context ---")
+        for row in shared:
+            print(f"\n[{row['key']}]")
+            print(row["value"])
+
+    if contexts:
+        print(f"\n--- {project} Context ---")
+        for row in contexts:
+            print(f"\n[{row['key']}]")
+            print(row["value"])
+
+    if summaries:
+        print("\n--- Recent Sessions ---")
+        for row in reversed(summaries):
+            print(f"\n[{row['created_at']}]")
+            print(row["summary"])
+
+    if not shared and not contexts and not summaries:
+        print("\nNo context stored yet. Use 'ctx set' or 'ctx shared set' to add.")
+
+    db.close()
+
+
+def cmd_set(args):
+    """Set a project context entry. Usage: ctx set <project> <key> <value>"""
+    if len(args) < 3:
+        print("Usage: ctx set <project> <key> <value>")
+        sys.exit(1)
+    project, key, value = args[0], args[1], " ".join(args[2:])
+    db = get_db()
+    db.execute(
+        """INSERT INTO contexts (project, key, value, updated_at)
+           VALUES (?, ?, ?, datetime('now'))
+           ON CONFLICT(project, key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at""",
+        (project, key, value),
+    )
+    db.commit()
+    db.close()
+    print(f"[{project}] {key} = saved.")
+
+
+def cmd_append(args):
+    """Append to an existing context entry. Usage: ctx append <project> <key> <value>"""
+    if len(args) < 3:
+        print("Usage: ctx append <project> <key> <value>")
+        sys.exit(1)
+    project, key, new_value = args[0], args[1], " ".join(args[2:])
+    db = get_db()
+    existing = db.execute(
+        "SELECT value FROM contexts WHERE project = ? AND key = ?", (project, key)
+    ).fetchone()
+    if existing:
+        value = existing["value"] + "\n" + new_value
+    else:
+        value = new_value
+    db.execute(
+        """INSERT INTO contexts (project, key, value, updated_at)
+           VALUES (?, ?, ?, datetime('now'))
+           ON CONFLICT(project, key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at""",
+        (project, key, value),
+    )
+    db.commit()
+    db.close()
+    print(f"[{project}] {key} += appended.")
+
+
+def cmd_shared(args):
+    """Manage shared context. Usage: ctx shared get | ctx shared set <key> <value>"""
+    if len(args) < 1:
+        print("Usage: ctx shared get | ctx shared set <key> <value>")
+        sys.exit(1)
+
+    if args[0] == "get":
+        db = get_db()
+        rows = db.execute("SELECT key, value FROM shared ORDER BY key").fetchall()
+        db.close()
+        if rows:
+            for row in rows:
+                print(f"\n[{row['key']}]")
+                print(row["value"])
+        else:
+            print("No shared context yet.")
+
+    elif args[0] == "set":
+        if len(args) < 3:
+            print("Usage: ctx shared set <key> <value>")
+            sys.exit(1)
+        key, value = args[1], " ".join(args[2:])
+        db = get_db()
+        db.execute(
+            """INSERT INTO shared (key, value, updated_at)
+               VALUES (?, ?, datetime('now'))
+               ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at""",
+            (key, value),
+        )
+        db.commit()
+        db.close()
+        print(f"[shared] {key} = saved.")
+
+    elif args[0] == "delete":
+        if len(args) < 2:
+            print("Usage: ctx shared delete <key>")
+            sys.exit(1)
+        db = get_db()
+        db.execute("DELETE FROM shared WHERE key = ?", (args[1],))
+        db.commit()
+        db.close()
+        print(f"[shared] {args[1]} deleted.")
+    else:
+        print("Usage: ctx shared get | ctx shared set <key> <value> | ctx shared delete <key>")
+
+
+def cmd_summary(args):
+    """Save a session summary. Usage: ctx summary <project> <text>"""
+    if len(args) < 2:
+        print("Usage: ctx summary <project> <summary text>")
+        sys.exit(1)
+    project, summary = args[0], " ".join(args[1:])
+    db = get_db()
+    db.execute(
+        "INSERT INTO summaries (project, summary) VALUES (?, ?)", (project, summary)
+    )
+    # Keep last 20 summaries per project
+    db.execute(
+        """DELETE FROM summaries WHERE project = ? AND id NOT IN (
+            SELECT id FROM summaries WHERE project = ? ORDER BY created_at DESC LIMIT 20
+        )""",
+        (project, project),
+    )
+    db.commit()
+    db.close()
+    print(f"[{project}] Summary saved.")
+
+
+def cmd_history(args):
+    """Show session history. Usage: ctx history <project> [limit]"""
+    if len(args) < 1:
+        print("Usage: ctx history <project> [limit]")
+        sys.exit(1)
+    project = args[0]
+    limit = int(args[1]) if len(args) > 1 else 10
+    db = get_db()
+    rows = db.execute(
+        "SELECT summary, created_at FROM summaries WHERE project = ? ORDER BY created_at DESC LIMIT ?",
+        (project, limit),
+    ).fetchall()
+    db.close()
+    if rows:
+        for row in reversed(rows):
+            print(f"\n[{row['created_at']}]")
+            print(row["summary"])
+    else:
+        print(f"No history for '{project}'.")
+
+
+def cmd_search(args):
+    """Full-text search across all contexts. Usage: ctx search <query>"""
+    if len(args) < 1:
+        print("Usage: ctx search <query>")
+        sys.exit(1)
+    query = " ".join(args)
+    db = get_db()
+
+    # Search project contexts
+    results_ctx = db.execute(
+        "SELECT project, key, value FROM contexts_fts WHERE contexts_fts MATCH ?",
+        (query,),
+    ).fetchall()
+
+    # Search shared contexts
+    results_shared = db.execute(
+        "SELECT key, value FROM shared_fts WHERE shared_fts MATCH ?", (query,)
+    ).fetchall()
+
+    # Search summaries (simple LIKE since no FTS on summaries)
+    results_sum = db.execute(
+        "SELECT project, summary, created_at FROM summaries WHERE summary LIKE ?",
+        (f"%{query}%",),
+    ).fetchall()
+
+    db.close()
+
+    total = len(results_ctx) + len(results_shared) + len(results_sum)
+    print(f"Found {total} result(s) for '{query}':\n")
+
+    if results_shared:
+        print("--- Shared ---")
+        for row in results_shared:
+            print(f"  [{row['key']}] {row['value'][:100]}")
+
+    if results_ctx:
+        print("--- Project Contexts ---")
+        for row in results_ctx:
+            print(f"  [{row['project']}:{row['key']}] {row['value'][:100]}")
+
+    if results_sum:
+        print("--- Summaries ---")
+        for row in results_sum:
+            print(f"  [{row['project']} @ {row['created_at']}] {row['summary'][:100]}")
+
+
+def cmd_list(args):
+    """List all registered projects."""
+    db = get_db()
+    sessions = db.execute("SELECT * FROM sessions ORDER BY name").fetchall()
+
+    # Also find projects with context but no session registration
+    orphans = db.execute(
+        """SELECT DISTINCT project FROM contexts
+           WHERE project NOT IN (SELECT name FROM sessions)
+           ORDER BY project"""
+    ).fetchall()
+
+    db.close()
+
+    if sessions:
+        print("Registered projects:")
+        for s in sessions:
+            ctx_count = _count_contexts(s["name"])
+            print(f"  {s['name']:25s} — {s['description']} ({ctx_count} entries)")
+    if orphans:
+        print("\nUnregistered (have context but no init):")
+        for o in orphans:
+            print(f"  {o['project']}")
+    if not sessions and not orphans:
+        print("No projects yet. Use 'ctx init <name> <description>' to start.")
+
+
+def cmd_delete(args):
+    """Delete a project or specific key. Usage: ctx delete <project> [key]"""
+    if len(args) < 1:
+        print("Usage: ctx delete <project> [key]")
+        sys.exit(1)
+    project = args[0]
+    db = get_db()
+    if len(args) >= 2:
+        key = args[1]
+        db.execute(
+            "DELETE FROM contexts WHERE project = ? AND key = ?", (project, key)
+        )
+        db.commit()
+        print(f"[{project}] {key} deleted.")
+    else:
+        db.execute("DELETE FROM contexts WHERE project = ?", (project,))
+        db.execute("DELETE FROM summaries WHERE project = ?", (project,))
+        db.execute("DELETE FROM sessions WHERE name = ?", (project,))
+        db.commit()
+        print(f"Project '{project}' and all its data deleted.")
+    db.close()
+
+
+def cmd_export(args):
+    """Export all data as JSON. Usage: ctx export"""
+    db = get_db()
+    data = {
+        "sessions": [dict(r) for r in db.execute("SELECT * FROM sessions").fetchall()],
+        "shared": [dict(r) for r in db.execute("SELECT * FROM shared").fetchall()],
+        "contexts": [dict(r) for r in db.execute("SELECT * FROM contexts").fetchall()],
+        "summaries": [dict(r) for r in db.execute("SELECT * FROM summaries").fetchall()],
+    }
+    db.close()
+    print(json.dumps(data, indent=2, ensure_ascii=False))
+
+
+def _count_contexts(project):
+    db = get_db()
+    row = db.execute(
+        "SELECT COUNT(*) as c FROM contexts WHERE project = ?", (project,)
+    ).fetchone()
+    db.close()
+    return row["c"]
+
+
+# ─── Main ───────────────────────────────────────────────────────────────
+
+COMMANDS = {
+    "init": cmd_init,
+    "get": cmd_get,
+    "set": cmd_set,
+    "append": cmd_append,
+    "shared": cmd_shared,
+    "summary": cmd_summary,
+    "history": cmd_history,
+    "search": cmd_search,
+    "list": cmd_list,
+    "delete": cmd_delete,
+    "export": cmd_export,
+}
+
+
+def print_help():
+    print("ctx — Cross-session context manager for Claude Code\n")
+    print("Commands:")
+    print("  init <project> <desc> [dir]   Register a new project")
+    print("  get <project>                 Load full context (shared + project)")
+    print("  set <project> <key> <value>   Set project context entry")
+    print("  append <project> <key> <val>  Append to existing entry")
+    print("  shared get|set|delete         Manage shared context")
+    print("  summary <project> <text>      Save session work summary")
+    print("  history <project> [limit]     Show session history")
+    print("  search <query>                Full-text search across everything")
+    print("  list                          List all projects")
+    print("  delete <project> [key]        Delete project or entry")
+    print("  export                        Export all data as JSON")
+
+
+if __name__ == "__main__":
+    init_db()
+
+    if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help", "help"):
+        print_help()
+        sys.exit(0)
+
+    cmd = sys.argv[1]
+    if cmd not in COMMANDS:
+        print(f"Unknown command: {cmd}")
+        print_help()
+        sys.exit(1)
+
+    COMMANDS[cmd](sys.argv[2:])
