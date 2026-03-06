@@ -680,9 +680,8 @@ class ClaudeCodeDialog(Gtk.Dialog):
         dir_box.pack_start(btn_browse, False, False, 0)
         grid.attach(dir_box, 1, 3, 1, 1)
 
-        self.btn_edit_ctx = Gtk.Button(label="Edit ctx entries\u2026")
-        self.btn_edit_ctx.connect("clicked", self._on_edit_ctx)
-        grid.attach(self.btn_edit_ctx, 1, 4, 1, 1)
+        self.lbl_ctx_status = Gtk.Label(xalign=0)
+        grid.attach(self.lbl_ctx_status, 1, 4, 1, 1)
 
         # Separator
         box.pack_start(Gtk.Separator(), False, False, 2)
@@ -728,6 +727,7 @@ class ClaudeCodeDialog(Gtk.Dialog):
                 self.textview.get_buffer().set_text(prompt)
 
         self.show_all()
+        self._update_ctx_status()
 
     def get_data(self):
         buf = self.textview.get_buffer()
@@ -762,16 +762,6 @@ class ClaudeCodeDialog(Gtk.Dialog):
         dlg.run()
         dlg.destroy()
 
-    def _on_edit_ctx(self, button):
-        project_dir = self.entry_project_dir.get_text().strip()
-        if not project_dir:
-            self._show_error("Set project directory first.")
-            return
-        ctx_project = os.path.basename(project_dir.rstrip("/"))
-        dlg = CtxEditDialog(self, ctx_project, project_dir)
-        dlg.run()
-        dlg.destroy()
-
     def _on_browse_dir(self, button):
         dlg = Gtk.FileChooserDialog(
             title="Select project directory",
@@ -801,62 +791,402 @@ class ClaudeCodeDialog(Gtk.Dialog):
                     f"Przed zakończeniem sesji: ctx summary {basename} \"<co zrobiliśmy>\""
                 )
                 buf.set_text(prompt)
+            self._update_ctx_status()
         dlg.destroy()
 
-    @staticmethod
-    def _detect_description(project_dir):
-        for name in ["README.md", "README.rst", "README.txt", "README"]:
-            readme_path = os.path.join(project_dir, name)
-            if os.path.isfile(readme_path):
-                try:
-                    with open(readme_path, "r") as f:
-                        for line in f:
-                            line = line.strip().lstrip("#").strip()
-                            if line:
-                                return line[:100]
-                except (IOError, UnicodeDecodeError):
-                    pass
-        return os.path.basename(project_dir.rstrip("/"))
-
-    def setup_ctx(self):
-        """Auto-initialize ctx project and generate CLAUDE.md if project_dir is set."""
+    def _update_ctx_status(self):
         project_dir = self.entry_project_dir.get_text().strip()
         if not project_dir:
+            self.lbl_ctx_status.set_text("")
             return
-        ctx_project = os.path.basename(project_dir.rstrip("/"))
-        ctx_desc = self._detect_description(project_dir)
-        try:
-            subprocess.run(
-                ["ctx", "init", ctx_project, ctx_desc, project_dir],
-                check=True, capture_output=True, text=True,
+        name = os.path.basename(project_dir.rstrip("/"))
+        if _is_ctx_project_registered(name):
+            self.lbl_ctx_status.set_markup(
+                '<small>\u2713 Ctx project "<b>'
+                + GLib.markup_escape_text(name)
+                + '</b>" is registered</small>'
             )
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            return
-        claude_md = os.path.join(project_dir, "CLAUDE.md")
-        if not os.path.exists(claude_md):
-            claude_content = (
-                f"# {ctx_project}\n\n"
-                f"On session start, load context:\n"
-                f"```bash\n"
-                f"ctx get {ctx_project}\n"
-                f"```\n\n"
-                f"Context manager: `ctx --help`\n\n"
-                f"During work:\n"
-                f"- Save important discoveries: `ctx set {ctx_project} <key> <value>`\n"
-                f"- Append to existing: `ctx append {ctx_project} <key> <value>`\n"
-                f"- Before ending session: `ctx summary {ctx_project} \"<what was done>\"`\n"
+        else:
+            self.lbl_ctx_status.set_markup(
+                "<small>\u2139 New project \u2014 ctx wizard will guide you after save</small>"
             )
-            try:
-                with open(claude_md, "w") as f:
-                    f.write(claude_content)
-            except IOError:
-                pass
 
 
 # ─── CtxEditDialog ────────────────────────────────────────────────────────────
 
 
 CTX_DB = os.path.join(os.path.expanduser("~"), ".claude-context", "context.db")
+
+
+def _detect_project_description(project_dir):
+    """Detect project description from README or directory name."""
+    for name in ["README.md", "README.rst", "README.txt", "README"]:
+        readme_path = os.path.join(project_dir, name)
+        if os.path.isfile(readme_path):
+            try:
+                with open(readme_path, "r") as f:
+                    for line in f:
+                        line = line.strip().lstrip("#").strip()
+                        if line:
+                            return line[:100]
+            except (IOError, UnicodeDecodeError):
+                pass
+    return os.path.basename(project_dir.rstrip("/"))
+
+
+def _is_ctx_project_registered(project_name):
+    """Check if a ctx project is already registered in the database."""
+    if not os.path.exists(CTX_DB):
+        return False
+    import sqlite3
+    try:
+        db = sqlite3.connect(CTX_DB)
+        row = db.execute(
+            "SELECT 1 FROM sessions WHERE name = ?", (project_name,)
+        ).fetchone()
+        db.close()
+        return row is not None
+    except sqlite3.Error:
+        return False
+
+
+def _is_ctx_available():
+    """Check if ctx command is available."""
+    try:
+        subprocess.run(["ctx", "--version"], capture_output=True, timeout=5)
+        return True
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+
+def _run_ctx_wizard_if_needed(parent, data):
+    """Launch ctx wizard if project_dir is set but ctx not registered. Returns updated data."""
+    project_dir = data.get("project_dir", "")
+    if not project_dir or not _is_ctx_available():
+        return data
+    project_name = os.path.basename(project_dir.rstrip("/"))
+    if _is_ctx_project_registered(project_name):
+        return data
+    wizard = CtxSetupWizard(parent, project_dir)
+    if wizard.run_wizard():
+        if not data["prompt"] or data["prompt"].startswith("Wczytaj kontekst"):
+            data["prompt"] = wizard.result_prompt
+    return data
+
+
+_WIZARD_BACK = 1
+_WIZARD_NEXT = 2
+
+
+class CtxSetupWizard(Gtk.Dialog):
+    """Step-by-step wizard for initial ctx project setup."""
+
+    def __init__(self, parent, project_dir):
+        super().__init__(
+            title="Ctx — New Project Setup",
+            transient_for=parent,
+            modal=True,
+            destroy_with_parent=True,
+        )
+        self.set_default_size(540, -1)
+        self.set_resizable(False)
+        self.project_dir = project_dir
+        self.project_name = os.path.basename(project_dir.rstrip("/"))
+        self.success = False
+        self.result_prompt = ""
+        self._current_page = 0
+
+        box = self.get_content_area()
+        box.set_border_width(16)
+        box.set_spacing(12)
+
+        # Page header
+        self.lbl_header = Gtk.Label(xalign=0)
+        box.pack_start(self.lbl_header, False, False, 0)
+        box.pack_start(Gtk.Separator(), False, False, 0)
+
+        # Stack for pages
+        self.stack = Gtk.Stack()
+        self.stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
+        box.pack_start(self.stack, True, True, 0)
+
+        # Status bar (for errors)
+        self.lbl_status = Gtk.Label(xalign=0, wrap=True, max_width_chars=60)
+        box.pack_start(self.lbl_status, False, False, 0)
+
+        self._build_page_project()
+        self._build_page_entry()
+        self._build_page_confirm()
+
+        # Navigation buttons
+        self.btn_cancel = self.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        self.btn_back = self.add_button("\u2190 Back", _WIZARD_BACK)
+        self.btn_next = self.add_button("Next \u2192", _WIZARD_NEXT)
+        self.btn_finish = self.add_button("\u2713 Create", Gtk.ResponseType.OK)
+
+        self._show_page(0)
+        self.show_all()
+
+    def _build_page_project(self):
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+
+        info = Gtk.Label(wrap=True, xalign=0, max_width_chars=58)
+        info.set_markup(
+            "Register the project in the ctx database.\n"
+            "The <b>project name</b> is used in all ctx commands "
+            "(e.g. <tt>ctx get MyProject</tt>).\n"
+            "<b>Description</b> helps Claude understand the project purpose."
+        )
+        page.pack_start(info, False, False, 0)
+
+        warn = Gtk.Label(wrap=True, xalign=0, max_width_chars=58)
+        warn.set_markup(
+            '<small>\u26a0 Case matters! "<tt>MyProject</tt>" \u2260 '
+            '"<tt>myproject</tt>". The name must match exactly in all commands.</small>'
+        )
+        page.pack_start(warn, False, False, 4)
+
+        grid = Gtk.Grid(column_spacing=12, row_spacing=8)
+
+        grid.attach(Gtk.Label(label="Directory:", halign=Gtk.Align.END), 0, 0, 1, 1)
+        lbl_dir = Gtk.Label(
+            label=self.project_dir, halign=Gtk.Align.START,
+            selectable=True, ellipsize=Pango.EllipsizeMode.MIDDLE,
+        )
+        grid.attach(lbl_dir, 1, 0, 1, 1)
+
+        grid.attach(Gtk.Label(label="Project name:", halign=Gtk.Align.END), 0, 1, 1, 1)
+        self.w_name = Gtk.Entry(hexpand=True)
+        self.w_name.set_text(self.project_name)
+        grid.attach(self.w_name, 1, 1, 1, 1)
+
+        grid.attach(Gtk.Label(label="Description:", halign=Gtk.Align.END), 0, 2, 1, 1)
+        self.w_desc = Gtk.Entry(hexpand=True)
+        self.w_desc.set_text(_detect_project_description(self.project_dir))
+        grid.attach(self.w_desc, 1, 2, 1, 1)
+
+        page.pack_start(grid, False, False, 0)
+        self.stack.add_named(page, "project")
+
+    def _build_page_entry(self):
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+
+        info = Gtk.Label(wrap=True, xalign=0, max_width_chars=58)
+        info.set_markup(
+            "Add the <b>first context entry</b>. Claude reads these at the start "
+            "of each session to understand the project.\n\n"
+            "Examples:\n"
+            '  Key: <tt>repo</tt>  Value: <tt>GitHub: .../MyRepo, branch: main</tt>\n'
+            '  Key: <tt>stack</tt>  Value: <tt>Python 3.12, Flask, PostgreSQL</tt>'
+        )
+        page.pack_start(info, False, False, 0)
+
+        grid = Gtk.Grid(column_spacing=12, row_spacing=8)
+
+        grid.attach(Gtk.Label(label="Key:", halign=Gtk.Align.END), 0, 0, 1, 1)
+        self.w_key = Gtk.Entry(hexpand=True)
+        self.w_key.set_placeholder_text("e.g. repo, stack, architecture")
+        grid.attach(self.w_key, 1, 0, 1, 1)
+
+        grid.attach(
+            Gtk.Label(label="Value:", halign=Gtk.Align.END, valign=Gtk.Align.START),
+            0, 1, 1, 1,
+        )
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_min_content_height(90)
+        self.w_value = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR)
+        scrolled.add(self.w_value)
+        grid.attach(scrolled, 1, 1, 1, 1)
+
+        page.pack_start(grid, True, True, 0)
+        self.stack.add_named(page, "entry")
+
+    def _build_page_confirm(self):
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+
+        info = Gtk.Label(wrap=True, xalign=0, max_width_chars=58)
+        info.set_text("Review and confirm. The following actions will be performed:")
+        page.pack_start(info, False, False, 0)
+
+        self.lbl_summary = Gtk.Label(wrap=True, xalign=0, max_width_chars=58)
+        page.pack_start(self.lbl_summary, False, False, 0)
+
+        page.pack_start(Gtk.Separator(), False, False, 4)
+        self.stack.add_named(page, "confirm")
+
+    def _show_page(self, idx):
+        self._current_page = idx
+        pages = ["project", "entry", "confirm"]
+        self.stack.set_visible_child_name(pages[idx])
+        self.lbl_status.set_text("")
+
+        headers = [
+            "Step 1 of 3: Project registration",
+            "Step 2 of 3: First context entry",
+            "Step 3 of 3: Confirm and create",
+        ]
+        self.lbl_header.set_markup(f"<b>{headers[idx]}</b>")
+
+        if idx == 2:
+            self._update_summary()
+
+    def _update_buttons(self):
+        idx = self._current_page
+        self.btn_back.set_visible(idx > 0)
+        self.btn_next.set_visible(idx < 2)
+        self.btn_finish.set_visible(idx == 2)
+
+    def _update_summary(self):
+        name = self.w_name.get_text().strip()
+        desc = self.w_desc.get_text().strip()
+        key = self.w_key.get_text().strip()
+        buf = self.w_value.get_buffer()
+        s, e = buf.get_bounds()
+        value = buf.get_text(s, e, False).strip()
+        val_preview = value[:150] + ("\u2026" if len(value) > 150 else "")
+
+        self.lbl_summary.set_markup(
+            f"<tt>1.</tt> <tt>ctx init</tt> \u2014 register project "
+            f"<b>{GLib.markup_escape_text(name)}</b>\n"
+            f"     {GLib.markup_escape_text(desc)}\n\n"
+            f"<tt>2.</tt> <tt>ctx set</tt> \u2014 add entry "
+            f"<b>{GLib.markup_escape_text(key)}</b>\n"
+            f"     {GLib.markup_escape_text(val_preview)}\n\n"
+            f"<tt>3.</tt> Create <tt>CLAUDE.md</tt> in project directory\n"
+            f"     (will be skipped if file already exists)"
+        )
+
+    def _validate_page(self, idx):
+        if idx == 0:
+            name = self.w_name.get_text().strip()
+            desc = self.w_desc.get_text().strip()
+            if not name:
+                self.lbl_status.set_markup(
+                    '<span foreground="red">Project name is required.</span>'
+                )
+                self.w_name.grab_focus()
+                return False
+            if not desc:
+                self.lbl_status.set_markup(
+                    '<span foreground="red">Description is required.</span>'
+                )
+                self.w_desc.grab_focus()
+                return False
+        elif idx == 1:
+            key = self.w_key.get_text().strip()
+            buf = self.w_value.get_buffer()
+            s, e = buf.get_bounds()
+            value = buf.get_text(s, e, False).strip()
+            if not key:
+                self.lbl_status.set_markup(
+                    '<span foreground="red">Key is required. '
+                    'E.g. "repo", "stack", "notes".</span>'
+                )
+                self.w_key.grab_focus()
+                return False
+            if not value:
+                self.lbl_status.set_markup(
+                    '<span foreground="red">Value is required. '
+                    "Describe something about the project.</span>"
+                )
+                self.w_value.grab_focus()
+                return False
+        return True
+
+    def _execute(self):
+        """Run ctx init, ctx set, and create CLAUDE.md."""
+        name = self.w_name.get_text().strip()
+        desc = self.w_desc.get_text().strip()
+        key = self.w_key.get_text().strip()
+        buf = self.w_value.get_buffer()
+        s, e = buf.get_bounds()
+        value = buf.get_text(s, e, False).strip()
+
+        # 1. ctx init
+        try:
+            r = subprocess.run(
+                ["ctx", "init", name, desc, self.project_dir],
+                capture_output=True, text=True,
+            )
+            if r.returncode != 0:
+                self.lbl_status.set_markup(
+                    f'<span foreground="red">ctx init failed: '
+                    f"{GLib.markup_escape_text(r.stderr.strip())}</span>"
+                )
+                return False
+        except FileNotFoundError:
+            self.lbl_status.set_markup(
+                '<span foreground="red">ctx command not found.</span>'
+            )
+            return False
+
+        # 2. ctx set
+        try:
+            r = subprocess.run(
+                ["ctx", "set", name, key, value],
+                capture_output=True, text=True,
+            )
+            if r.returncode != 0:
+                self.lbl_status.set_markup(
+                    f'<span foreground="red">ctx set failed: '
+                    f"{GLib.markup_escape_text(r.stderr.strip())}</span>"
+                )
+                return False
+        except FileNotFoundError:
+            return False
+
+        # 3. CLAUDE.md
+        claude_md = os.path.join(self.project_dir, "CLAUDE.md")
+        if not os.path.exists(claude_md):
+            try:
+                with open(claude_md, "w") as f:
+                    f.write(
+                        f"# {name}\n\n"
+                        f"On session start, load context:\n"
+                        f"```bash\n"
+                        f"ctx get {name}\n"
+                        f"```\n\n"
+                        f"Context manager: `ctx --help`\n\n"
+                        f"During work:\n"
+                        f"- Save important discoveries: `ctx set {name} <key> <value>`\n"
+                        f"- Append to existing: `ctx append {name} <key> <value>`\n"
+                        f'- Before ending session: `ctx summary {name} "<what was done>"`\n'
+                    )
+            except IOError as e:
+                self.lbl_status.set_markup(
+                    f'<span foreground="red">CLAUDE.md: {GLib.markup_escape_text(str(e))}</span>'
+                )
+                return False
+
+        self.project_name = name
+        self.result_prompt = (
+            f"Wczytaj kontekst projektu poleceniem: ctx get {name}\n"
+            f"Wykonaj t\u0119 komend\u0119 i zapoznaj si\u0119 z kontekstem zanim zaczniesz prac\u0119.\n"
+            f"Kontekst zarz\u0105dzasz przez: ctx --help\n"
+            f"Wa\u017cne odkrycia zapisuj: ctx set {name} <key> <value>\n"
+            f'Przed zako\u0144czeniem sesji: ctx summary {name} "<co zrobili\u015bmy>"'
+        )
+        self.success = True
+        return True
+
+    def run_wizard(self):
+        """Run the wizard. Returns True if completed successfully."""
+        while True:
+            self._update_buttons()
+            resp = self.run()
+            if resp == _WIZARD_NEXT:
+                if self._validate_page(self._current_page):
+                    self._show_page(self._current_page + 1)
+            elif resp == _WIZARD_BACK:
+                self._show_page(self._current_page - 1)
+            elif resp == Gtk.ResponseType.OK:
+                if self._execute():
+                    self.destroy()
+                    return True
+            else:
+                self.destroy()
+                return False
 
 
 class _CtxEntryDialog(Gtk.Dialog):
@@ -1658,8 +1988,9 @@ class SessionSidebar(Gtk.Box):
             if resp != Gtk.ResponseType.OK:
                 break
             if dlg.validate():
-                dlg.setup_ctx()
-                self.app.claude_manager.add(dlg.get_data())
+                data = dlg.get_data()
+                data = _run_ctx_wizard_if_needed(dlg, data)
+                self.app.claude_manager.add(data)
                 self.refresh()
                 break
         dlg.destroy()
@@ -1827,8 +2158,8 @@ class SessionSidebar(Gtk.Box):
             if resp != Gtk.ResponseType.OK:
                 break
             if dlg.validate():
-                dlg.setup_ctx()
                 data = dlg.get_data()
+                data = _run_ctx_wizard_if_needed(dlg, data)
                 self.app.claude_manager.update(claude_id, data)
                 self.refresh()
                 break
@@ -1847,6 +2178,27 @@ class SessionSidebar(Gtk.Box):
         )
         if dlg.run() == Gtk.ResponseType.YES:
             self.app.claude_manager.delete(claude_id)
+            # Ask about ctx cleanup
+            project_dir = config.get("project_dir", "")
+            if project_dir:
+                ctx_name = os.path.basename(project_dir.rstrip("/"))
+                if _is_ctx_available() and _is_ctx_project_registered(ctx_name):
+                    ctx_dlg = Gtk.MessageDialog(
+                        transient_for=self.app,
+                        modal=True,
+                        message_type=Gtk.MessageType.QUESTION,
+                        buttons=Gtk.ButtonsType.YES_NO,
+                        text=f"Also delete ctx project \"{ctx_name}\"?",
+                    )
+                    ctx_dlg.format_secondary_text(
+                        "This will remove all context entries for this project from the ctx database."
+                    )
+                    if ctx_dlg.run() == Gtk.ResponseType.YES:
+                        subprocess.run(
+                            ["ctx", "delete", ctx_name],
+                            capture_output=True, text=True,
+                        )
+                    ctx_dlg.destroy()
             self.refresh()
         dlg.destroy()
 
