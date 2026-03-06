@@ -161,6 +161,36 @@ treeview:hover {{
     background: {CATPPUCCIN['surface2']};
     color: {CATPPUCCIN['red']};
 }}
+stackswitcher {{
+    background: {CATPPUCCIN['crust']};
+    border-bottom: 1px solid {CATPPUCCIN['surface0']};
+}}
+stackswitcher button {{
+    background: {CATPPUCCIN['crust']};
+    color: {CATPPUCCIN['subtext0']};
+    border: none;
+    border-radius: 0;
+    padding: 6px 16px;
+    border-bottom: 2px solid transparent;
+    font-weight: bold;
+    font-size: 12px;
+}}
+stackswitcher button:checked {{
+    background: {CATPPUCCIN['mantle']};
+    color: {CATPPUCCIN['blue']};
+    border-bottom: 2px solid {CATPPUCCIN['blue']};
+}}
+stackswitcher button:hover {{
+    background: {CATPPUCCIN['surface0']};
+}}
+textview.ctx-detail {{
+    font-family: monospace;
+    font-size: 10pt;
+}}
+textview.ctx-detail text {{
+    background-color: {CATPPUCCIN['crust']};
+    color: {CATPPUCCIN['subtext1']};
+}}
 """
 
 
@@ -1239,6 +1269,78 @@ class _CtxEntryDialog(Gtk.Dialog):
         return key, value
 
 
+class _CtxProjectDialog(Gtk.Dialog):
+    """Dialog for adding/editing a ctx project."""
+
+    def __init__(self, parent, title="New Project", name="", description="", work_dir=""):
+        super().__init__(
+            title=title,
+            transient_for=parent,
+            modal=True,
+            destroy_with_parent=True,
+        )
+        self.add_buttons(
+            Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+            Gtk.STOCK_OK, Gtk.ResponseType.OK,
+        )
+        self.set_default_size(450, -1)
+        self.set_default_response(Gtk.ResponseType.OK)
+
+        box = self.get_content_area()
+        box.set_border_width(12)
+        box.set_spacing(8)
+
+        grid = Gtk.Grid(column_spacing=12, row_spacing=8)
+        box.pack_start(grid, True, True, 0)
+
+        grid.attach(Gtk.Label(label="Name:", halign=Gtk.Align.END), 0, 0, 1, 1)
+        self.entry_name = Gtk.Entry(hexpand=True)
+        self.entry_name.set_text(name)
+        grid.attach(self.entry_name, 1, 0, 1, 1)
+
+        grid.attach(Gtk.Label(label="Description:", halign=Gtk.Align.END), 0, 1, 1, 1)
+        self.entry_desc = Gtk.Entry(hexpand=True)
+        self.entry_desc.set_text(description)
+        grid.attach(self.entry_desc, 1, 1, 1, 1)
+
+        grid.attach(Gtk.Label(label="Directory:", halign=Gtk.Align.END), 0, 2, 1, 1)
+        dir_box = Gtk.Box(spacing=4)
+        self.entry_dir = Gtk.Entry(hexpand=True)
+        self.entry_dir.set_text(work_dir)
+        self.entry_dir.set_placeholder_text("(optional) path to project directory")
+        dir_box.pack_start(self.entry_dir, True, True, 0)
+        btn_browse = Gtk.Button(label="Browse\u2026")
+        btn_browse.connect("clicked", self._on_browse)
+        dir_box.pack_start(btn_browse, False, False, 0)
+        grid.attach(dir_box, 1, 2, 1, 1)
+
+        self.show_all()
+
+    def _on_browse(self, button):
+        dlg = Gtk.FileChooserDialog(
+            title="Select directory",
+            parent=self,
+            action=Gtk.FileChooserAction.SELECT_FOLDER,
+        )
+        dlg.add_buttons(
+            Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+            Gtk.STOCK_OPEN, Gtk.ResponseType.OK,
+        )
+        if dlg.run() == Gtk.ResponseType.OK:
+            path = dlg.get_filename()
+            self.entry_dir.set_text(path)
+            if not self.entry_name.get_text().strip():
+                self.entry_name.set_text(os.path.basename(path.rstrip("/")))
+        dlg.destroy()
+
+    def get_data(self):
+        return (
+            self.entry_name.get_text().strip(),
+            self.entry_desc.get_text().strip(),
+            self.entry_dir.get_text().strip(),
+        )
+
+
 class CtxEditDialog(Gtk.Dialog):
     """Dialog to view and edit ctx project entries."""
 
@@ -1659,8 +1761,6 @@ class SessionSidebar(Gtk.Box):
     def __init__(self, app):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.app = app
-        self.get_style_context().add_class("sidebar")
-        self.set_size_request(250, -1)
 
         # Header
         header = Gtk.Label(label=f"  {APP_NAME} Sessions")
@@ -2203,6 +2303,497 @@ class SessionSidebar(Gtk.Box):
         dlg.destroy()
 
 
+# ─── CtxManagerPanel ──────────────────────────────────────────────────────────
+
+
+class CtxManagerPanel(Gtk.Box):
+    """Panel for browsing and managing ctx project contexts."""
+
+    def __init__(self, app):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL)
+        self.app = app
+
+        # Paned: tree on top, detail on bottom
+        paned = Gtk.VPaned()
+        self.pack_start(paned, True, True, 0)
+
+        # ── Tree ──
+        # Columns: icon, display_name, project, key, color, weight
+        self.store = Gtk.TreeStore(str, str, str, str, str, int)
+        self.tree = Gtk.TreeView(model=self.store)
+        self.tree.set_headers_visible(False)
+        self.tree.set_activate_on_single_click(False)
+
+        col = Gtk.TreeViewColumn()
+        cell_icon = Gtk.CellRendererText()
+        col.pack_start(cell_icon, False)
+        col.add_attribute(cell_icon, "text", 0)
+
+        cell_name = Gtk.CellRendererText()
+        cell_name.set_property("ellipsize", Pango.EllipsizeMode.END)
+        col.pack_start(cell_name, True)
+        col.add_attribute(cell_name, "text", 1)
+        col.add_attribute(cell_name, "foreground", 4)
+        col.add_attribute(cell_name, "weight", 5)
+
+        self.tree.append_column(col)
+
+        tree_scroll = Gtk.ScrolledWindow()
+        tree_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        tree_scroll.add(self.tree)
+        paned.pack1(tree_scroll, resize=True, shrink=False)
+
+        # ── Detail pane ──
+        detail_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+
+        self.detail_header = Gtk.Label(xalign=0)
+        self.detail_header.set_margin_start(8)
+        self.detail_header.set_margin_top(4)
+        detail_box.pack_start(self.detail_header, False, False, 0)
+
+        detail_scroll = Gtk.ScrolledWindow()
+        detail_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        detail_scroll.set_min_content_height(80)
+        self.detail_view = Gtk.TextView()
+        self.detail_view.set_editable(False)
+        self.detail_view.set_cursor_visible(False)
+        self.detail_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        self.detail_view.set_left_margin(8)
+        self.detail_view.set_right_margin(8)
+        self.detail_view.set_top_margin(4)
+        self.detail_view.set_bottom_margin(4)
+        self.detail_view.get_style_context().add_class("ctx-detail")
+        detail_scroll.add(self.detail_view)
+        detail_box.pack_start(detail_scroll, True, True, 0)
+
+        paned.pack2(detail_box, resize=False, shrink=False)
+        paned.set_position(300)
+
+        # ── Buttons ──
+        btn_box = Gtk.Box(spacing=4)
+        btn_box.set_border_width(6)
+
+        btn_add = Gtk.MenuButton(label="Add \u25be")
+        btn_add.get_style_context().add_class("sidebar-btn")
+        add_menu = Gtk.Menu()
+        item_proj = Gtk.MenuItem(label="New Project")
+        item_proj.connect("activate", lambda _: self._on_add_project())
+        add_menu.append(item_proj)
+        item_entry = Gtk.MenuItem(label="New Entry")
+        item_entry.connect("activate", lambda _: self._on_add_entry())
+        add_menu.append(item_entry)
+        add_menu.show_all()
+        btn_add.set_popup(add_menu)
+
+        btn_edit = Gtk.Button(label="Edit")
+        btn_edit.get_style_context().add_class("sidebar-btn")
+        btn_edit.connect("clicked", lambda _: self._on_edit())
+
+        btn_del = Gtk.Button(label="Delete")
+        btn_del.get_style_context().add_class("sidebar-btn")
+        btn_del.connect("clicked", lambda _: self._on_delete())
+
+        btn_refresh = Gtk.Button(label="\u21bb")
+        btn_refresh.get_style_context().add_class("sidebar-btn")
+        btn_refresh.set_tooltip_text("Refresh")
+        btn_refresh.connect("clicked", lambda _: self.refresh())
+
+        btn_box.pack_start(btn_add, True, True, 0)
+        btn_box.pack_start(btn_edit, True, True, 0)
+        btn_box.pack_start(btn_del, True, True, 0)
+        btn_box.pack_start(btn_refresh, False, False, 0)
+        self.pack_start(btn_box, False, False, 0)
+
+        # Signals
+        self.tree.connect("row-activated", self._on_row_activated)
+        self.tree.connect("button-press-event", self._on_button_press)
+        self.tree.get_selection().connect("changed", self._on_selection_changed)
+
+        self.refresh()
+
+    def refresh(self):
+        """Reload all data from the ctx database."""
+        self.store.clear()
+        self.detail_header.set_text("")
+        self.detail_view.get_buffer().set_text("")
+        if not os.path.exists(CTX_DB):
+            return
+
+        import sqlite3
+        db = sqlite3.connect(CTX_DB)
+        db.row_factory = sqlite3.Row
+
+        projects = db.execute(
+            "SELECT name, description, work_dir FROM sessions ORDER BY name"
+        ).fetchall()
+
+        for proj in projects:
+            proj_iter = self.store.append(None, [
+                "\U0001f4c1",
+                proj["name"],
+                proj["name"],
+                "",
+                CATPPUCCIN["blue"],
+                Pango.Weight.BOLD,
+            ])
+            entries = db.execute(
+                "SELECT key FROM contexts WHERE project = ? ORDER BY key",
+                (proj["name"],),
+            ).fetchall()
+            for entry in entries:
+                self.store.append(proj_iter, [
+                    " ",
+                    entry["key"],
+                    proj["name"],
+                    entry["key"],
+                    CATPPUCCIN["text"],
+                    Pango.Weight.NORMAL,
+                ])
+
+        # Shared entries
+        shared = db.execute("SELECT key FROM shared ORDER BY key").fetchall()
+        if shared:
+            shared_iter = self.store.append(None, [
+                "\U0001f517",
+                "Shared",
+                "__shared__",
+                "",
+                CATPPUCCIN["peach"],
+                Pango.Weight.BOLD,
+            ])
+            for entry in shared:
+                self.store.append(shared_iter, [
+                    " ",
+                    entry["key"],
+                    "__shared__",
+                    entry["key"],
+                    CATPPUCCIN["text"],
+                    Pango.Weight.NORMAL,
+                ])
+
+        db.close()
+        self.tree.expand_all()
+
+    def _get_selected_info(self):
+        """Returns (project_name, entry_key) of selected row."""
+        sel = self.tree.get_selection()
+        model, it = sel.get_selected()
+        if it is None:
+            return None, None
+        return model.get_value(it, 2), model.get_value(it, 3)
+
+    def _on_selection_changed(self, selection):
+        model, it = selection.get_selected()
+        if it is None:
+            self.detail_header.set_text("")
+            self.detail_view.get_buffer().set_text("")
+            return
+        project = model.get_value(it, 2)
+        key = model.get_value(it, 3)
+        if key:
+            self._show_entry_detail(project, key)
+        else:
+            self._show_project_detail(project)
+
+    def _show_project_detail(self, project):
+        import sqlite3
+        if not os.path.exists(CTX_DB):
+            return
+        db = sqlite3.connect(CTX_DB)
+        db.row_factory = sqlite3.Row
+
+        if project == "__shared__":
+            self.detail_header.set_markup("<b>\U0001f517 Shared</b>")
+            self.detail_view.get_buffer().set_text(
+                "Shared context entries available to all projects."
+            )
+            db.close()
+            return
+
+        proj = db.execute(
+            "SELECT description, work_dir FROM sessions WHERE name = ?",
+            (project,),
+        ).fetchone()
+        if not proj:
+            db.close()
+            return
+
+        self.detail_header.set_markup(
+            f"<b>\U0001f4c1 {GLib.markup_escape_text(project)}</b>"
+        )
+        lines = []
+        if proj["description"]:
+            lines.append(proj["description"])
+        if proj["work_dir"]:
+            lines.append(f"Dir: {proj['work_dir']}")
+
+        count = db.execute(
+            "SELECT COUNT(*) FROM contexts WHERE project = ?", (project,)
+        ).fetchone()[0]
+        lines.append(f"Entries: {count}")
+
+        # Last summary
+        summary = db.execute(
+            "SELECT summary, created_at FROM summaries "
+            "WHERE project = ? ORDER BY created_at DESC LIMIT 1",
+            (project,),
+        ).fetchone()
+        if summary:
+            lines.append(
+                f"\n\u2500\u2500 Last summary ({summary['created_at'][:10]}) \u2500\u2500"
+            )
+            lines.append(summary["summary"])
+
+        # Associated Claude session prompt
+        for cs in self.app.claude_manager.all():
+            cs_dir = cs.get("project_dir", "").rstrip("/")
+            if cs_dir and os.path.basename(cs_dir) == project:
+                prompt = cs.get("prompt", "")
+                if prompt:
+                    lines.append("\n\u2500\u2500 Introductory prompt \u2500\u2500")
+                    lines.append(prompt)
+                break
+
+        self.detail_view.get_buffer().set_text("\n".join(lines))
+        db.close()
+
+    def _show_entry_detail(self, project, key):
+        import sqlite3
+        if not os.path.exists(CTX_DB):
+            return
+        db = sqlite3.connect(CTX_DB)
+        if project == "__shared__":
+            row = db.execute(
+                "SELECT value FROM shared WHERE key = ?", (key,)
+            ).fetchone()
+        else:
+            row = db.execute(
+                "SELECT value FROM contexts WHERE project = ? AND key = ?",
+                (project, key),
+            ).fetchone()
+        if row:
+            self.detail_header.set_markup(
+                f"<b>{GLib.markup_escape_text(key)}</b>"
+            )
+            self.detail_view.get_buffer().set_text(row[0])
+        db.close()
+
+    def _on_row_activated(self, tree, path, column):
+        self._on_edit()
+
+    def _on_button_press(self, widget, event):
+        if event.button != 3:
+            return False
+        path_info = self.tree.get_path_at_pos(int(event.x), int(event.y))
+        if not path_info:
+            return True
+        path = path_info[0]
+        self.tree.get_selection().select_path(path)
+        it = self.store.get_iter(path)
+        project = self.store.get_value(it, 2)
+        key = self.store.get_value(it, 3)
+
+        menu = Gtk.Menu()
+        if not key:
+            # Project row
+            item_add = Gtk.MenuItem(label="Add Entry")
+            item_add.connect("activate", lambda _: self._on_add_entry())
+            menu.append(item_add)
+
+            item_edit = Gtk.MenuItem(label="Edit Project")
+            item_edit.connect("activate", lambda _: self._on_edit())
+            menu.append(item_edit)
+
+            menu.append(Gtk.SeparatorMenuItem())
+
+            item_del = Gtk.MenuItem(label="Delete Project")
+            item_del.connect("activate", lambda _: self._on_delete())
+            menu.append(item_del)
+        else:
+            # Entry row
+            item_edit = Gtk.MenuItem(label="Edit Entry")
+            item_edit.connect("activate", lambda _: self._on_edit())
+            menu.append(item_edit)
+
+            item_del = Gtk.MenuItem(label="Delete Entry")
+            item_del.connect("activate", lambda _: self._on_delete())
+            menu.append(item_del)
+
+        menu.show_all()
+        menu.popup_at_pointer(event)
+        return True
+
+    def _on_add_project(self):
+        dlg = _CtxProjectDialog(self.app, "New Project")
+        if dlg.run() == Gtk.ResponseType.OK:
+            name, desc, work_dir = dlg.get_data()
+            if name and desc:
+                args = ["ctx", "init", name, desc]
+                if work_dir:
+                    args.append(work_dir)
+                subprocess.run(args, capture_output=True, text=True)
+                self.refresh()
+        dlg.destroy()
+
+    def _on_add_entry(self):
+        project, _ = self._get_selected_info()
+        if not project or project == "__shared__":
+            return
+        dlg = _CtxEntryDialog(self.app, f"Add entry to {project}")
+        if dlg.run() == Gtk.ResponseType.OK:
+            key, value = dlg.get_data()
+            if key:
+                subprocess.run(
+                    ["ctx", "set", project, key, value],
+                    capture_output=True, text=True,
+                )
+                self.refresh()
+        dlg.destroy()
+
+    def _on_edit(self):
+        project, key = self._get_selected_info()
+        if not project:
+            return
+        if project == "__shared__":
+            if key:
+                self._edit_shared_entry(key)
+            return
+        if key:
+            self._edit_entry(project, key)
+        else:
+            self._edit_project(project)
+
+    def _edit_project(self, project):
+        import sqlite3
+        if not os.path.exists(CTX_DB):
+            return
+        db = sqlite3.connect(CTX_DB)
+        row = db.execute(
+            "SELECT description, work_dir FROM sessions WHERE name = ?",
+            (project,),
+        ).fetchone()
+        db.close()
+        if not row:
+            return
+        dlg = _CtxProjectDialog(
+            self.app, "Edit Project", project, row[0] or "", row[1] or ""
+        )
+        dlg.entry_name.set_sensitive(False)
+        if dlg.run() == Gtk.ResponseType.OK:
+            _, desc, work_dir = dlg.get_data()
+            if desc:
+                args = ["ctx", "init", project, desc]
+                if work_dir:
+                    args.append(work_dir)
+                subprocess.run(args, capture_output=True, text=True)
+                self.refresh()
+        dlg.destroy()
+
+    def _edit_entry(self, project, key):
+        import sqlite3
+        if not os.path.exists(CTX_DB):
+            return
+        db = sqlite3.connect(CTX_DB)
+        row = db.execute(
+            "SELECT value FROM contexts WHERE project = ? AND key = ?",
+            (project, key),
+        ).fetchone()
+        db.close()
+        if not row:
+            return
+        dlg = _CtxEntryDialog(self.app, f"Edit: {key}", key, row[0])
+        if dlg.run() == Gtk.ResponseType.OK:
+            new_key, value = dlg.get_data()
+            if new_key:
+                if new_key != key:
+                    subprocess.run(
+                        ["ctx", "delete", project, key],
+                        capture_output=True, text=True,
+                    )
+                subprocess.run(
+                    ["ctx", "set", project, new_key, value],
+                    capture_output=True, text=True,
+                )
+                self.refresh()
+        dlg.destroy()
+
+    def _edit_shared_entry(self, key):
+        import sqlite3
+        if not os.path.exists(CTX_DB):
+            return
+        db = sqlite3.connect(CTX_DB)
+        row = db.execute(
+            "SELECT value FROM shared WHERE key = ?", (key,)
+        ).fetchone()
+        db.close()
+        if not row:
+            return
+        dlg = _CtxEntryDialog(self.app, f"Edit shared: {key}", key, row[0])
+        if dlg.run() == Gtk.ResponseType.OK:
+            new_key, value = dlg.get_data()
+            if new_key:
+                db = sqlite3.connect(CTX_DB)
+                if new_key != key:
+                    db.execute("DELETE FROM shared WHERE key = ?", (key,))
+                db.execute(
+                    "INSERT OR REPLACE INTO shared (key, value, updated_at) "
+                    "VALUES (?, ?, datetime('now'))",
+                    (new_key, value),
+                )
+                db.commit()
+                db.close()
+                self.refresh()
+        dlg.destroy()
+
+    def _on_delete(self):
+        project, key = self._get_selected_info()
+        if not project:
+            return
+        if key:
+            self._delete_entry(project, key)
+        elif project != "__shared__":
+            self._delete_project(project)
+
+    def _delete_entry(self, project, key):
+        dlg = Gtk.MessageDialog(
+            transient_for=self.app,
+            modal=True,
+            message_type=Gtk.MessageType.QUESTION,
+            buttons=Gtk.ButtonsType.YES_NO,
+            text=f'Delete entry "{key}" from {project}?',
+        )
+        if dlg.run() == Gtk.ResponseType.YES:
+            if project == "__shared__":
+                import sqlite3
+                db = sqlite3.connect(CTX_DB)
+                db.execute("DELETE FROM shared WHERE key = ?", (key,))
+                db.commit()
+                db.close()
+            else:
+                subprocess.run(
+                    ["ctx", "delete", project, key],
+                    capture_output=True, text=True,
+                )
+            self.refresh()
+        dlg.destroy()
+
+    def _delete_project(self, project):
+        dlg = Gtk.MessageDialog(
+            transient_for=self.app,
+            modal=True,
+            message_type=Gtk.MessageType.QUESTION,
+            buttons=Gtk.ButtonsType.YES_NO,
+            text=f'Delete project "{project}" and all its entries?',
+        )
+        if dlg.run() == Gtk.ResponseType.YES:
+            subprocess.run(
+                ["ctx", "delete", project],
+                capture_output=True, text=True,
+            )
+            self.refresh()
+        dlg.destroy()
+
+
 # ─── BTerminalApp ─────────────────────────────────────────────────────────────
 
 
@@ -2235,9 +2826,31 @@ class BTerminalApp(Gtk.Window):
         paned = Gtk.HPaned()
         self.add(paned)
 
-        # Sidebar
+        # Sidebar container with stack switcher
+        sidebar_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        sidebar_box.get_style_context().add_class("sidebar")
+        sidebar_box.set_size_request(250, -1)
+
+        self.sidebar_stack = Gtk.Stack()
+        self.sidebar_stack.set_transition_type(
+            Gtk.StackTransitionType.SLIDE_LEFT_RIGHT
+        )
+
         self.sidebar = SessionSidebar(self)
-        paned.pack1(self.sidebar, resize=False, shrink=False)
+        self.sidebar_stack.add_titled(self.sidebar, "sessions", "Sessions")
+
+        self.ctx_panel = CtxManagerPanel(self)
+        self.sidebar_stack.add_titled(self.ctx_panel, "ctx", "Ctx")
+
+        switcher = Gtk.StackSwitcher()
+        switcher.set_stack(self.sidebar_stack)
+        switcher.set_halign(Gtk.Align.FILL)
+        switcher.set_homogeneous(True)
+
+        sidebar_box.pack_start(switcher, False, False, 0)
+        sidebar_box.pack_start(self.sidebar_stack, True, True, 0)
+
+        paned.pack1(sidebar_box, resize=False, shrink=False)
 
         # Notebook (tabs)
         self.notebook = Gtk.Notebook()
@@ -2247,6 +2860,16 @@ class BTerminalApp(Gtk.Window):
         paned.pack2(self.notebook, resize=True, shrink=False)
 
         paned.set_position(250)
+
+        # Auto-refresh ctx panel when switching to it
+        self.sidebar_stack.connect(
+            "notify::visible-child",
+            lambda s, _: (
+                self.ctx_panel.refresh()
+                if s.get_visible_child() is self.ctx_panel
+                else None
+            ),
+        )
 
         # Keyboard shortcuts
         self.connect("key-press-event", self._on_key_press)
