@@ -2119,10 +2119,11 @@ class TerminalTab(Gtk.Box):
 
             # Trigger: feed task instruction to Claude Code terminal
             message = (
-                f"[AUTO-TRIGGER] Jeśli wykonałeś wcześniej zadania i nie oznaczyłeś ich — "
-                f"najpierw zamknij je: tasks done {self._task_project} <task_id> (w Bash). "
-                f"Następnie sprawdź: tasks context {self._task_project} — wykonaj następne otwarte zadanie. "
-                f"Po zakończeniu MUSISZ oznaczyć: tasks done {self._task_project} <task_id>\r"
+                f"[AUTO-TRIGGER] Sprawdź listę zadań: tasks context {self._task_project} "
+                f"— wykonaj następne otwarte zadanie. "
+                f"MUSISZ oznaczyć KAŻDE wykonane zadanie: tasks done {self._task_project} <task_id> (w Bash). "
+                f"Pętla auto-trigger kończy się DOPIERO gdy WSZYSTKIE zadania są zamknięte (done). "
+                f"Jeśli nie oznaczysz — ta wiadomość będzie się powtarzać.\r"
             )
             self.terminal.feed_child(message.encode())
 
@@ -5312,10 +5313,11 @@ class TaskListPanel(Gtk.Box):
             tab = self.app.notebook.get_nth_page(i)
             if isinstance(tab, TerminalTab) and tab._task_project == project:
                 message = (
-                    f"[AUTO-TRIGGER] Jeśli wykonałeś wcześniej zadania i nie oznaczyłeś ich — "
-                    f"najpierw zamknij je: tasks done {project} <task_id> (w Bash). "
-                    f"Następnie sprawdź: tasks context {project} — wykonaj następne otwarte zadanie. "
-                    f"Po zakończeniu MUSISZ oznaczyć: tasks done {project} <task_id>\r"
+                    f"[AUTO-TRIGGER] Sprawdź listę zadań: tasks context {project} "
+                    f"— wykonaj następne otwarte zadanie. "
+                    f"MUSISZ oznaczyć KAŻDE wykonane zadanie: tasks done {project} <task_id> (w Bash). "
+                    f"Pętla auto-trigger kończy się DOPIERO gdy WSZYSTKIE zadania są zamknięte (done). "
+                    f"Jeśli nie oznaczysz — ta wiadomość będzie się powtarzać.\r"
                 )
                 tab.terminal.feed_child(message.encode())
                 return
