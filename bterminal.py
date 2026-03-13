@@ -1106,6 +1106,29 @@ def _detect_project_description(project_dir):
     return os.path.basename(project_dir.rstrip("/"))
 
 
+def _resolve_ctx_project_name(project_dir):
+    """Resolve ctx project name from a project directory path.
+
+    Looks up the sessions table by work_dir. Falls back to basename.
+    """
+    if not project_dir or not os.path.exists(CTX_DB):
+        return os.path.basename(project_dir.rstrip("/")) if project_dir else None
+    import sqlite3
+    normalized = project_dir.rstrip("/")
+    try:
+        db = sqlite3.connect(CTX_DB)
+        row = db.execute(
+            "SELECT name FROM sessions WHERE RTRIM(work_dir, '/') = ?",
+            (normalized,),
+        ).fetchone()
+        db.close()
+        if row:
+            return row[0]
+    except sqlite3.Error:
+        pass
+    return os.path.basename(normalized)
+
+
 def _is_ctx_project_registered(project_name):
     """Check if a ctx project is already registered in the database."""
     if not os.path.exists(CTX_DB):
@@ -1807,7 +1830,7 @@ class TerminalTab(Gtk.Box):
         if claude_config:
             project_dir = claude_config.get("project_dir", "")
             if project_dir:
-                self._task_project = os.path.basename(project_dir.rstrip("/"))
+                self._task_project = _resolve_ctx_project_name(project_dir)
             self.terminal.connect("contents-changed", self._on_contents_changed_tasks)
 
         self.show_all()
@@ -5102,7 +5125,21 @@ class TaskListPanel(Gtk.Box):
 
         self.pack_start(btn_box, False, False, 0)
 
+        self._db_mtime = 0
         self.refresh()
+        GLib.timeout_add(2000, self._poll_db_changes)
+
+    def _poll_db_changes(self):
+        """Check if ctx database mtime changed and refresh if so."""
+        try:
+            mtime = os.path.getmtime(CTX_DB)
+        except OSError:
+            return True
+        if mtime != self._db_mtime:
+            self._db_mtime = mtime
+            self._load_tasks()
+            self._load_autorun_state()
+        return True
 
     def _get_selected_project(self):
         return self.project_combo.get_active_text()
@@ -5129,6 +5166,10 @@ class TaskListPanel(Gtk.Box):
         self._load_projects()
         self._load_tasks()
         self._load_autorun_state()
+        try:
+            self._db_mtime = os.path.getmtime(CTX_DB)
+        except OSError:
+            pass
 
     def _load_projects(self):
         current = self._get_selected_project()
@@ -5221,6 +5262,37 @@ class TaskListPanel(Gtk.Box):
         db.commit()
         db.close()
         self._update_auto_label(enable)
+
+        # Immediately trigger first task when Start is clicked
+        if enable:
+            self._trigger_first_task(project)
+
+    def _trigger_first_task(self, project):
+        """Find a Claude Code tab matching this project and send trigger."""
+        import sqlite3
+        if not os.path.exists(CTX_DB):
+            return
+        db = sqlite3.connect(CTX_DB)
+        db.row_factory = sqlite3.Row
+        count = db.execute(
+            "SELECT COUNT(*) as c FROM tasks WHERE project = ? AND status = 'open'",
+            (project,),
+        ).fetchone()
+        db.close()
+        if count["c"] == 0:
+            return
+
+        # Find matching Claude Code tab
+        for i in range(self.app.notebook.get_n_pages()):
+            tab = self.app.notebook.get_nth_page(i)
+            if isinstance(tab, TerminalTab) and tab._task_project == project:
+                message = (
+                    f"[AUTO-TRIGGER] Sprawdź listę zadań: tasks context {project} "
+                    f"— wykonaj następne otwarte zadanie, po zakończeniu oznacz: "
+                    f"tasks done {project} <task_id>\n"
+                )
+                tab.terminal.feed_child(message.encode())
+                return
 
     def _on_add_task(self):
         project = self._get_selected_project()
@@ -5504,6 +5576,22 @@ class BTerminalApp(Gtk.Window):
 
     def _on_switch_page(self, notebook, page, page_num):
         GLib.idle_add(self._update_window_title)
+        # Auto-select project in Task panel based on active Claude Code tab
+        if isinstance(page, TerminalTab) and page._task_project:
+            GLib.idle_add(self._sync_task_panel_project, page._task_project)
+
+    def _sync_task_panel_project(self, project_name):
+        """Set Task panel's project combo to match the active tab's project."""
+        if not hasattr(self, "task_panel"):
+            return
+        combo = self.task_panel.project_combo
+        model = combo.get_model()
+        if not model:
+            return
+        for i, row in enumerate(model):
+            if row[0] == project_name:
+                combo.set_active(i)
+                break
 
     def _build_tab_label(self, text, tab_widget):
         """Build a tab label with a close button."""
