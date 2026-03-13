@@ -10,9 +10,12 @@ import json
 import os
 import subprocess
 import tempfile
+import threading
+import urllib.error
+import urllib.request
 import uuid
 
-from gi.repository import Gdk, Gio, GLib, Gtk, Pango, Vte
+from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk, Pango, Vte
 
 # ─── Stałe i konfiguracja ────────────────────────────────────────────────────
 
@@ -20,6 +23,7 @@ APP_NAME = "BTerminal"
 CONFIG_DIR = os.path.expanduser("~/.config/bterminal")
 SESSIONS_FILE = os.path.join(CONFIG_DIR, "sessions.json")
 CLAUDE_SESSIONS_FILE = os.path.join(CONFIG_DIR, "claude_sessions.json")
+CONSULT_CONFIG_FILE = os.path.join(CONFIG_DIR, "consult.json")
 SSH_PATH = "/usr/bin/ssh"
 
 def _find_claude_path():
@@ -321,6 +325,94 @@ class ClaudeSessionManager:
 
     def all(self):
         return list(self.sessions)
+
+
+# ─── ConsultManager ──────────────────────────────────────────────────────────
+
+
+class ConsultManager:
+    """Manage OpenRouter consult configuration (API key, models)."""
+
+    DEFAULT_CONFIG = {
+        "api_key": "",
+        "default_model": "google/gemini-2.5-pro",
+        "models": {
+            "google/gemini-2.5-pro": {"enabled": True, "name": "Gemini 2.5 Pro"},
+            "openai/gpt-4o": {"enabled": True, "name": "GPT-4o"},
+            "openai/o3-mini": {"enabled": True, "name": "o3-mini"},
+            "deepseek/deepseek-r1": {"enabled": True, "name": "DeepSeek R1"},
+            "anthropic/claude-sonnet-4": {"enabled": False, "name": "Claude Sonnet 4"},
+            "meta-llama/llama-4-maverick": {
+                "enabled": False,
+                "name": "Llama 4 Maverick",
+            },
+        },
+    }
+
+    def __init__(self):
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        self.config = {}
+        self.load()
+
+    def load(self):
+        if os.path.isfile(CONSULT_CONFIG_FILE):
+            try:
+                with open(CONSULT_CONFIG_FILE) as f:
+                    self.config = json.load(f)
+                return
+            except (json.JSONDecodeError, IOError):
+                pass
+        self.config = json.loads(json.dumps(self.DEFAULT_CONFIG))
+        self.save()
+
+    def save(self):
+        fd, tmp = tempfile.mkstemp(dir=CONFIG_DIR, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(self.config, f, indent=2)
+            os.replace(tmp, CONSULT_CONFIG_FILE)
+        except Exception:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+            raise
+
+    def get_api_key(self):
+        return self.config.get("api_key", "")
+
+    def set_api_key(self, key):
+        self.config["api_key"] = key
+        self.save()
+
+    def get_default_model(self):
+        return self.config.get("default_model", "")
+
+    def set_default_model(self, model_id):
+        self.config["default_model"] = model_id
+        models = self.config.setdefault("models", {})
+        if model_id in models:
+            models[model_id]["enabled"] = True
+        self.save()
+
+    def get_models(self):
+        return self.config.get("models", {})
+
+    def set_model_enabled(self, model_id, enabled):
+        models = self.config.setdefault("models", {})
+        if model_id in models:
+            models[model_id]["enabled"] = enabled
+            self.save()
+
+    def add_model(self, model_id, name="", enabled=True):
+        models = self.config.setdefault("models", {})
+        models[model_id] = {"name": name or model_id, "enabled": enabled}
+        self.save()
+
+    def remove_model(self, model_id):
+        models = self.config.get("models", {})
+        models.pop(model_id, None)
+        if self.config.get("default_model") == model_id:
+            self.config["default_model"] = ""
+        self.save()
 
 
 # ─── SessionDialog ────────────────────────────────────────────────────────────
@@ -818,7 +910,10 @@ class ClaudeCodeDialog(Gtk.Dialog):
                     f"Wykonaj tę komendę i zapoznaj się z kontekstem zanim zaczniesz pracę.\n"
                     f"Kontekst zarządzasz przez: ctx --help\n"
                     f"Ważne odkrycia zapisuj: ctx set {basename} <key> <value>\n"
-                    f"Przed zakończeniem sesji: ctx summary {basename} \"<co zrobiliśmy>\""
+                    f"Przed zakończeniem sesji: ctx summary {basename} \"<co zrobiliśmy>\"\n"
+                    f"\n"
+                    f"Konsultacje z zewnętrznymi modelami AI (OpenRouter): consult \"pytanie\"\n"
+                    f"Dostępne modele i opcje: consult"
                 )
                 buf.set_text(prompt)
             self._update_ctx_status()
@@ -846,6 +941,105 @@ class ClaudeCodeDialog(Gtk.Dialog):
 
 
 CTX_DB = os.path.join(os.path.expanduser("~"), ".claude-context", "context.db")
+CTX_IMAGES_DIR = os.path.join(os.path.expanduser("~"), ".claude-context", "images")
+_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg", ".tiff", ".ico"}
+
+
+def _clipboard_has_image_or_path():
+    """Check if clipboard has an image bitmap or a text path to an image file."""
+    clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+    if clipboard.wait_is_image_available():
+        return True
+    text = clipboard.wait_for_text()
+    if text:
+        path = text.strip().strip("'\"")
+        if os.path.isfile(path) and os.path.splitext(path)[1].lower() in _IMAGE_EXTENSIONS:
+            return True
+    return False
+
+
+def _clipboard_get_image_or_path():
+    """Return (pixbuf, None) or (None, file_path) or (None, None)."""
+    clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+    pixbuf = clipboard.wait_for_image()
+    if pixbuf:
+        return pixbuf, None
+    text = clipboard.wait_for_text()
+    if text:
+        path = text.strip().strip("'\"")
+        if os.path.isfile(path) and os.path.splitext(path)[1].lower() in _IMAGE_EXTENSIONS:
+            return None, path
+    return None, None
+
+
+def _ensure_images_table():
+    """Create images table in ctx database if it doesn't exist."""
+    import sqlite3
+    if not os.path.exists(CTX_DB):
+        return
+    db = sqlite3.connect(CTX_DB)
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS images ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  project TEXT NOT NULL,"
+        "  filename TEXT NOT NULL,"
+        "  original_name TEXT,"
+        "  added_at TEXT DEFAULT (datetime('now')),"
+        "  UNIQUE(project, filename)"
+        ")"
+    )
+    db.commit()
+    db.close()
+
+
+def _save_ctx_image(project, source, original_name=None):
+    """Save image to ctx. source: file path (str) or GdkPixbuf.Pixbuf."""
+    import sqlite3
+    import shutil
+    _ensure_images_table()
+    proj_dir = os.path.join(CTX_IMAGES_DIR, project)
+    os.makedirs(proj_dir, exist_ok=True)
+
+    if isinstance(source, GdkPixbuf.Pixbuf):
+        ext = ".png"
+        if not original_name:
+            original_name = "clipboard.png"
+        filename = f"{uuid.uuid4().hex[:12]}{ext}"
+        dest = os.path.join(proj_dir, filename)
+        source.savev(dest, "png", [], [])
+    else:
+        if not original_name:
+            original_name = os.path.basename(source)
+        ext = os.path.splitext(original_name)[1] or ".png"
+        filename = f"{uuid.uuid4().hex[:12]}{ext}"
+        dest = os.path.join(proj_dir, filename)
+        shutil.copy2(source, dest)
+
+    db = sqlite3.connect(CTX_DB)
+    db.execute(
+        "INSERT OR REPLACE INTO images (project, filename, original_name, added_at) "
+        "VALUES (?, ?, ?, datetime('now'))",
+        (project, filename, original_name),
+    )
+    db.commit()
+    db.close()
+    return filename
+
+
+def _delete_ctx_image(project, filename):
+    """Delete an image file and its database entry."""
+    import sqlite3
+    path = os.path.join(CTX_IMAGES_DIR, project, filename)
+    if os.path.exists(path):
+        os.remove(path)
+    if os.path.exists(CTX_DB):
+        db = sqlite3.connect(CTX_DB)
+        db.execute(
+            "DELETE FROM images WHERE project = ? AND filename = ?",
+            (project, filename),
+        )
+        db.commit()
+        db.close()
 
 
 def _detect_project_description(project_dir):
@@ -1182,6 +1376,15 @@ class CtxSetupWizard(Gtk.Dialog):
                         f"- Save important discoveries: `ctx set {name} <key> <value>`\n"
                         f"- Append to existing: `ctx append {name} <key> <value>`\n"
                         f'- Before ending session: `ctx summary {name} "<what was done>"`\n'
+                        f"\n"
+                        f"## External AI consultation (OpenRouter)\n\n"
+                        f"Consult other models (GPT, Gemini, DeepSeek, etc.) for code review, cross-checks, or analysis:\n"
+                        f"```bash\n"
+                        f'consult "question"                        # ask default model\n'
+                        f'consult -m model_id "question"            # ask specific model\n'
+                        f'consult -f file.py "review this code"     # include file\n'
+                        f"consult                                   # show available models\n"
+                        f"```\n"
                     )
             except IOError as e:
                 self.lbl_status.set_markup(
@@ -1195,7 +1398,10 @@ class CtxSetupWizard(Gtk.Dialog):
             f"Wykonaj t\u0119 komend\u0119 i zapoznaj si\u0119 z kontekstem zanim zaczniesz prac\u0119.\n"
             f"Kontekst zarz\u0105dzasz przez: ctx --help\n"
             f"Wa\u017cne odkrycia zapisuj: ctx set {name} <key> <value>\n"
-            f'Przed zako\u0144czeniem sesji: ctx summary {name} "<co zrobili\u015bmy>"'
+            f'Przed zako\u0144czeniem sesji: ctx summary {name} "<co zrobili\u015bmy>"\n'
+            f"\n"
+            f"Konsultacje z zewn\u0119trznymi modelami AI (OpenRouter): consult \"pytanie\"\n"
+            f"Dost\u0119pne modele i opcje: consult"
         )
         self.success = True
         return True
@@ -1528,6 +1734,20 @@ class TerminalTab(Gtk.Box):
         self.terminal.connect("key-press-event", self._on_key_press)
         self.terminal.connect("button-press-event", self._on_button_press)
 
+        # Drag & drop — accept files, paste path into terminal
+        self.terminal.drag_dest_set(
+            Gtk.DestDefaults.ALL,
+            [Gtk.TargetEntry.new("text/uri-list", 0, 0)],
+            Gdk.DragAction.COPY,
+        )
+        self.terminal.connect("drag-data-received", self._on_terminal_drag_received)
+
+        # Tab label references for in-place updates (avoid widget recreation)
+        self._tab_label_box = None
+        self._tab_label_widget = None
+        self._tab_label_text = None
+        self._pending_macro_timers = []
+
         self.show_all()
 
         if claude_config:
@@ -1671,8 +1891,12 @@ class TerminalTab(Gtk.Box):
                 terminal.copy_clipboard_format(Vte.Format.TEXT)
             return True
 
-        # Ctrl+Shift+V: paste
+        # Ctrl+Shift+V: paste (clipboard image → save to ctx & paste path)
         if mod == (ctrl | shift) and event.keyval in (Gdk.KEY_V, Gdk.KEY_v):
+            clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+            if clipboard.wait_is_image_available():
+                self._paste_clipboard_image_path()
+                return True
             terminal.paste_clipboard()
             return True
 
@@ -1719,6 +1943,13 @@ class TerminalTab(Gtk.Box):
             item_select_all.connect("activate", lambda _: terminal.select_all())
             menu.append(item_select_all)
 
+            menu.append(Gtk.SeparatorMenuItem())
+
+            item_paste_img = Gtk.MenuItem(label="Paste Image to Ctx")
+            item_paste_img.set_sensitive(_clipboard_has_image_or_path())
+            item_paste_img.connect("activate", lambda _: self._on_paste_image_to_ctx())
+            menu.append(item_paste_img)
+
             menu.show_all()
             menu.popup_at_pointer(event)
             return True
@@ -1738,6 +1969,165 @@ class TerminalTab(Gtk.Box):
                 self.app.update_tab_title(self, self.claude_config.get("name", "Claude Code"))
             else:
                 self.app.update_tab_title(self, title)
+
+    def _paste_clipboard_image_path(self):
+        """Save clipboard image to ctx and paste its path into terminal."""
+        clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+        pixbuf = clipboard.wait_for_image()
+        if not pixbuf:
+            return
+        project = self._detect_ctx_project()
+        if not project:
+            return
+        filename = _save_ctx_image(project, pixbuf)
+        path = os.path.join(CTX_IMAGES_DIR, project, filename)
+        # Replace clipboard with path text and use native VTE paste
+        clipboard.set_text(path, -1)
+        clipboard.store()
+        self.terminal.paste_clipboard()
+        if hasattr(self.app, "ctx_panel"):
+            self.app.ctx_panel.refresh()
+
+    def _detect_ctx_project(self):
+        """Auto-detect ctx project from tab config, or ask user."""
+        import sqlite3
+        if not os.path.exists(CTX_DB):
+            return None
+        # Try auto-detect from claude config
+        if self.claude_config:
+            proj_dir = self.claude_config.get("project_dir", "")
+            if proj_dir:
+                candidate = os.path.basename(proj_dir.rstrip("/"))
+                db = sqlite3.connect(CTX_DB)
+                exists = db.execute(
+                    "SELECT 1 FROM sessions WHERE name = ?", (candidate,)
+                ).fetchone()
+                db.close()
+                if exists:
+                    return candidate
+        # Fallback: show dialog
+        db = sqlite3.connect(CTX_DB)
+        projects = [
+            r[0] for r in db.execute(
+                "SELECT name FROM sessions ORDER BY name"
+            ).fetchall()
+        ]
+        db.close()
+        if not projects:
+            return None
+        dlg = Gtk.Dialog(
+            title="Save Image to Project",
+            transient_for=self.app,
+            modal=True,
+        )
+        dlg.add_buttons(
+            Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+            Gtk.STOCK_OK, Gtk.ResponseType.OK,
+        )
+        dlg.set_default_size(300, -1)
+        box = dlg.get_content_area()
+        box.set_border_width(12)
+        box.set_spacing(8)
+        lbl = Gtk.Label(label="Select project for image:")
+        lbl.set_xalign(0)
+        box.pack_start(lbl, False, False, 0)
+        combo = Gtk.ComboBoxText()
+        for p in projects:
+            combo.append_text(p)
+        # Pre-select project matching current Claude session
+        preselect = 0
+        if self.claude_config:
+            proj_dir = self.claude_config.get("project_dir", "")
+            if proj_dir:
+                basename = os.path.basename(proj_dir.rstrip("/"))
+                for i, p in enumerate(projects):
+                    if p == basename:
+                        preselect = i
+                        break
+        combo.set_active(preselect)
+        box.pack_start(combo, False, False, 0)
+        dlg.show_all()
+        project = None
+        if dlg.run() == Gtk.ResponseType.OK:
+            project = combo.get_active_text()
+        dlg.destroy()
+        return project
+
+    def _on_terminal_drag_received(self, widget, context, x, y, data, info, time):
+        """Handle files dropped onto terminal — paste file path."""
+        uris = data.get_uris()
+        if not uris:
+            return
+        paths = []
+        for uri in uris:
+            if uri.startswith("file://"):
+                try:
+                    path = GLib.filename_from_uri(uri)[0]
+                    paths.append(path)
+                except Exception:
+                    pass
+        if paths:
+            text = " ".join(paths)
+            self.terminal.feed_child(text.encode("utf-8"))
+
+    def _on_paste_image_to_ctx(self):
+        """Paste clipboard image (bitmap or file path) to a ctx project."""
+        pixbuf, file_path = _clipboard_get_image_or_path()
+        if not pixbuf and not file_path:
+            return
+        import sqlite3
+        if not os.path.exists(CTX_DB):
+            return
+        db = sqlite3.connect(CTX_DB)
+        projects = [
+            r[0] for r in db.execute(
+                "SELECT name FROM sessions ORDER BY name"
+            ).fetchall()
+        ]
+        db.close()
+        if not projects:
+            return
+
+        dlg = Gtk.Dialog(
+            title="Paste Image to Project",
+            transient_for=self.app,
+            modal=True,
+        )
+        dlg.add_buttons(
+            Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+            Gtk.STOCK_OK, Gtk.ResponseType.OK,
+        )
+        dlg.set_default_size(300, -1)
+        box = dlg.get_content_area()
+        box.set_border_width(12)
+        box.set_spacing(8)
+        lbl = Gtk.Label(label="Select project:")
+        lbl.set_xalign(0)
+        box.pack_start(lbl, False, False, 0)
+        combo = Gtk.ComboBoxText()
+        for p in projects:
+            combo.append_text(p)
+        # Pre-select project matching current Claude session
+        preselect = 0
+        if self.claude_config:
+            proj_dir = self.claude_config.get("project_dir", "")
+            if proj_dir:
+                basename = os.path.basename(proj_dir.rstrip("/"))
+                for i, p in enumerate(projects):
+                    if p == basename:
+                        preselect = i
+                        break
+        combo.set_active(preselect)
+        box.pack_start(combo, False, False, 0)
+        dlg.show_all()
+        if dlg.run() == Gtk.ResponseType.OK:
+            project = combo.get_active_text()
+            if project:
+                source = pixbuf if pixbuf else file_path
+                _save_ctx_image(project, source)
+                if hasattr(self.app, "ctx_panel"):
+                    self.app.ctx_panel.refresh()
+        dlg.destroy()
 
     def get_label(self):
         if self.claude_config:
@@ -2401,6 +2791,19 @@ class _CtxExportDialog(Gtk.Dialog):
                 self.store.append(proj_iter, [
                     True, "\U0001f4cb", f"Summaries ({scount})", "summaries", pname,
                 ])
+            # Images
+            _ensure_images_table()
+            images = db.execute(
+                "SELECT filename, original_name FROM images "
+                "WHERE project = ? ORDER BY added_at",
+                (pname,),
+            ).fetchall()
+            for img in images:
+                self.store.append(proj_iter, [
+                    True, "\U0001f5bc",
+                    img["original_name"] or img["filename"],
+                    "image", img["filename"],
+                ])
 
         shared = db.execute("SELECT key FROM shared ORDER BY key").fetchall()
         if shared:
@@ -2451,11 +2854,15 @@ class _CtxExportDialog(Gtk.Dialog):
     def get_export_data(self):
         """Collect checked items and return export dict."""
         import sqlite3
+        import base64
         if not os.path.exists(CTX_DB):
             return None
         db = sqlite3.connect(CTX_DB)
         db.row_factory = sqlite3.Row
-        data = {"sessions": [], "contexts": [], "shared": [], "summaries": []}
+        data = {
+            "sessions": [], "contexts": [], "shared": [],
+            "summaries": [], "images": [],
+        }
 
         root = self.store.get_iter_first()
         while root:
@@ -2466,6 +2873,7 @@ class _CtxExportDialog(Gtk.Dialog):
                 proj_name = dkey
                 child = self.store.iter_children(root)
                 checked_entries = []
+                checked_images = []
                 include_summaries = False
                 while child:
                     if self.store.get_value(child, 0):
@@ -2475,9 +2883,12 @@ class _CtxExportDialog(Gtk.Dialog):
                             checked_entries.append(ckey)
                         elif ctype == "summaries":
                             include_summaries = True
+                        elif ctype == "image":
+                            checked_images.append(ckey)
                     child = self.store.iter_next(child)
 
-                if checked_entries or include_summaries or self.store.get_value(root, 0):
+                if (checked_entries or include_summaries
+                        or checked_images or self.store.get_value(root, 0)):
                     row = db.execute(
                         "SELECT * FROM sessions WHERE name = ?", (proj_name,)
                     ).fetchone()
@@ -2500,6 +2911,24 @@ class _CtxExportDialog(Gtk.Dialog):
                         (proj_name,),
                     ).fetchall()
                     data["summaries"].extend(dict(r) for r in rows)
+
+                for fname in checked_images:
+                    img_path = os.path.join(CTX_IMAGES_DIR, proj_name, fname)
+                    if os.path.exists(img_path):
+                        with open(img_path, "rb") as f:
+                            img_b64 = base64.b64encode(f.read()).decode()
+                        orig = db.execute(
+                            "SELECT original_name, added_at FROM images "
+                            "WHERE project = ? AND filename = ?",
+                            (proj_name, fname),
+                        ).fetchone()
+                        data["images"].append({
+                            "project": proj_name,
+                            "filename": fname,
+                            "original_name": orig["original_name"] if orig else fname,
+                            "added_at": orig["added_at"] if orig else "",
+                            "data": img_b64,
+                        })
 
             elif dtype == "shared":
                 child = self.store.iter_children(root)
@@ -2654,9 +3083,13 @@ class _CtxImportDialog(Gtk.Dialog):
         summaries_by_proj = {}
         for s in data.get("summaries", []):
             summaries_by_proj.setdefault(s["project"], []).append(s)
+        images_by_proj = {}
+        for img in data.get("images", []):
+            images_by_proj.setdefault(img["project"], []).append(img)
 
         all_projects = sorted(
-            set(sessions) | set(contexts_by_proj) | set(summaries_by_proj)
+            set(sessions) | set(contexts_by_proj)
+            | set(summaries_by_proj) | set(images_by_proj)
         )
         for proj_name in all_projects:
             proj_iter = self.store.append(None, [
@@ -2670,6 +3103,12 @@ class _CtxImportDialog(Gtk.Dialog):
             if scount:
                 self.store.append(proj_iter, [
                     True, "\U0001f4cb", f"Summaries ({scount})", "summaries", proj_name,
+                ])
+            for img in images_by_proj.get(proj_name, []):
+                self.store.append(proj_iter, [
+                    True, "\U0001f5bc",
+                    img.get("original_name") or img["filename"],
+                    "image", img["filename"],
                 ])
 
         shared = data.get("shared", [])
@@ -2731,8 +3170,14 @@ class _CtxImportDialog(Gtk.Dialog):
         for s in data.get("summaries", []):
             summaries_by_proj.setdefault(s["project"], []).append(s)
         shared_map = {s["key"]: s for s in data.get("shared", [])}
+        images_by_fname = {}
+        for img in data.get("images", []):
+            images_by_fname[(img["project"], img["filename"])] = img
 
-        result = {"sessions": [], "contexts": [], "shared": [], "summaries": []}
+        result = {
+            "sessions": [], "contexts": [], "shared": [],
+            "summaries": [], "images": [],
+        }
 
         root = self.store.get_iter_first()
         while root:
@@ -2743,6 +3188,7 @@ class _CtxImportDialog(Gtk.Dialog):
                 proj_name = dkey
                 child = self.store.iter_children(root)
                 checked_entries = []
+                checked_images = []
                 include_summaries = False
                 while child:
                     if self.store.get_value(child, 0):
@@ -2752,9 +3198,11 @@ class _CtxImportDialog(Gtk.Dialog):
                             checked_entries.append(ckey)
                         elif ctype == "summaries":
                             include_summaries = True
+                        elif ctype == "image":
+                            checked_images.append(ckey)
                     child = self.store.iter_next(child)
 
-                if checked_entries or include_summaries:
+                if checked_entries or include_summaries or checked_images:
                     if proj_name in sessions_map:
                         result["sessions"].append(sessions_map[proj_name])
                     for ekey in checked_entries:
@@ -2766,6 +3214,10 @@ class _CtxImportDialog(Gtk.Dialog):
                         result["summaries"].extend(
                             summaries_by_proj.get(proj_name, [])
                         )
+                    for fname in checked_images:
+                        key = (proj_name, fname)
+                        if key in images_by_fname:
+                            result["images"].append(images_by_fname[key])
 
             elif dtype == "shared":
                 child = self.store.iter_children(root)
@@ -2797,8 +3249,8 @@ class CtxManagerPanel(Gtk.Box):
         self.pack_start(paned, True, True, 0)
 
         # ── Tree ──
-        # Columns: icon, display_name, project, key, color, weight
-        self.store = Gtk.TreeStore(str, str, str, str, str, int)
+        # Columns: icon, display_name, project, key, color, weight, row_type
+        self.store = Gtk.TreeStore(str, str, str, str, str, int, str)
         self.tree = Gtk.TreeView(model=self.store)
         self.tree.set_headers_visible(False)
         self.tree.set_activate_on_single_click(False)
@@ -2822,6 +3274,13 @@ class CtxManagerPanel(Gtk.Box):
         tree_scroll.add(self.tree)
         paned.pack1(tree_scroll, resize=True, shrink=False)
 
+        # Drag & drop — accept image files
+        self.tree.drag_dest_set(
+            Gtk.DestDefaults.ALL,
+            [Gtk.TargetEntry.new("text/uri-list", 0, 0)],
+            Gdk.DragAction.COPY,
+        )
+
         # ── Detail pane ──
         detail_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
 
@@ -2830,6 +3289,9 @@ class CtxManagerPanel(Gtk.Box):
         self.detail_header.set_margin_top(4)
         detail_box.pack_start(self.detail_header, False, False, 0)
 
+        self.detail_stack = Gtk.Stack()
+
+        # Text detail page
         detail_scroll = Gtk.ScrolledWindow()
         detail_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         detail_scroll.set_min_content_height(80)
@@ -2843,7 +3305,18 @@ class CtxManagerPanel(Gtk.Box):
         self.detail_view.set_bottom_margin(4)
         self.detail_view.get_style_context().add_class("ctx-detail")
         detail_scroll.add(self.detail_view)
-        detail_box.pack_start(detail_scroll, True, True, 0)
+        self.detail_stack.add_named(detail_scroll, "text")
+
+        # Image detail page
+        img_scroll = Gtk.ScrolledWindow()
+        img_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        self.detail_image = Gtk.Image()
+        self.detail_image.set_halign(Gtk.Align.CENTER)
+        self.detail_image.set_valign(Gtk.Align.START)
+        img_scroll.add(self.detail_image)
+        self.detail_stack.add_named(img_scroll, "image")
+
+        detail_box.pack_start(self.detail_stack, True, True, 0)
 
         paned.pack2(detail_box, resize=False, shrink=False)
         paned.set_position(300)
@@ -2861,6 +3334,9 @@ class CtxManagerPanel(Gtk.Box):
         item_entry = Gtk.MenuItem(label="New Entry")
         item_entry.connect("activate", lambda _: self._on_add_entry())
         add_menu.append(item_entry)
+        item_img = Gtk.MenuItem(label="Add Image")
+        item_img.connect("activate", lambda _: self._on_add_image())
+        add_menu.append(item_img)
         add_menu.show_all()
         btn_add.set_popup(add_menu)
 
@@ -2900,6 +3376,7 @@ class CtxManagerPanel(Gtk.Box):
         # Signals
         self.tree.connect("row-activated", self._on_row_activated)
         self.tree.connect("button-press-event", self._on_button_press)
+        self.tree.connect("drag-data-received", self._on_drag_data_received)
         self.tree.get_selection().connect("changed", self._on_selection_changed)
 
         self.refresh()
@@ -2909,12 +3386,14 @@ class CtxManagerPanel(Gtk.Box):
         self.store.clear()
         self.detail_header.set_text("")
         self.detail_view.get_buffer().set_text("")
+        self.detail_stack.set_visible_child_name("text")
         if not os.path.exists(CTX_DB):
             return
 
         import sqlite3
         db = sqlite3.connect(CTX_DB)
         db.row_factory = sqlite3.Row
+        _ensure_images_table()
 
         projects = db.execute(
             "SELECT name, description, work_dir FROM sessions ORDER BY name"
@@ -2928,6 +3407,7 @@ class CtxManagerPanel(Gtk.Box):
                 "",
                 CATPPUCCIN["blue"],
                 Pango.Weight.BOLD,
+                "project",
             ])
             entries = db.execute(
                 "SELECT key FROM contexts WHERE project = ? ORDER BY key",
@@ -2941,6 +3421,23 @@ class CtxManagerPanel(Gtk.Box):
                     entry["key"],
                     CATPPUCCIN["text"],
                     Pango.Weight.NORMAL,
+                    "entry",
+                ])
+            # Images
+            images = db.execute(
+                "SELECT filename, original_name FROM images "
+                "WHERE project = ? ORDER BY added_at",
+                (proj["name"],),
+            ).fetchall()
+            for img in images:
+                self.store.append(proj_iter, [
+                    "\U0001f5bc",
+                    img["original_name"] or img["filename"],
+                    proj["name"],
+                    img["filename"],
+                    CATPPUCCIN["green"],
+                    Pango.Weight.NORMAL,
+                    "image",
                 ])
 
         # Shared entries
@@ -2953,6 +3450,7 @@ class CtxManagerPanel(Gtk.Box):
                 "",
                 CATPPUCCIN["peach"],
                 Pango.Weight.BOLD,
+                "shared_root",
             ])
             for entry in shared:
                 self.store.append(shared_iter, [
@@ -2962,31 +3460,38 @@ class CtxManagerPanel(Gtk.Box):
                     entry["key"],
                     CATPPUCCIN["text"],
                     Pango.Weight.NORMAL,
+                    "shared_entry",
                 ])
 
         db.close()
         self.tree.expand_all()
 
     def _get_selected_info(self):
-        """Returns (project_name, entry_key) of selected row."""
+        """Returns (project_name, key, row_type) of selected row."""
         sel = self.tree.get_selection()
         model, it = sel.get_selected()
         if it is None:
-            return None, None
-        return model.get_value(it, 2), model.get_value(it, 3)
+            return None, None, None
+        return model.get_value(it, 2), model.get_value(it, 3), model.get_value(it, 6)
 
     def _on_selection_changed(self, selection):
         model, it = selection.get_selected()
         if it is None:
             self.detail_header.set_text("")
             self.detail_view.get_buffer().set_text("")
+            self.detail_stack.set_visible_child_name("text")
             return
         project = model.get_value(it, 2)
         key = model.get_value(it, 3)
-        if key:
+        rtype = model.get_value(it, 6)
+        if rtype == "image":
+            self._show_image_detail(project, key)
+        elif key:
             self._show_entry_detail(project, key)
+            self.detail_stack.set_visible_child_name("text")
         else:
             self._show_project_detail(project)
+            self.detail_stack.set_visible_child_name("text")
 
     def _show_project_detail(self, project):
         import sqlite3
@@ -3024,6 +3529,12 @@ class CtxManagerPanel(Gtk.Box):
             "SELECT COUNT(*) FROM contexts WHERE project = ?", (project,)
         ).fetchone()[0]
         lines.append(f"Entries: {count}")
+
+        img_count = db.execute(
+            "SELECT COUNT(*) FROM images WHERE project = ?", (project,)
+        ).fetchone()[0]
+        if img_count:
+            lines.append(f"Images: {img_count}")
 
         # Last summary
         summary = db.execute(
@@ -3071,6 +3582,32 @@ class CtxManagerPanel(Gtk.Box):
             self.detail_view.get_buffer().set_text(row[0])
         db.close()
 
+    def _show_image_detail(self, project, filename):
+        """Show image preview in detail pane."""
+        self.detail_header.set_markup(
+            f"<b>\U0001f5bc {GLib.markup_escape_text(filename)}</b>"
+        )
+        path = os.path.join(CTX_IMAGES_DIR, project, filename)
+        if not os.path.exists(path):
+            self.detail_view.get_buffer().set_text("Image file not found.")
+            self.detail_stack.set_visible_child_name("text")
+            return
+        try:
+            pixbuf = GdkPixbuf.Pixbuf.new_from_file(path)
+            max_w, max_h = 230, 400
+            w, h = pixbuf.get_width(), pixbuf.get_height()
+            if w > max_w or h > max_h:
+                scale = min(max_w / w, max_h / h)
+                pixbuf = pixbuf.scale_simple(
+                    int(w * scale), int(h * scale),
+                    GdkPixbuf.InterpType.BILINEAR,
+                )
+            self.detail_image.set_from_pixbuf(pixbuf)
+            self.detail_stack.set_visible_child_name("image")
+        except Exception:
+            self.detail_view.get_buffer().set_text("Failed to load image.")
+            self.detail_stack.set_visible_child_name("text")
+
     def _on_row_activated(self, tree, path, column):
         self._on_edit()
 
@@ -3085,13 +3622,26 @@ class CtxManagerPanel(Gtk.Box):
         it = self.store.get_iter(path)
         project = self.store.get_value(it, 2)
         key = self.store.get_value(it, 3)
+        rtype = self.store.get_value(it, 6)
 
         menu = Gtk.Menu()
-        if not key:
-            # Project row
+        if rtype == "project":
             item_add = Gtk.MenuItem(label="Add Entry")
             item_add.connect("activate", lambda _: self._on_add_entry())
             menu.append(item_add)
+
+            item_add_img = Gtk.MenuItem(label="Add Image")
+            item_add_img.connect("activate", lambda _: self._on_add_image())
+            menu.append(item_add_img)
+
+            item_paste_img = Gtk.MenuItem(label="Paste Image from Clipboard")
+            item_paste_img.set_sensitive(_clipboard_has_image_or_path())
+            item_paste_img.connect(
+                "activate", lambda _, p=project: self._on_paste_image(p)
+            )
+            menu.append(item_paste_img)
+
+            menu.append(Gtk.SeparatorMenuItem())
 
             item_edit = Gtk.MenuItem(label="Edit Project")
             item_edit.connect("activate", lambda _: self._on_edit())
@@ -3102,8 +3652,13 @@ class CtxManagerPanel(Gtk.Box):
             item_del = Gtk.MenuItem(label="Delete Project")
             item_del.connect("activate", lambda _: self._on_delete())
             menu.append(item_del)
-        else:
-            # Entry row
+        elif rtype == "image":
+            item_del = Gtk.MenuItem(label="Delete Image")
+            item_del.connect(
+                "activate", lambda _, p=project, f=key: self._delete_image(p, f)
+            )
+            menu.append(item_del)
+        elif rtype in ("entry", "shared_entry"):
             item_edit = Gtk.MenuItem(label="Edit Entry")
             item_edit.connect("activate", lambda _: self._on_edit())
             menu.append(item_edit)
@@ -3129,7 +3684,7 @@ class CtxManagerPanel(Gtk.Box):
         dlg.destroy()
 
     def _on_add_entry(self):
-        project, _ = self._get_selected_info()
+        project, _, _ = self._get_selected_info()
         if not project or project == "__shared__":
             return
         dlg = _CtxEntryDialog(self.app, f"Add entry to {project}")
@@ -3144,9 +3699,11 @@ class CtxManagerPanel(Gtk.Box):
         dlg.destroy()
 
     def _on_edit(self):
-        project, key = self._get_selected_info()
+        project, key, rtype = self._get_selected_info()
         if not project:
             return
+        if rtype == "image":
+            return  # images are not editable
         if project == "__shared__":
             if key:
                 self._edit_shared_entry(key)
@@ -3239,10 +3796,12 @@ class CtxManagerPanel(Gtk.Box):
         dlg.destroy()
 
     def _on_delete(self):
-        project, key = self._get_selected_info()
+        project, key, rtype = self._get_selected_info()
         if not project:
             return
-        if key:
+        if rtype == "image":
+            self._delete_image(project, key)
+        elif key:
             self._delete_entry(project, key)
         elif project != "__shared__":
             self._delete_project(project)
@@ -3285,6 +3844,91 @@ class CtxManagerPanel(Gtk.Box):
             )
             self.refresh()
         dlg.destroy()
+
+    def _on_add_image(self):
+        """Add image from file chooser to selected project."""
+        project, _, _ = self._get_selected_info()
+        if not project or project == "__shared__":
+            return
+        dlg = Gtk.FileChooserDialog(
+            title=f"Add image to {project}",
+            parent=self.app,
+            action=Gtk.FileChooserAction.OPEN,
+        )
+        dlg.add_buttons(
+            Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+            Gtk.STOCK_OPEN, Gtk.ResponseType.OK,
+        )
+        filt = Gtk.FileFilter()
+        filt.set_name("Images")
+        for mime in ("image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp"):
+            filt.add_mime_type(mime)
+        dlg.add_filter(filt)
+        filt_all = Gtk.FileFilter()
+        filt_all.set_name("All files")
+        filt_all.add_pattern("*")
+        dlg.add_filter(filt_all)
+        if dlg.run() == Gtk.ResponseType.OK:
+            path = dlg.get_filename()
+            if path:
+                _save_ctx_image(project, path)
+                self.refresh()
+        dlg.destroy()
+
+    def _on_paste_image(self, project=None):
+        """Paste image (bitmap or file path) from clipboard to a project."""
+        if not project:
+            project, _, _ = self._get_selected_info()
+        if not project or project == "__shared__":
+            return
+        pixbuf, file_path = _clipboard_get_image_or_path()
+        if pixbuf or file_path:
+            source = pixbuf if pixbuf else file_path
+            _save_ctx_image(project, source)
+            self.refresh()
+
+    def _delete_image(self, project, filename):
+        """Delete an image with confirmation."""
+        dlg = Gtk.MessageDialog(
+            transient_for=self.app,
+            modal=True,
+            message_type=Gtk.MessageType.QUESTION,
+            buttons=Gtk.ButtonsType.YES_NO,
+            text=f"Delete image from {project}?",
+        )
+        if dlg.run() == Gtk.ResponseType.YES:
+            _delete_ctx_image(project, filename)
+            self.refresh()
+        dlg.destroy()
+
+    def _on_drag_data_received(self, widget, context, x, y, data, info, time):
+        """Handle image files dropped on the tree."""
+        uris = data.get_uris()
+        if not uris:
+            return
+        path_info = self.tree.get_dest_row_at_pos(x, y)
+        if not path_info:
+            return
+        tree_path, _ = path_info
+        it = self.store.get_iter(tree_path)
+        # Walk up to project row
+        parent = self.store.iter_parent(it)
+        if parent:
+            it = parent
+        project = self.store.get_value(it, 2)
+        rtype = self.store.get_value(it, 6)
+        if not project or project == "__shared__" or rtype not in ("project",):
+            return
+        img_exts = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
+        added = False
+        for uri in uris:
+            if uri.startswith("file://"):
+                filepath = GLib.filename_from_uri(uri)[0]
+                if filepath.lower().endswith(img_exts):
+                    _save_ctx_image(project, filepath)
+                    added = True
+        if added:
+            self.refresh()
 
     def _on_export(self):
         dlg = _CtxExportDialog(self.app)
@@ -3335,6 +3979,7 @@ class CtxManagerPanel(Gtk.Box):
 
     def _do_import(self, data, overwrite):
         import sqlite3
+        import base64
         # Ensure database and tables exist
         subprocess.run(["ctx", "list"], capture_output=True, text=True)
         if not os.path.exists(CTX_DB):
@@ -3392,6 +4037,445 @@ class CtxManagerPanel(Gtk.Box):
         db.commit()
         db.close()
 
+        # Import images (files + DB entries)
+        _ensure_images_table()
+        for img in data.get("images", []):
+            img_data = img.get("data")
+            if not img_data:
+                continue
+            project = img["project"]
+            proj_dir = os.path.join(CTX_IMAGES_DIR, project)
+            os.makedirs(proj_dir, exist_ok=True)
+            filename = img["filename"]
+            dest = os.path.join(proj_dir, filename)
+            if not overwrite and os.path.exists(dest):
+                continue
+            with open(dest, "wb") as f:
+                f.write(base64.b64decode(img_data))
+            db = sqlite3.connect(CTX_DB)
+            db.execute(
+                f"INSERT OR {mode} INTO images "
+                "(project, filename, original_name, added_at) "
+                "VALUES (?, ?, ?, ?)",
+                (
+                    project, filename,
+                    img.get("original_name", filename),
+                    img.get("added_at", ""),
+                ),
+            )
+            db.commit()
+            db.close()
+
+
+# ─── ConsultPanel ────────────────────────────────────────────────────────────
+
+
+class ConsultPanel(Gtk.Box):
+    """Sidebar panel for managing external AI model consultation via OpenRouter."""
+
+    def __init__(self, app):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL)
+        self.app = app
+        self.manager = ConsultManager()
+
+        # ── API Key section ──
+        key_box = Gtk.Box(spacing=4)
+        key_box.set_border_width(6)
+
+        key_label = Gtk.Label(label="API Key:")
+        key_label.set_xalign(0)
+        key_box.pack_start(key_label, False, False, 0)
+
+        self.key_entry = Gtk.Entry()
+        self.key_entry.set_visibility(False)
+        self.key_entry.set_text(self.manager.get_api_key())
+        self.key_entry.set_placeholder_text("sk-or-...")
+        key_box.pack_start(self.key_entry, True, True, 0)
+
+        eye_btn = Gtk.ToggleButton(label="Show")
+        eye_btn.get_style_context().add_class("sidebar-btn")
+        eye_btn.set_relief(Gtk.ReliefStyle.NONE)
+        eye_btn.connect(
+            "toggled", lambda b: self.key_entry.set_visibility(b.get_active())
+        )
+        key_box.pack_start(eye_btn, False, False, 0)
+
+        save_key_btn = Gtk.Button(label="Save")
+        save_key_btn.get_style_context().add_class("sidebar-btn")
+        save_key_btn.connect("clicked", self._on_save_key)
+        key_box.pack_start(save_key_btn, False, False, 0)
+
+        self.pack_start(key_box, False, False, 0)
+
+        # ── Separator ──
+        self.pack_start(Gtk.Separator(), False, False, 0)
+
+        # ── Default model label ──
+        self.default_label = Gtk.Label()
+        self.default_label.set_xalign(0)
+        self.default_label.set_margin_start(8)
+        self.default_label.set_margin_top(4)
+        self.default_label.set_margin_bottom(4)
+        self.pack_start(self.default_label, False, False, 0)
+
+        # ── Model list ──
+        # Columns: enabled(bool), default_star(str), name(str), model_id(str)
+        self.store = Gtk.ListStore(bool, str, str, str)
+        self.tree = Gtk.TreeView(model=self.store)
+        self.tree.set_headers_visible(False)
+        self.tree.set_activate_on_single_click(False)
+
+        # Toggle column
+        toggle_renderer = Gtk.CellRendererToggle()
+        toggle_renderer.connect("toggled", self._on_toggle)
+        col_toggle = Gtk.TreeViewColumn("", toggle_renderer, active=0)
+        col_toggle.set_min_width(30)
+        self.tree.append_column(col_toggle)
+
+        # Star + name column
+        col_main = Gtk.TreeViewColumn()
+
+        cell_star = Gtk.CellRendererText()
+        col_main.pack_start(cell_star, False)
+        col_main.add_attribute(cell_star, "text", 1)
+        col_main.add_attribute(cell_star, "foreground", 1)
+        # Use a cell data func to color the star
+        col_main.set_cell_data_func(
+            cell_star,
+            lambda col, cell, model, it, _: cell.set_property(
+                "foreground", CATPPUCCIN["yellow"] if model[it][1] else None
+            ),
+        )
+
+        cell_name = Gtk.CellRendererText()
+        cell_name.set_property("ellipsize", Pango.EllipsizeMode.END)
+        col_main.pack_start(cell_name, True)
+        col_main.add_attribute(cell_name, "text", 2)
+
+        self.tree.append_column(col_main)
+
+        tree_scroll = Gtk.ScrolledWindow()
+        tree_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        tree_scroll.add(self.tree)
+        self.pack_start(tree_scroll, True, True, 0)
+
+        # ── Buttons row 1 ──
+        btn_box = Gtk.Box(spacing=4)
+        btn_box.set_border_width(6)
+
+        btn_default = Gtk.Button(label="Set Default")
+        btn_default.get_style_context().add_class("sidebar-btn")
+        btn_default.connect("clicked", self._on_set_default)
+        btn_box.pack_start(btn_default, True, True, 0)
+
+        btn_add = Gtk.Button(label="Add")
+        btn_add.get_style_context().add_class("sidebar-btn")
+        btn_add.connect("clicked", self._on_add_model)
+        btn_box.pack_start(btn_add, True, True, 0)
+
+        btn_remove = Gtk.Button(label="Remove")
+        btn_remove.get_style_context().add_class("sidebar-btn")
+        btn_remove.connect("clicked", self._on_remove_model)
+        btn_box.pack_start(btn_remove, True, True, 0)
+
+        self.pack_start(btn_box, False, False, 0)
+
+        # ── Buttons row 2 ──
+        btn_box2 = Gtk.Box(spacing=4)
+        btn_box2.set_border_width(6)
+        btn_box2.set_margin_top(0)
+
+        self.btn_fetch = Gtk.Button(label="Fetch Models from OpenRouter")
+        self.btn_fetch.get_style_context().add_class("sidebar-btn")
+        self.btn_fetch.connect("clicked", self._on_fetch_models)
+        btn_box2.pack_start(self.btn_fetch, True, True, 0)
+
+        self.pack_start(btn_box2, False, False, 0)
+
+        # ── CLI info ──
+        info_label = Gtk.Label()
+        info_label.set_markup(
+            f'<span size="small" foreground="{CATPPUCCIN["overlay1"]}">'
+            "CLI: consult \"question\" | consult -m model \"q\" | consult models"
+            "</span>"
+        )
+        info_label.set_xalign(0)
+        info_label.set_line_wrap(True)
+        info_label.set_margin_start(8)
+        info_label.set_margin_bottom(6)
+        self.pack_start(info_label, False, False, 0)
+
+        self.refresh()
+
+    def refresh(self):
+        """Reload model list from config."""
+        self.store.clear()
+        self.manager.load()
+        default = self.manager.get_default_model()
+        models = self.manager.get_models()
+
+        default_name = models.get(default, {}).get("name", default)
+        self.default_label.set_markup(
+            f'<span foreground="{CATPPUCCIN["subtext0"]}">'
+            f"Default: </span>"
+            f'<span foreground="{CATPPUCCIN["yellow"]}">'
+            f"{default_name}</span>"
+        )
+
+        # Sort: enabled first, then alphabetically
+        sorted_ids = sorted(
+            models.keys(),
+            key=lambda m: (not models[m].get("enabled", False), m),
+        )
+
+        for mid in sorted_ids:
+            info = models[mid]
+            star = " \u2605 " if mid == default else "   "
+            name = f"{info.get('name', mid)}  ({mid})"
+            self.store.append([info.get("enabled", False), star, name, mid])
+
+    def _on_save_key(self, btn):
+        key = self.key_entry.get_text().strip()
+        self.manager.set_api_key(key)
+
+    def _on_toggle(self, renderer, path):
+        it = self.store.get_iter(path)
+        enabled = not self.store[it][0]
+        model_id = self.store[it][3]
+        self.store[it][0] = enabled
+        self.manager.set_model_enabled(model_id, enabled)
+
+    def _on_set_default(self, btn):
+        sel = self.tree.get_selection()
+        model, it = sel.get_selected()
+        if not it:
+            return
+        model_id = self.store[it][3]
+        self.manager.set_default_model(model_id)
+        self.refresh()
+
+    def _on_add_model(self, btn):
+        dlg = Gtk.Dialog(
+            title="Add Model",
+            transient_for=self.app,
+            modal=True,
+            destroy_with_parent=True,
+        )
+        dlg.add_buttons(
+            Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+            Gtk.STOCK_OK, Gtk.ResponseType.OK,
+        )
+        box = dlg.get_content_area()
+        box.set_border_width(12)
+        box.set_spacing(8)
+
+        lbl_id = Gtk.Label(label="Model ID (e.g. google/gemini-2.5-pro):")
+        lbl_id.set_xalign(0)
+        box.add(lbl_id)
+        entry_id = Gtk.Entry()
+        entry_id.set_placeholder_text("provider/model-name")
+        box.add(entry_id)
+
+        lbl_name = Gtk.Label(label="Display Name:")
+        lbl_name.set_xalign(0)
+        box.add(lbl_name)
+        entry_name = Gtk.Entry()
+        entry_name.set_placeholder_text("Model Name")
+        box.add(entry_name)
+
+        dlg.show_all()
+
+        while True:
+            resp = dlg.run()
+            if resp != Gtk.ResponseType.OK:
+                break
+            mid = entry_id.get_text().strip()
+            name = entry_name.get_text().strip() or mid
+            if not mid:
+                continue
+            self.manager.add_model(mid, name)
+            self.refresh()
+            break
+        dlg.destroy()
+
+    def _on_remove_model(self, btn):
+        sel = self.tree.get_selection()
+        model, it = sel.get_selected()
+        if not it:
+            return
+        model_id = self.store[it][3]
+        self.manager.remove_model(model_id)
+        self.refresh()
+
+    def _on_fetch_models(self, btn):
+        """Fetch available models from OpenRouter in background thread."""
+        api_key = self.manager.get_api_key()
+        if not api_key:
+            dlg = Gtk.MessageDialog(
+                transient_for=self.app,
+                message_type=Gtk.MessageType.WARNING,
+                buttons=Gtk.ButtonsType.OK,
+                text="Set an API key first.",
+            )
+            dlg.run()
+            dlg.destroy()
+            return
+
+        btn.set_sensitive(False)
+        btn.set_label("Fetching...")
+
+        def fetch():
+            try:
+                req = urllib.request.Request(
+                    "https://openrouter.ai/api/v1/models",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                )
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    data = json.loads(resp.read().decode())
+                models = data.get("data", [])
+                GLib.idle_add(self._show_model_picker, models)
+            except Exception as e:
+                GLib.idle_add(self._fetch_error, str(e))
+            finally:
+                GLib.idle_add(self._fetch_done)
+
+        threading.Thread(target=fetch, daemon=True).start()
+
+    def _fetch_done(self):
+        self.btn_fetch.set_sensitive(True)
+        self.btn_fetch.set_label("Fetch Models from OpenRouter")
+
+    def _fetch_error(self, msg):
+        dlg = Gtk.MessageDialog(
+            transient_for=self.app,
+            message_type=Gtk.MessageType.ERROR,
+            buttons=Gtk.ButtonsType.OK,
+            text=f"Fetch failed: {msg}",
+        )
+        dlg.run()
+        dlg.destroy()
+
+    def _show_model_picker(self, models):
+        """Show dialog for selecting models from OpenRouter catalog."""
+        dlg = Gtk.Dialog(
+            title="Select Models from OpenRouter",
+            transient_for=self.app,
+            modal=True,
+        )
+        dlg.set_default_size(550, 500)
+        dlg.add_buttons(
+            Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+            "Add Selected", Gtk.ResponseType.OK,
+        )
+
+        box = dlg.get_content_area()
+        box.set_spacing(4)
+
+        # Search entry
+        search = Gtk.SearchEntry()
+        search.set_placeholder_text("Filter models...")
+        search.set_margin_start(8)
+        search.set_margin_end(8)
+        search.set_margin_top(4)
+        box.pack_start(search, False, False, 0)
+
+        # Info label
+        info = Gtk.Label()
+        info.set_markup(
+            f'<span size="small" foreground="{CATPPUCCIN["overlay1"]}">'
+            f"{len(models)} models available. Check ones to add.</span>"
+        )
+        info.set_xalign(0)
+        info.set_margin_start(8)
+        box.pack_start(info, False, False, 0)
+
+        # Model list: selected(bool), name(str), id(str), pricing(str)
+        pick_store = Gtk.ListStore(bool, str, str, str)
+        existing = set(self.manager.get_models().keys())
+
+        for m in sorted(models, key=lambda x: x.get("id", "")):
+            mid = m.get("id", "")
+            name = m.get("name", mid)
+            pricing = m.get("pricing", {})
+            price_str = ""
+            if pricing:
+                try:
+                    pp = float(pricing.get("prompt", "0")) * 1_000_000
+                    cp = float(pricing.get("completion", "0")) * 1_000_000
+                    price_str = f"${pp:.2f} / ${cp:.2f} per 1M"
+                except (ValueError, TypeError):
+                    pass
+            pick_store.append([mid in existing, name, mid, price_str])
+
+        # Filterable model
+        filter_model = pick_store.filter_new()
+
+        def visible_func(model, it, _data):
+            text = search.get_text().lower()
+            if not text:
+                return True
+            return text in model[it][1].lower() or text in model[it][2].lower()
+
+        filter_model.set_visible_func(visible_func)
+        search.connect("search-changed", lambda _: filter_model.refilter())
+
+        tree = Gtk.TreeView(model=filter_model)
+        tree.set_headers_visible(True)
+
+        toggle = Gtk.CellRendererToggle()
+
+        def on_pick_toggle(_renderer, path):
+            real_it = filter_model.convert_iter_to_child_iter(
+                filter_model.get_iter(path)
+            )
+            pick_store[real_it][0] = not pick_store[real_it][0]
+
+        toggle.connect("toggled", on_pick_toggle)
+        col_sel = Gtk.TreeViewColumn("", toggle, active=0)
+        col_sel.set_min_width(30)
+        tree.append_column(col_sel)
+
+        cell_name = Gtk.CellRendererText()
+        cell_name.set_property("ellipsize", Pango.EllipsizeMode.END)
+        col_name = Gtk.TreeViewColumn("Model", cell_name, text=1)
+        col_name.set_expand(True)
+        col_name.set_sort_column_id(1)
+        tree.append_column(col_name)
+
+        cell_id = Gtk.CellRendererText()
+        cell_id.set_property("ellipsize", Pango.EllipsizeMode.END)
+        col_id = Gtk.TreeViewColumn("ID", cell_id, text=2)
+        col_id.set_min_width(150)
+        tree.append_column(col_id)
+
+        cell_price = Gtk.CellRendererText()
+        col_price = Gtk.TreeViewColumn("Price", cell_price, text=3)
+        col_price.set_min_width(130)
+        tree.append_column(col_price)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        scroll.add(tree)
+        box.pack_start(scroll, True, True, 0)
+
+        dlg.show_all()
+
+        if dlg.run() == Gtk.ResponseType.OK:
+            added = 0
+            it = pick_store.get_iter_first()
+            while it:
+                if pick_store[it][0]:
+                    mid = pick_store[it][2]
+                    name = pick_store[it][1]
+                    if mid not in existing:
+                        self.manager.add_model(mid, name, enabled=True)
+                        added += 1
+                it = pick_store.iter_next(it)
+            if added:
+                self.refresh()
+
+        dlg.destroy()
+
 
 # ─── BTerminalApp ─────────────────────────────────────────────────────────────
 
@@ -3441,6 +4525,9 @@ class BTerminalApp(Gtk.Window):
         self.ctx_panel = CtxManagerPanel(self)
         self.sidebar_stack.add_titled(self.ctx_panel, "ctx", "Ctx")
 
+        self.consult_panel = ConsultPanel(self)
+        self.sidebar_stack.add_titled(self.consult_panel, "consult", "Consult")
+
         switcher = Gtk.StackSwitcher()
         switcher.set_stack(self.sidebar_stack)
         switcher.set_halign(Gtk.Align.FILL)
@@ -3460,15 +4547,15 @@ class BTerminalApp(Gtk.Window):
 
         paned.set_position(250)
 
-        # Auto-refresh ctx panel when switching to it
-        self.sidebar_stack.connect(
-            "notify::visible-child",
-            lambda s, _: (
+        # Auto-refresh panels when switching to them
+        def _on_sidebar_switch(stack, _param):
+            child = stack.get_visible_child()
+            if child is self.ctx_panel:
                 self.ctx_panel.refresh()
-                if s.get_visible_child() is self.ctx_panel
-                else None
-            ),
-        )
+            elif child is self.consult_panel:
+                self.consult_panel.refresh()
+
+        self.sidebar_stack.connect("notify::visible-child", _on_sidebar_switch)
 
         # Keyboard shortcuts
         self.connect("key-press-event", self._on_key_press)
@@ -3612,11 +4699,17 @@ class BTerminalApp(Gtk.Window):
                 term.copy_clipboard_format(Vte.Format.TEXT)
             return True
 
-        # Ctrl+Shift+V: paste
+        # Ctrl+Shift+V: paste (delegate to tab for image handling)
         if mod == (ctrl | shift) and event.keyval in (Gdk.KEY_V, Gdk.KEY_v):
-            term = self._get_current_terminal()
-            if term:
-                term.paste_clipboard()
+            idx = self.notebook.get_current_page()
+            if idx >= 0:
+                tab = self.notebook.get_nth_page(idx)
+                if isinstance(tab, TerminalTab):
+                    clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+                    if clipboard.wait_is_image_available():
+                        tab._paste_clipboard_image_path()
+                        return True
+                    tab.terminal.paste_clipboard()
             return True
 
         # Ctrl+PageUp: previous tab

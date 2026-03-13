@@ -40,8 +40,9 @@ mkdir -p "$INSTALL_DIR" "$BIN_DIR" "$CONFIG_DIR" "$CTX_DIR" "$ICON_DIR"
 
 cp "$SCRIPT_DIR/bterminal.py" "$INSTALL_DIR/bterminal.py"
 cp "$SCRIPT_DIR/ctx" "$INSTALL_DIR/ctx"
+cp "$SCRIPT_DIR/consult" "$INSTALL_DIR/consult"
 cp "$SCRIPT_DIR/bterminal.svg" "$ICON_DIR/bterminal.svg"
-chmod +x "$INSTALL_DIR/bterminal.py" "$INSTALL_DIR/ctx"
+chmod +x "$INSTALL_DIR/bterminal.py" "$INSTALL_DIR/ctx" "$INSTALL_DIR/consult"
 
 # ─── Symlinks ──────────────────────────────────────────────────────────
 
@@ -49,9 +50,11 @@ echo "[3/5] Creating symlinks in $BIN_DIR..."
 
 ln -sf "$INSTALL_DIR/bterminal.py" "$BIN_DIR/bterminal"
 ln -sf "$INSTALL_DIR/ctx" "$BIN_DIR/ctx"
+ln -sf "$INSTALL_DIR/consult" "$BIN_DIR/consult"
 
 echo "  bterminal -> $INSTALL_DIR/bterminal.py"
 echo "  ctx       -> $INSTALL_DIR/ctx"
+echo "  consult   -> $INSTALL_DIR/consult"
 
 # ─── Init ctx database ────────────────────────────────────────────────
 
@@ -89,6 +92,9 @@ echo "  bterminal"
 echo ""
 echo "Context manager:"
 echo "  ctx --help"
+echo ""
+echo "Consult external AI models:"
+echo "  consult --help"
 echo ""
 echo "Make sure $BIN_DIR is in your PATH."
 echo "If not, add to ~/.bashrc:"
