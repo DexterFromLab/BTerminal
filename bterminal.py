@@ -1485,9 +1485,10 @@ class CtxSetupWizard(Gtk.Dialog):
             f"Konsultacje z zewn\u0119trznymi modelami AI (OpenRouter): consult \"pytanie\"\n"
             f"Dost\u0119pne modele i opcje: consult\n"
             f"\n"
-            f"Dost\u0119pne narz\u0119dzie 'tasks' \u2014 lista zada\u0144 zarz\u0105dzana przez u\u017cytkownika.\n"
-            f"NIE pobieraj ani nie wykonuj zada\u0144 z listy samodzielnie.\n"
-            f"Je\u015bli system auto-trigger wy\u015ble Ci polecenie z list\u0105 zada\u0144 \u2014 wtedy wykonuj.\n"
+            f"Dostępne narzędzie 'tasks' — ZEWNĘTRZNY CLI tool uruchamiany w Bash (NIE wbudowany TaskCreate/TaskList).\n"
+            f"NIE pobieraj ani nie wykonuj zadań z listy samodzielnie.\n"
+            f"Jeśli system auto-trigger wyśle Ci polecenie z listą zadań — wtedy wykonuj.\n"
+            f"Po każdym wykonanym zadaniu MUSISZ oznaczyć je jako done: tasks done <project> <task_id>\n"
             f"Pomoc: tasks --help"
         )
         self.success = True
@@ -1910,9 +1911,10 @@ class TerminalTab(Gtk.Box):
         if prompt and project_dir and "tasks" not in prompt:
             prompt += (
                 f"\n\n"
-                f"Dost\u0119pne narz\u0119dzie 'tasks' \u2014 lista zada\u0144 zarz\u0105dzana przez u\u017cytkownika.\n"
-                f"NIE pobieraj ani nie wykonuj zada\u0144 z listy samodzielnie.\n"
-                f"Je\u015bli system auto-trigger wy\u015ble Ci polecenie z list\u0105 zada\u0144 \u2014 wtedy wykonuj.\n"
+                f"Dostępne narzędzie 'tasks' — ZEWNĘTRZNY CLI tool uruchamiany w Bash (NIE wbudowany TaskCreate/TaskList).\n"
+                f"NIE pobieraj ani nie wykonuj zadań z listy samodzielnie.\n"
+                f"Jeśli system auto-trigger wyśle Ci polecenie z listą zadań — wtedy wykonuj.\n"
+                f"Po każdym wykonanym zadaniu MUSISZ oznaczyć je jako done: tasks done <project> <task_id>\n"
                 f"Pomoc: tasks --help"
             )
         prompt_arg = ""
@@ -2117,9 +2119,10 @@ class TerminalTab(Gtk.Box):
 
             # Trigger: feed task instruction to Claude Code terminal
             message = (
-                f"[AUTO-TRIGGER] Sprawd\u017a list\u0119 zada\u0144: tasks context {self._task_project} "
-                f"— wykonaj nast\u0119pne otwarte zadanie, po zako\u0144czeniu oznacz: "
-                f"tasks done {self._task_project} <task_id>\r"
+                f"[AUTO-TRIGGER] Jeśli wykonałeś wcześniej zadania i nie oznaczyłeś ich — "
+                f"najpierw zamknij je: tasks done {self._task_project} <task_id> (w Bash). "
+                f"Następnie sprawdź: tasks context {self._task_project} — wykonaj następne otwarte zadanie. "
+                f"Po zakończeniu MUSISZ oznaczyć: tasks done {self._task_project} <task_id>\r"
             )
             self.terminal.feed_child(message.encode())
 
@@ -5309,9 +5312,10 @@ class TaskListPanel(Gtk.Box):
             tab = self.app.notebook.get_nth_page(i)
             if isinstance(tab, TerminalTab) and tab._task_project == project:
                 message = (
-                    f"[AUTO-TRIGGER] Sprawdź listę zadań: tasks context {project} "
-                    f"— wykonaj następne otwarte zadanie, po zakończeniu oznacz: "
-                    f"tasks done {project} <task_id>\r"
+                    f"[AUTO-TRIGGER] Jeśli wykonałeś wcześniej zadania i nie oznaczyłeś ich — "
+                    f"najpierw zamknij je: tasks done {project} <task_id> (w Bash). "
+                    f"Następnie sprawdź: tasks context {project} — wykonaj następne otwarte zadanie. "
+                    f"Po zakończeniu MUSISZ oznaczyć: tasks done {project} <task_id>\r"
                 )
                 tab.terminal.feed_child(message.encode())
                 return
