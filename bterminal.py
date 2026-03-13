@@ -331,21 +331,31 @@ class ClaudeSessionManager:
 
 
 class ConsultManager:
-    """Manage OpenRouter consult configuration (API key, models)."""
+    """Manage consult configuration (API key, models from OpenRouter & Claude Code)."""
+
+    CLAUDE_CODE_MODELS = {
+        "claude-code/opus": {"name": "Claude Opus 4.6", "enabled": True, "source": "claude-code"},
+        "claude-code/sonnet": {"name": "Claude Sonnet 4.6", "enabled": True, "source": "claude-code"},
+        "claude-code/haiku": {"name": "Claude Haiku 4.5", "enabled": True, "source": "claude-code"},
+    }
 
     DEFAULT_CONFIG = {
         "api_key": "",
         "default_model": "google/gemini-2.5-pro",
         "models": {
-            "google/gemini-2.5-pro": {"enabled": True, "name": "Gemini 2.5 Pro"},
-            "openai/gpt-4o": {"enabled": True, "name": "GPT-4o"},
-            "openai/o3-mini": {"enabled": True, "name": "o3-mini"},
-            "deepseek/deepseek-r1": {"enabled": True, "name": "DeepSeek R1"},
-            "anthropic/claude-sonnet-4": {"enabled": False, "name": "Claude Sonnet 4"},
+            "google/gemini-2.5-pro": {"enabled": True, "name": "Gemini 2.5 Pro", "source": "openrouter"},
+            "openai/gpt-4o": {"enabled": True, "name": "GPT-4o", "source": "openrouter"},
+            "openai/o3-mini": {"enabled": True, "name": "o3-mini", "source": "openrouter"},
+            "deepseek/deepseek-r1": {"enabled": True, "name": "DeepSeek R1", "source": "openrouter"},
+            "anthropic/claude-sonnet-4": {"enabled": False, "name": "Claude Sonnet 4", "source": "openrouter"},
             "meta-llama/llama-4-maverick": {
                 "enabled": False,
                 "name": "Llama 4 Maverick",
+                "source": "openrouter",
             },
+            "claude-code/opus": {"enabled": True, "name": "Claude Opus 4.6", "source": "claude-code"},
+            "claude-code/sonnet": {"enabled": True, "name": "Claude Sonnet 4.6", "source": "claude-code"},
+            "claude-code/haiku": {"enabled": True, "name": "Claude Haiku 4.5", "source": "claude-code"},
         },
     }
 
@@ -359,11 +369,26 @@ class ConsultManager:
             try:
                 with open(CONSULT_CONFIG_FILE) as f:
                     self.config = json.load(f)
+                self._ensure_claude_code_models()
                 return
             except (json.JSONDecodeError, IOError):
                 pass
         self.config = json.loads(json.dumps(self.DEFAULT_CONFIG))
         self.save()
+
+    def _ensure_claude_code_models(self):
+        """Ensure Claude Code models exist and are enabled in config."""
+        models = self.config.setdefault("models", {})
+        changed = False
+        for mid, info in self.CLAUDE_CODE_MODELS.items():
+            if mid not in models:
+                models[mid] = dict(info)
+                changed = True
+            elif not models[mid].get("enabled", False):
+                models[mid]["enabled"] = True
+                changed = True
+        if changed:
+            self.save()
 
     def save(self):
         fd, tmp = tempfile.mkstemp(dir=CONFIG_DIR, suffix=".tmp")
@@ -402,9 +427,9 @@ class ConsultManager:
             models[model_id]["enabled"] = enabled
             self.save()
 
-    def add_model(self, model_id, name="", enabled=True):
+    def add_model(self, model_id, name="", enabled=True, source="openrouter"):
         models = self.config.setdefault("models", {})
-        models[model_id] = {"name": name or model_id, "enabled": enabled}
+        models[model_id] = {"name": name or model_id, "enabled": enabled, "source": source}
         self.save()
 
     def remove_model(self, model_id):
@@ -412,6 +437,24 @@ class ConsultManager:
         models.pop(model_id, None)
         if self.config.get("default_model") == model_id:
             self.config["default_model"] = ""
+        self.save()
+
+    def get_project_preset(self, project_dir):
+        """Return tribunal preset for a project dir, or None."""
+        presets = self.config.get("tribunal_projects", {})
+        return presets.get(project_dir)
+
+    def save_project_preset(self, project_dir, preset):
+        """Save tribunal preset for a project dir."""
+        if "tribunal_projects" not in self.config:
+            self.config["tribunal_projects"] = {}
+        self.config["tribunal_projects"][project_dir] = preset
+        self.save()
+
+    def delete_project_preset(self, project_dir):
+        """Remove tribunal preset for a project dir."""
+        presets = self.config.get("tribunal_projects", {})
+        presets.pop(project_dir, None)
         self.save()
 
 
@@ -4238,6 +4281,38 @@ class ConsultPanel(Gtk.Box):
         rounds_box.pack_start(self.single_pass_check, False, False, 4)
         self.pack_start(rounds_box, False, False, 0)
 
+        # Project directory
+        proj_lbl = Gtk.Label()
+        proj_lbl.set_markup(
+            f'<span foreground="{CATPPUCCIN["subtext0"]}">Project dir:</span>'
+        )
+        proj_lbl.set_xalign(0)
+        proj_lbl.set_margin_start(8)
+        self.pack_start(proj_lbl, False, False, 0)
+
+        proj_box = Gtk.Box(spacing=4)
+        proj_box.set_border_width(6)
+        self.project_combo = Gtk.ComboBoxText()
+        self.project_combo.set_hexpand(True)
+        self.project_combo.connect("changed", self._on_project_combo_changed)
+        proj_box.pack_start(self.project_combo, True, True, 0)
+        self.pack_start(proj_box, False, False, 0)
+
+        dir_entry_box = Gtk.Box(spacing=4)
+        dir_entry_box.set_border_width(6)
+        dir_entry_box.set_margin_top(0)
+        self.project_dir_entry = Gtk.Entry()
+        self.project_dir_entry.set_placeholder_text("Override path or pick from dropdown")
+        dir_entry_box.pack_start(self.project_dir_entry, True, True, 0)
+        browse_btn = Gtk.Button(label="...")
+        browse_btn.set_tooltip_text("Browse")
+        browse_btn.get_style_context().add_class("sidebar-btn")
+        browse_btn.connect("clicked", self._on_browse_project_dir)
+        dir_entry_box.pack_start(browse_btn, False, False, 0)
+        self.pack_start(dir_entry_box, False, False, 0)
+
+        self._refresh_project_combo()
+
         # Problem text
         problem_lbl = Gtk.Label()
         problem_lbl.set_markup(
@@ -4261,9 +4336,14 @@ class ConsultPanel(Gtk.Box):
         problem_scroll.add(self.problem_text)
         self.pack_start(problem_scroll, False, False, 0)
 
-        # Run button
+        # Run + Save buttons
         run_box = Gtk.Box(spacing=4)
         run_box.set_border_width(6)
+        self.btn_save_preset = Gtk.Button(label="Save")
+        self.btn_save_preset.set_tooltip_text("Save tribunal settings for selected project")
+        self.btn_save_preset.get_style_context().add_class("sidebar-btn")
+        self.btn_save_preset.connect("clicked", self._on_save_preset)
+        run_box.pack_start(self.btn_save_preset, False, False, 0)
         self.btn_debate = Gtk.Button(label="Run Debate")
         self.btn_debate.get_style_context().add_class("sidebar-btn")
         self.btn_debate.connect("clicked", self._on_run_debate)
@@ -4300,16 +4380,22 @@ class ConsultPanel(Gtk.Box):
             f"{default_name}</span>"
         )
 
-        # Sort: enabled first, then alphabetically
+        # Sort: enabled first, then by source (openrouter first), then alphabetically
         sorted_ids = sorted(
             models.keys(),
-            key=lambda m: (not models[m].get("enabled", False), m),
+            key=lambda m: (
+                not models[m].get("enabled", False),
+                0 if models[m].get("source", "openrouter") == "openrouter" else 1,
+                m,
+            ),
         )
 
         for mid in sorted_ids:
             info = models[mid]
             star = " \u2605 " if mid == default else "   "
-            name = f"{info.get('name', mid)}  ({mid})"
+            source = info.get("source", "openrouter")
+            src_tag = "[CC]" if source == "claude-code" else "[OR]"
+            name = f"{src_tag} {info.get('name', mid)}  ({mid})"
             self.store.append([info.get("enabled", False), star, name, mid])
 
         # Refresh tribunal dropdowns
@@ -4323,8 +4409,10 @@ class ConsultPanel(Gtk.Box):
             saved = tribunal_cfg.get(f"{role}_model", "")
             active_idx = 0
             for i, mid in enumerate(enabled_models):
+                source = models[mid].get("source", "openrouter")
+                src_tag = "[CC]" if source == "claude-code" else "[OR]"
                 name = models[mid].get("name", mid)
-                combo.append(mid, f"{name}")
+                combo.append(mid, f"{src_tag} {name}")
                 if mid == saved:
                     active_idx = i
             if enabled_models:
@@ -4332,6 +4420,9 @@ class ConsultPanel(Gtk.Box):
 
         max_rounds = tribunal_cfg.get("max_rounds", 3)
         self.rounds_spin.set_value(max_rounds)
+
+        # Refresh project dropdown
+        self._refresh_project_combo()
 
     def _on_save_key(self, btn):
         key = self.key_entry.get_text().strip()
@@ -4343,6 +4434,7 @@ class ConsultPanel(Gtk.Box):
         model_id = self.store[it][3]
         self.store[it][0] = enabled
         self.manager.set_model_enabled(model_id, enabled)
+        self.refresh()
 
     def _on_set_default(self, btn):
         sel = self.tree.get_selection()
@@ -4406,6 +4498,92 @@ class ConsultPanel(Gtk.Box):
         self.manager.remove_model(model_id)
         self.refresh()
 
+    def _refresh_project_combo(self):
+        """Populate project dropdown from Claude sessions with project_dir."""
+        self.project_combo.remove_all()
+        self.project_combo.append("", "(none)")
+        seen = set()
+        for s in self.app.claude_manager.all():
+            pdir = s.get("project_dir", "").strip()
+            if pdir and pdir not in seen:
+                seen.add(pdir)
+                name = s.get("name", "") or os.path.basename(pdir.rstrip("/"))
+                self.project_combo.append(pdir, f"{name}  ({pdir})")
+        self.project_combo.set_active(0)
+
+    def _on_project_combo_changed(self, combo):
+        """When a project is selected from dropdown, fill the entry and load preset."""
+        pdir = combo.get_active_id() or ""
+        self.project_dir_entry.set_text(pdir)
+        if pdir:
+            self._load_project_preset(pdir)
+
+    def _load_project_preset(self, project_dir):
+        """Load saved tribunal settings for the given project dir into UI."""
+        preset = self.manager.get_project_preset(project_dir)
+        if not preset:
+            return
+        for role, combo in self.tribunal_combos.items():
+            saved = preset.get(f"{role}_model", "")
+            if saved:
+                combo.set_active_id(saved)
+        if "max_rounds" in preset:
+            self.rounds_spin.set_value(preset["max_rounds"])
+        if "single_pass" in preset:
+            self.single_pass_check.set_active(preset["single_pass"])
+
+    def _on_save_preset(self, btn):
+        """Save current tribunal settings for the selected project."""
+        pdir = self.project_dir_entry.get_text().strip()
+        if not pdir:
+            dlg = Gtk.MessageDialog(
+                transient_for=self.app,
+                message_type=Gtk.MessageType.WARNING,
+                buttons=Gtk.ButtonsType.OK,
+                text="Select a project directory first.",
+            )
+            dlg.run()
+            dlg.destroy()
+            return
+
+        models = {}
+        for role, combo in self.tribunal_combos.items():
+            mid = combo.get_active_id()
+            if mid:
+                models[f"{role}_model"] = mid
+
+        preset = {
+            **models,
+            "max_rounds": int(self.rounds_spin.get_value()),
+            "single_pass": self.single_pass_check.get_active(),
+        }
+        self.manager.save_project_preset(pdir, preset)
+
+    def _on_browse_project_dir(self, btn):
+        """Open file chooser for project directory."""
+        dlg = Gtk.FileChooserDialog(
+            title="Select project directory",
+            parent=self.app,
+            action=Gtk.FileChooserAction.SELECT_FOLDER,
+        )
+        dlg.add_buttons(
+            Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+            Gtk.STOCK_OPEN, Gtk.ResponseType.OK,
+        )
+        current = self.project_dir_entry.get_text().strip()
+        if current and os.path.isdir(current):
+            dlg.set_current_folder(current)
+        if dlg.run() == Gtk.ResponseType.OK:
+            self.project_dir_entry.set_text(dlg.get_filename())
+        dlg.destroy()
+
+    def _get_debate_project_dir(self):
+        """Return project dir for debate: entry overrides combo, fallback to HOME."""
+        path = self.project_dir_entry.get_text().strip()
+        if path and os.path.isdir(path):
+            return path
+        return os.environ.get("HOME", "/")
+
     def _on_run_debate(self, btn):
         """Launch a tribunal debate in a new terminal tab."""
         buf = self.problem_text.get_buffer()
@@ -4416,17 +4594,6 @@ class ConsultPanel(Gtk.Box):
                 message_type=Gtk.MessageType.WARNING,
                 buttons=Gtk.ButtonsType.OK,
                 text="Enter a problem statement first.",
-            )
-            dlg.run()
-            dlg.destroy()
-            return
-
-        if not self.manager.get_api_key():
-            dlg = Gtk.MessageDialog(
-                transient_for=self.app,
-                message_type=Gtk.MessageType.WARNING,
-                buttons=Gtk.ButtonsType.OK,
-                text="Set an API key first.",
             )
             dlg.run()
             dlg.destroy()
@@ -4450,16 +4617,36 @@ class ConsultPanel(Gtk.Box):
             dlg.destroy()
             return
 
-        # Save tribunal config
+        # Check API key only if any OpenRouter models are used
+        needs_api_key = any(
+            not mid.startswith("claude-code/") for mid in models.values()
+        )
+        if needs_api_key and not self.manager.get_api_key():
+            dlg = Gtk.MessageDialog(
+                transient_for=self.app,
+                message_type=Gtk.MessageType.WARNING,
+                buttons=Gtk.ButtonsType.OK,
+                text="Set an API key first (needed for OpenRouter models).",
+            )
+            dlg.run()
+            dlg.destroy()
+            return
+
+        # Save tribunal config (global + per-project)
         self.manager.load()
         if "tribunal" not in self.manager.config:
             self.manager.config["tribunal"] = {}
         self.manager.config["tribunal"]["analyst_model"] = models["analyst"]
         self.manager.config["tribunal"]["advocate_model"] = models["advocate"]
         self.manager.config["tribunal"]["critic_model"] = models["critic"]
-        cfg["tribunal"]["arbiter_model"] = models["arbiter"]
-        cfg["tribunal"]["max_rounds"] = int(self.rounds_spin.get_value())
+        self.manager.config["tribunal"]["arbiter_model"] = models["arbiter"]
+        self.manager.config["tribunal"]["max_rounds"] = int(self.rounds_spin.get_value())
         self.manager.save()
+
+        # Auto-save per-project preset
+        pdir = self.project_dir_entry.get_text().strip()
+        if pdir:
+            self._on_save_preset(None)
 
         # Build command
         rounds = int(self.rounds_spin.get_value())
@@ -4487,9 +4674,11 @@ class ConsultPanel(Gtk.Box):
         self.app.notebook.set_current_page(idx)
         self.app.notebook.set_tab_reorderable(tab, True)
 
+        project_dir = self._get_debate_project_dir()
+
         tab.terminal.spawn_async(
             Vte.PtyFlags.DEFAULT,
-            os.environ.get("HOME", "/"),
+            project_dir,
             ["/bin/bash", "-c", script],
             None,
             GLib.SpawnFlags.DEFAULT,
@@ -4661,7 +4850,7 @@ class ConsultPanel(Gtk.Box):
                     mid = pick_store[it][2]
                     name = pick_store[it][1]
                     if mid not in existing:
-                        self.manager.add_model(mid, name, enabled=True)
+                        self.manager.add_model(mid, name, enabled=True, source="openrouter")
                         added += 1
                 it = pick_store.iter_next(it)
             if added:

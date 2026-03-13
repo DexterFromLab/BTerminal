@@ -25,16 +25,22 @@ CONFIG_FILE = os.path.join(CONFIG_DIR, "consult.json")
 OPENROUTER_API = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_MODELS_API = "https://openrouter.ai/api/v1/models"
 
+CLAUDE_CODE_MODELS = {
+    "claude-code/opus": {"name": "Claude Opus 4.6", "alias": "opus", "source": "claude-code"},
+    "claude-code/sonnet": {"name": "Claude Sonnet 4.6", "alias": "sonnet", "source": "claude-code"},
+    "claude-code/haiku": {"name": "Claude Haiku 4.5", "alias": "haiku", "source": "claude-code"},
+}
+
 DEFAULT_CONFIG = {
     "api_key": "",
     "default_model": "google/gemini-2.5-pro",
     "models": {
-        "google/gemini-2.5-pro": {"enabled": True, "name": "Gemini 2.5 Pro"},
-        "openai/gpt-4o": {"enabled": True, "name": "GPT-4o"},
-        "openai/o3-mini": {"enabled": True, "name": "o3-mini"},
-        "deepseek/deepseek-r1": {"enabled": True, "name": "DeepSeek R1"},
-        "anthropic/claude-sonnet-4": {"enabled": False, "name": "Claude Sonnet 4"},
-        "meta-llama/llama-4-maverick": {"enabled": False, "name": "Llama 4 Maverick"},
+        "google/gemini-2.5-pro": {"enabled": True, "name": "Gemini 2.5 Pro", "source": "openrouter"},
+        "openai/gpt-4o": {"enabled": True, "name": "GPT-4o", "source": "openrouter"},
+        "openai/o3-mini": {"enabled": True, "name": "o3-mini", "source": "openrouter"},
+        "deepseek/deepseek-r1": {"enabled": True, "name": "DeepSeek R1", "source": "openrouter"},
+        "anthropic/claude-sonnet-4": {"enabled": False, "name": "Claude Sonnet 4", "source": "openrouter"},
+        "meta-llama/llama-4-maverick": {"enabled": False, "name": "Llama 4 Maverick", "source": "openrouter"},
     },
     "tribunal": {
         "analyst_model": "",
@@ -50,7 +56,18 @@ def load_config():
     if os.path.isfile(CONFIG_FILE):
         try:
             with open(CONFIG_FILE) as f:
-                return json.load(f)
+                cfg = json.load(f)
+            # Ensure Claude Code models exist
+            models = cfg.setdefault("models", {})
+            changed = False
+            for mid, info in CLAUDE_CODE_MODELS.items():
+                if mid not in models:
+                    models[mid] = dict(info, enabled=False)
+                    changed = True
+            if changed:
+                with open(CONFIG_FILE, "w") as f:
+                    json.dump(cfg, f, indent=2)
+            return cfg
         except (json.JSONDecodeError, IOError):
             pass
     os.makedirs(CONFIG_DIR, exist_ok=True)
@@ -105,6 +122,56 @@ def call_openrouter(api_key, model, system_prompt, user_prompt):
     text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
     usage = data.get("usage", {})
     return text, usage
+
+
+# ── Claude Code API call ────────────────────────────────────────────────
+
+
+def is_claude_code_model(model_id):
+    """Check if model ID refers to a Claude Code local model."""
+    return model_id.startswith("claude-code/")
+
+
+def get_claude_alias(model_id):
+    """Get Claude CLI alias from model ID (e.g. 'claude-code/opus' -> 'opus')."""
+    info = CLAUDE_CODE_MODELS.get(model_id)
+    if info:
+        return info["alias"]
+    return model_id.split("/", 1)[-1]
+
+
+def call_claude_code(model_id, system_prompt, user_prompt):
+    """Call Claude Code CLI. Returns (text, usage_dict)."""
+    import subprocess
+
+    alias = get_claude_alias(model_id)
+    full_prompt = f"{system_prompt}\n\n{user_prompt}" if system_prompt else user_prompt
+
+    env = os.environ.copy()
+    env.pop("CLAUDECODE", None)
+
+    result = subprocess.run(
+        ["claude", "-p", "--model", alias, full_prompt],
+        capture_output=True, text=True, timeout=300, env=env,
+    )
+
+    if result.returncode != 0:
+        raise RuntimeError(f"Claude Code error: {result.stderr.strip()}")
+
+    text = result.stdout.strip()
+    # Claude Code CLI doesn't report token usage, estimate roughly
+    usage = {
+        "prompt_tokens": len(full_prompt) // 4,
+        "completion_tokens": len(text) // 4,
+    }
+    return text, usage
+
+
+def call_model(api_key, model, system_prompt, user_prompt):
+    """Dispatch to the right API based on model source."""
+    if is_claude_code_model(model):
+        return call_claude_code(model, system_prompt, user_prompt)
+    return call_openrouter(api_key, model, system_prompt, user_prompt)
 
 
 # ── JSON extraction ─────────────────────────────────────────────────────
@@ -562,9 +629,10 @@ def log(msg):
 
 def run_agent(api_key, role, model, user_prompt):
     """Call agent and parse JSON response. Returns (parsed_dict, usage)."""
-    log(f"{role.title()} ({model})...")
+    source = "Claude Code" if is_claude_code_model(model) else "OpenRouter"
+    log(f"{role.title()} ({model} [{source}])...")
     start = time.time()
-    text, usage = call_openrouter(api_key, model, SYSTEM_PROMPTS[role], user_prompt)
+    text, usage = call_model(api_key, model, SYSTEM_PROMPTS[role], user_prompt)
     elapsed = time.time() - start
     log(f"{role.title()} done ({elapsed:.1f}s)")
 
@@ -577,7 +645,9 @@ def run_agent(api_key, role, model, user_prompt):
 
 def debate(problem, analyst_model, advocate_model, critic_model, arbiter_model,
            max_rounds=3, single_pass=False, output_dir=".tribunal"):
-    api_key = get_api_key()
+    all_models = [analyst_model, advocate_model, critic_model, arbiter_model]
+    needs_openrouter = any(not is_claude_code_model(m) for m in all_models)
+    api_key = get_api_key() if needs_openrouter else ""
     start_time = time.time()
 
     # Resolve models
@@ -764,16 +834,17 @@ def debate(problem, analyst_model, advocate_model, critic_model, arbiter_model,
 
 def ask(question, model=None, files=None, system_prompt=None):
     cfg = load_config()
-    api_key = cfg.get("api_key", "")
-    if not api_key:
-        print(
-            "Error: No API key. Set it in BTerminal Consult tab "
-            "or edit ~/.config/bterminal/consult.json",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
     model = model or cfg.get("default_model", "google/gemini-2.5-pro")
+
+    if not is_claude_code_model(model):
+        api_key = cfg.get("api_key", "")
+        if not api_key:
+            print(
+                "Error: No API key. Set it in BTerminal Consult tab "
+                "or edit ~/.config/bterminal/consult.json",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     content = question or ""
 
@@ -800,10 +871,24 @@ def ask(question, model=None, files=None, system_prompt=None):
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": content})
 
-    payload = json.dumps({"model": model, "messages": messages, "stream": True}).encode()
-
     model_name = cfg.get("models", {}).get(model, {}).get("name", model)
-    print(f"[{model_name} — {model}]", file=sys.stderr)
+    source = "Claude Code" if is_claude_code_model(model) else "OpenRouter"
+    print(f"[{model_name} — {model} ({source})]", file=sys.stderr)
+
+    # Claude Code models use CLI directly
+    if is_claude_code_model(model):
+        combined = content
+        if system_prompt:
+            combined = f"{system_prompt}\n\n{content}"
+        try:
+            text, _ = call_claude_code(model, "", combined)
+            print(text)
+        except Exception as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+        return
+
+    payload = json.dumps({"model": model, "messages": messages, "stream": True}).encode()
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -864,7 +949,9 @@ def list_models():
     for mid in sorted(enabled):
         info = enabled[mid]
         star = "  [default]" if mid == default else ""
-        print(f"  {mid} — {info.get('name', mid)}{star}")
+        source = info.get("source", "openrouter")
+        src_tag = "[CC]" if source == "claude-code" else "[OR]"
+        print(f"  {src_tag} {mid} — {info.get('name', mid)}{star}")
 
     disabled = {k: v for k, v in models.items() if not v.get("enabled")}
     if disabled:
