@@ -1,6 +1,6 @@
 # BTerminal
 
-GTK 3 terminal with SSH & Claude Code session management, macros, and a cross-session context database. Catppuccin Mocha theme.
+GTK 3 terminal with SSH & Claude Code session management, macros, cross-session context database, AI model consultation via OpenRouter, and task management with auto-trigger. Catppuccin Mocha theme.
 
 ![BTerminal](screenshot.png)
 
@@ -14,6 +14,19 @@ GTK 3 terminal with SSH & Claude Code session management, macros, and a cross-se
 - **Session colors** — 10 Catppuccin accent colors for quick visual identification
 - **Sudo askpass** — temporary helper for Claude Code sudo mode: password entered once, auto-cleanup on exit
 - **Catppuccin Mocha** — full theme across terminal, sidebar, tabs, dialogs and scrollbars
+
+### Consult (AI Models)
+
+- **Consult CLI** — query external AI models via OpenRouter from the terminal (`consult 'question'`)
+- **Consult panel** — sidebar tab for model management: enable/disable models, set default, fetch available models from OpenRouter
+- **Pipe support** — pipe any output to consult for analysis (`cat log.txt | consult 'what went wrong?'`)
+- **File context** — attach files to queries (`consult -f code.py 'review this'`)
+
+### Task Management
+
+- **Tasks CLI** — per-project task lists (`tasks add project "description"`, `tasks done project id`)
+- **Task List panel** — sidebar tab for browsing and managing tasks per project
+- **Auto-trigger** — automatically trigger Claude Code sessions to pick up and execute pending tasks
 
 ### Context Manager
 
@@ -33,7 +46,7 @@ cd BTerminal
 The installer will:
 1. Install system dependencies (python3-gi, GTK3, VTE)
 2. Copy files to `~/.local/share/bterminal/`
-3. Create symlinks: `bterminal` and `ctx` in `~/.local/bin/`
+3. Create symlinks: `bterminal`, `ctx`, and `consult` in `~/.local/bin/`
 4. Initialize context database at `~/.claude-context/context.db`
 5. Add desktop entry and icon to application menu
 
@@ -93,6 +106,32 @@ Before ending session: ctx summary myproject "<what was done>"
 
 Claude Code reads `CLAUDE.md` automatically and will maintain the context database.
 
+## Consult
+
+`consult` queries external AI models via OpenRouter API.
+
+```bash
+consult 'question'                   # Ask the default model
+consult -m gpt-4 'question'         # Ask a specific model
+consult -f code.py 'review this'    # Attach a file for context
+cat log.txt | consult 'what failed?' # Pipe input for analysis
+consult models                       # List available models
+```
+
+Configuration: `~/.config/bterminal/consult.json` (API key and model settings).
+
+## Tasks
+
+`tasks` manages per-project task lists for Claude Code sessions.
+
+```bash
+tasks list myproject                 # Show all tasks
+tasks context myproject              # Show tasks + next task instructions
+tasks add myproject "description"    # Add a task
+tasks done myproject <task_id>       # Mark task as done
+tasks --help                         # Full help
+```
+
 ## Configuration
 
 Config files in `~/.config/bterminal/`:
@@ -101,6 +140,7 @@ Config files in `~/.config/bterminal/`:
 |------|-------------|
 | `sessions.json` | SSH sessions and macros |
 | `claude_sessions.json` | Claude Code session configs |
+| `consult.json` | Consult API key and model settings |
 
 Context database: `~/.claude-context/context.db`
 
