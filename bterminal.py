@@ -1455,7 +1455,18 @@ class CtxSetupWizard(Gtk.Dialog):
                         f'consult -m model_id "question"            # ask specific model\n'
                         f'consult -f file.py "review this code"     # include file\n'
                         f"consult                                   # show available models\n"
-                        f"```\n"
+                        f"```\n\n"
+                        f"## Task management (CLI tool)\n\n"
+                        f"IMPORTANT: Use the `tasks` CLI tool via Bash — NOT the built-in TaskCreate/TaskUpdate/TaskList tools.\n"
+                        f"The built-in task tools are a different system. Always use `tasks` in Bash.\n\n"
+                        f"```bash\n"
+                        f"tasks list {name}                           # show all tasks\n"
+                        f"tasks context {name}                        # show tasks + next task instructions\n"
+                        f'tasks add {name} "description"              # add a task\n'
+                        f"tasks done {name} <task_id>                 # mark task as done\n"
+                        f"tasks --help                                # full help\n"
+                        f"```\n\n"
+                        f"Do NOT pick up tasks on your own. Only execute tasks when the auto-trigger system sends you a command.\n"
                     )
             except IOError as e:
                 self.lbl_status.set_markup(

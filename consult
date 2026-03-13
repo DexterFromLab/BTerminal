@@ -15,6 +15,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -150,10 +151,13 @@ def call_claude_code(model_id, system_prompt, user_prompt):
     env = os.environ.copy()
     env.pop("CLAUDECODE", None)
 
-    result = subprocess.run(
-        ["claude", "-p", "--model", alias, full_prompt],
-        capture_output=True, text=True, timeout=300, env=env,
-    )
+    try:
+        result = subprocess.run(
+            ["claude", "-p", "--model", alias, full_prompt],
+            capture_output=True, text=True, timeout=600, env=env,
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"Claude Code timeout (10min) — prompt too large or model too slow")
 
     if result.returncode != 0:
         raise RuntimeError(f"Claude Code error: {result.stderr.strip()}")
@@ -410,14 +414,14 @@ def critic_prompt(problem, problem_frame, solutions, targeted, prev_objections=N
     ctx = {"problemFrame": problem_frame, "solutions": solutions, "targeted": targeted}
     if prev_objections:
         ctx["previousObjections"] = [
-            {"id": o["id"], "targetSolutionId": o["targetSolutionId"],
-             "category": o["category"], "argument": o["argument"]}
+            {"id": o.get("id", "?"), "targetSolutionId": o.get("targetSolutionId", "?"),
+             "category": o.get("category", "?"), "argument": (o.get("argument") or "")[:200]}
             for o in prev_objections
         ]
     if prev_defenses:
         ctx["previousDefenses"] = [
-            {"objectionId": d["objectionId"], "verdict": d["verdict"],
-             "counterArgument": d["counterArgument"][:200]}
+            {"objectionId": d.get("objectionId", "?"), "verdict": d.get("verdict", "?"),
+             "counterArgument": (d.get("counterArgument") or "")[:200]}
             for d in prev_defenses
         ]
     ctx_str = json.dumps(ctx, indent=2)
@@ -466,11 +470,11 @@ Produce a JSON object with:
 
 def extract_delta(new_objections, all_objections):
     existing_ids = {o["id"] for o in all_objections}
-    existing_args = {o["argument"].lower()[:80] for o in all_objections}
+    existing_args = {(o.get("argument") or "").lower()[:80] for o in all_objections}
     return [
         o for o in new_objections
         if o["id"] not in existing_ids
-        and o["argument"].lower()[:80] not in existing_args
+        and (o.get("argument") or "").lower()[:80] not in existing_args
     ]
 
 
@@ -627,14 +631,67 @@ def log(msg):
     print(f"[tribunal] {msg}", file=sys.stderr)
 
 
-def run_agent(api_key, role, model, user_prompt):
+class Spinner:
+    """Animated spinner showing elapsed time during long operations."""
+
+    FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+    def __init__(self, message):
+        self._message = message
+        self._stop = threading.Event()
+        self._thread = None
+
+    def start(self):
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._spin, daemon=True)
+        self._thread.start()
+
+    def _spin(self):
+        start = time.time()
+        i = 0
+        while not self._stop.is_set():
+            elapsed = time.time() - start
+            frame = self.FRAMES[i % len(self.FRAMES)]
+            sys.stderr.write(f"\r[tribunal] {self._message} {frame} {elapsed:.0f}s")
+            sys.stderr.flush()
+            i += 1
+            self._stop.wait(0.1)
+
+    def stop(self, final_message=None):
+        self._stop.set()
+        if self._thread:
+            self._thread.join()
+        sys.stderr.write("\r\033[K")
+        if final_message:
+            sys.stderr.write(f"[tribunal] {final_message}\n")
+        sys.stderr.flush()
+
+
+def run_agent(api_key, role, model, user_prompt, retries=1):
     """Call agent and parse JSON response. Returns (parsed_dict, usage)."""
     source = "Claude Code" if is_claude_code_model(model) else "OpenRouter"
-    log(f"{role.title()} ({model} [{source}])...")
-    start = time.time()
-    text, usage = call_model(api_key, model, SYSTEM_PROMPTS[role], user_prompt)
-    elapsed = time.time() - start
-    log(f"{role.title()} done ({elapsed:.1f}s)")
+    label = f"{role.title()} ({model} [{source}])"
+
+    for attempt in range(retries + 1):
+        spinner = Spinner(label)
+        spinner.start()
+        start = time.time()
+        try:
+            text, usage = call_model(api_key, model, SYSTEM_PROMPTS[role], user_prompt)
+        except RuntimeError as e:
+            elapsed = time.time() - start
+            if attempt < retries:
+                spinner.stop(f"{role.title()} FAILED ({elapsed:.1f}s) — retrying...")
+                continue
+            spinner.stop(f"{role.title()} FAILED ({elapsed:.1f}s) — {e}")
+            return None, {"prompt_tokens": 0, "completion_tokens": 0}
+        except Exception:
+            elapsed = time.time() - start
+            spinner.stop(f"{role.title()} FAILED ({elapsed:.1f}s)")
+            raise
+        elapsed = time.time() - start
+        spinner.stop(f"{role.title()} done ({elapsed:.1f}s)")
+        break
 
     parsed = extract_json(text)
     if parsed is None:
@@ -685,8 +742,27 @@ def debate(problem, analyst_model, advocate_model, critic_model, arbiter_model,
         a["cost"] += cost
         a["calls"] += 1
 
+    # ── ANSI colors ──
+    C_BOLD = "\033[1m"
+    C_DIM = "\033[2m"
+    C_CYAN = "\033[36m"
+    C_GREEN = "\033[32m"
+    C_YELLOW = "\033[33m"
+    C_RED = "\033[31m"
+    C_MAGENTA = "\033[35m"
+    C_RESET = "\033[0m"
+
+    def section(title):
+        width = 60
+        print(f"\n{C_CYAN}{C_BOLD}{'─' * width}", file=sys.stderr)
+        print(f"  {title}", file=sys.stderr)
+        print(f"{'─' * width}{C_RESET}\n", file=sys.stderr)
+
+    def bullet(text, indent=2):
+        print(f"{' ' * indent}{C_DIM}•{C_RESET} {text}", file=sys.stderr)
+
     # ── Phase 0: Analyst ──
-    log("Phase 0: Analyst — framing the problem")
+    section("Phase 0: ANALYST — framing the problem")
     result, usage = run_agent(api_key, "analyst", analyst_model, analyst_prompt(problem))
     track("analyst", analyst_model, usage)
 
@@ -699,22 +775,67 @@ def debate(problem, analyst_model, advocate_model, critic_model, arbiter_model,
                          "constraints": [], "criteria": ["correctness"], "context": ""}
         perspectives = ["pragmatist", "innovator"]
 
-    log(f"Analyst done — {len(perspectives)} perspectives")
+    # Show analyst output
+    stmt = problem_frame.get("statement", problem)
+    print(f"\n  {C_BOLD}Problem frame:{C_RESET}", file=sys.stderr)
+    # Wrap long statement
+    for i in range(0, len(stmt), 76):
+        print(f"    {stmt[i:i+76]}", file=sys.stderr)
+
+    dims = problem_frame.get("dimensions", [])
+    if dims:
+        print(f"\n  {C_BOLD}Dimensions ({len(dims)}):{C_RESET}", file=sys.stderr)
+        for d in dims:
+            label = d[:90] + "..." if len(d) > 90 else d
+            bullet(label, indent=4)
+
+    constraints = problem_frame.get("constraints", [])
+    if constraints:
+        print(f"\n  {C_BOLD}Constraints ({len(constraints)}):{C_RESET}", file=sys.stderr)
+        for c in constraints:
+            label = c[:90] + "..." if len(c) > 90 else c
+            bullet(label, indent=4)
+
+    criteria = problem_frame.get("criteria", [])
+    if criteria:
+        print(f"\n  {C_BOLD}Success criteria ({len(criteria)}):{C_RESET}", file=sys.stderr)
+        for c in criteria:
+            label = c[:90] + "..." if len(c) > 90 else c
+            bullet(label, indent=4)
+
+    print(f"\n  {C_BOLD}Perspectives:{C_RESET} {', '.join(perspectives)}", file=sys.stderr)
     print(file=sys.stderr)
 
     # ── Phase 1: Advocate generates solutions ──
-    log("Phase 1: Advocates — generating solutions")
+    section("Phase 1: ADVOCATE — generating solutions")
     result, usage = run_agent(api_key, "advocate", advocate_model,
                               advocate_generate_prompt(problem, problem_frame, perspectives))
     track("advocate", advocate_model, usage)
 
     solutions = result.get("solutions", []) if result else []
-    log(f"Advocates done — {len(solutions)} solutions")
-    print(file=sys.stderr)
 
     if not solutions:
         log("ERROR: No solutions generated, aborting")
         return
+
+    # Show solutions
+    for s in solutions:
+        sid = s.get("id", "?")
+        title = s.get("title", "Untitled")
+        conf = s.get("confidence", 0)
+        persp = s.get("perspective", "?")
+        print(f"\n  {C_GREEN}{C_BOLD}{sid}: {title}{C_RESET}", file=sys.stderr)
+        print(f"    {C_DIM}Perspective:{C_RESET} {persp}  |  {C_DIM}Confidence:{C_RESET} {confidence_bar(conf)}", file=sys.stderr)
+        approach = s.get("approach", "")
+        if approach:
+            short = approach[:200] + "..." if len(approach) > 200 else approach
+            print(f"    {short}", file=sys.stderr)
+        tradeoffs = s.get("tradeoffs", [])
+        if tradeoffs:
+            print(f"    {C_YELLOW}Tradeoffs:{C_RESET}", file=sys.stderr)
+            for t in tradeoffs[:4]:
+                bullet(t[:100], indent=6)
+    print(file=sys.stderr)
 
     # ── Phase 2+: Adversarial rounds ──
     all_objections = []
@@ -728,7 +849,8 @@ def debate(problem, analyst_model, advocate_model, critic_model, arbiter_model,
         is_full = round_num <= 1
 
         # Critic
-        log(f"Round {round_num}: Critic ({'full' if is_full else 'targeted'})")
+        mode = "full" if is_full else "targeted"
+        section(f"Round {round_num}: CRITIC — {mode} critique")
         result, usage = run_agent(
             api_key, "critic", critic_model,
             critic_prompt(problem, problem_frame, solutions, not is_full,
@@ -743,17 +865,34 @@ def debate(problem, analyst_model, advocate_model, critic_model, arbiter_model,
         if not delta:
             converged = True
             convergence_round = round_num
-            log(f"Round {round_num}: No new objections — converged")
+            print(f"\n  {C_GREEN}{C_BOLD}✓ No new objections — debate converged{C_RESET}", file=sys.stderr)
             rounds.append({"round": round_num, "agent": "critic", "objections": 0, "defenses": 0})
             break
 
         all_objections.extend(delta)
-        log(f"Round {round_num}: {len(delta)} new objections")
         rounds.append({"round": round_num, "agent": "critic",
                        "objections": len(delta), "defenses": 0})
 
+        # Show objections
+        for o in delta:
+            oid = o.get("id", "?")
+            target = o.get("targetSolutionId", "?")
+            cat = o.get("category", "?")
+            sev = o.get("severity", "?")
+            arg = (o.get("argument") or "")[:150]
+            sev_color = C_RED if sev in ("CRITICAL", "HIGH") else C_YELLOW
+            print(f"\n  {sev_color}{severity_badge(sev)}{C_RESET} {C_BOLD}{oid}{C_RESET} → {target} ({cat})", file=sys.stderr)
+            print(f"    {arg}", file=sys.stderr)
+            mit = o.get("suggestedMitigation")
+            if mit:
+                print(f"    {C_DIM}Mitigation: {mit[:120]}{C_RESET}", file=sys.stderr)
+
+        assessment = result.get("overallAssessment", "") if result else ""
+        if assessment:
+            print(f"\n  {C_BOLD}Assessment:{C_RESET} {assessment[:300]}", file=sys.stderr)
+
         # Advocate defense
-        log(f"Round {round_num}: Advocate defense")
+        section(f"Round {round_num}: ADVOCATE — defense")
         result, usage = run_agent(
             api_key, "advocate", advocate_model,
             advocate_defend_prompt(problem, problem_frame, solutions, delta))
@@ -762,10 +901,27 @@ def debate(problem, analyst_model, advocate_model, critic_model, arbiter_model,
         defenses = result.get("defenses", []) if result else []
         if result and result.get("revisedSolutions"):
             solutions = result["revisedSolutions"]
+            log(f"Solutions revised based on concessions")
         all_defenses.extend(defenses)
-        log(f"Round {round_num}: {len(defenses)} defenses")
         rounds.append({"round": round_num, "agent": "advocate",
                        "objections": 0, "defenses": len(defenses)})
+
+        # Show defenses
+        for d in defenses:
+            did = d.get("objectionId", "?")
+            verdict = d.get("verdict", "?")
+            ca = (d.get("counterArgument") or "")[:150]
+            if verdict == "DEFENDED":
+                icon, color = "✓", C_GREEN
+            elif verdict == "CONCEDED":
+                icon, color = "✗", C_RED
+            else:
+                icon, color = "~", C_YELLOW
+            print(f"\n  {color}{icon} {did}{C_RESET} → {C_BOLD}{verdict}{C_RESET}", file=sys.stderr)
+            print(f"    {ca}", file=sys.stderr)
+            mod = d.get("modification")
+            if mod:
+                print(f"    {C_MAGENTA}Modification: {mod[:150]}{C_RESET}", file=sys.stderr)
 
         print(file=sys.stderr)
         round_num += 1
@@ -773,7 +929,7 @@ def debate(problem, analyst_model, advocate_model, critic_model, arbiter_model,
             break
 
     # ── Final: Arbiter ──
-    log("Final: Arbiter synthesis")
+    section("FINAL: ARBITER — synthesis & ruling")
     result, usage = run_agent(
         api_key, "arbiter", arbiter_model,
         arbiter_prompt(problem, problem_frame, solutions, all_objections,
@@ -781,9 +937,53 @@ def debate(problem, analyst_model, advocate_model, critic_model, arbiter_model,
     track("arbiter", arbiter_model, usage)
 
     ruling = result
+
+    # Show ruling
     if ruling:
         conf = ruling.get("confidence", 0)
-        log(f"Arbiter done — confidence: {conf*100:.0f}%")
+        print(f"\n  {C_BOLD}Confidence:{C_RESET} {confidence_bar(conf)}", file=sys.stderr)
+
+        rec = ruling.get("recommendation", "")
+        if rec:
+            print(f"\n  {C_GREEN}{C_BOLD}Recommendation:{C_RESET}", file=sys.stderr)
+            for i in range(0, len(rec), 76):
+                print(f"    {rec[i:i+76]}", file=sys.stderr)
+
+        rationale = ruling.get("rationale", "")
+        if rationale:
+            print(f"\n  {C_BOLD}Rationale:{C_RESET}", file=sys.stderr)
+            for i in range(0, len(rationale), 76):
+                print(f"    {rationale[i:i+76]}", file=sys.stderr)
+
+        dissent = ruling.get("dissent")
+        if dissent:
+            print(f"\n  {C_YELLOW}{C_BOLD}Dissent:{C_RESET} {dissent}", file=sys.stderr)
+
+        unresolved = ruling.get("unresolved", [])
+        if unresolved:
+            print(f"\n  {C_BOLD}Unresolved:{C_RESET}", file=sys.stderr)
+            for u in unresolved:
+                bullet(u, indent=4)
+
+        actions = ruling.get("actionItems", [])
+        if actions:
+            print(f"\n  {C_BOLD}Action items:{C_RESET}", file=sys.stderr)
+            for i, a in enumerate(actions, 1):
+                print(f"    {C_GREEN}{i}.{C_RESET} {a}", file=sys.stderr)
+
+        risks = ruling.get("riskMatrix", [])
+        if risks:
+            print(f"\n  {C_BOLD}Risk matrix:{C_RESET}", file=sys.stderr)
+            for r in risks:
+                risk = r.get("risk", "?")
+                lh = r.get("likelihood", "?")
+                imp = r.get("impact", "?")
+                sev_color = C_RED if imp in ("HIGH", "CRITICAL") else C_YELLOW
+                print(f"    {sev_color}▸{C_RESET} {risk} ({C_DIM}likelihood:{C_RESET} {lh}, {C_DIM}impact:{C_RESET} {imp})", file=sys.stderr)
+                mit = r.get("mitigation", "")
+                if mit:
+                    print(f"      {C_DIM}→ {mit[:120]}{C_RESET}", file=sys.stderr)
+
     print(file=sys.stderr)
 
     duration = time.time() - start_time
