@@ -153,7 +153,8 @@ def call_claude_code(model_id, system_prompt, user_prompt):
 
     try:
         result = subprocess.run(
-            ["claude", "-p", "--model", alias, full_prompt],
+            ["claude", "-p", "--model", alias],
+            input=full_prompt,
             capture_output=True, text=True, timeout=600, env=env,
         )
     except subprocess.TimeoutExpired:
@@ -566,7 +567,7 @@ def generate_report(problem, problem_frame, solutions, rounds, all_objections,
         for d in all_defenses:
             v = d.get("verdict", "?")
             icon = {"DEFENDED": "\u2713", "CONCEDED": "\u2717", "PARTIALLY_CONCEDED": "~"}.get(v, "?")
-            ca = d.get("counterArgument", "")[:120]
+            ca = (d.get("counterArgument") or "")[:120]
             lines.append(f"- **{icon} {d['objectionId']}** \u2192 {v}: {ca}")
             if d.get("modification"):
                 lines.append(f"  - *Modification:* {d['modification'][:200]}")
@@ -996,22 +997,12 @@ def debate(problem, analyst_model, advocate_model, critic_model, arbiter_model,
         total_rounds, duration, cost_data, agent_models)
 
     os.makedirs(output_dir, exist_ok=True)
-
-    # Find next available number to avoid overwriting previous results
-    existing_nums = []
-    for f in os.listdir(output_dir):
-        m = re.match(r"tribunal-report-(\d+)", f)
-        if m:
-            existing_nums.append(int(m.group(1)))
-    num = max(existing_nums, default=0) + 1
-    suffix = f"-{num:03d}"
-
-    report_path = os.path.join(output_dir, f"tribunal-report{suffix}.md")
+    report_path = os.path.join(output_dir, "tribunal-report.md")
     with open(report_path, "w") as f:
         f.write(report)
 
     # Also save raw JSON
-    raw_path = os.path.join(output_dir, f"tribunal-data{suffix}.json")
+    raw_path = os.path.join(output_dir, "tribunal-data.json")
     with open(raw_path, "w") as f:
         json.dump({
             "problem": problem_frame, "solutions": solutions,
@@ -1178,6 +1169,7 @@ def print_help():
     print('  consult -s "system prompt" "question"     Custom system prompt')
     print("  consult models                            List enabled models")
     print('  consult debate "problem"                  Multi-model debate')
+    print('  consult debate -f file.py "problem"       Debate with file context')
     print()
     print("Options:")
     print("  -m, --model MODEL    Model ID (default: from config)")
@@ -1186,6 +1178,7 @@ def print_help():
     print("  -h, --help           Show this help")
     print()
     print("Debate options:")
+    print("  -f, --file FILE      Include file(s) as context (repeatable)")
     print("  --analyst MODEL      Model for problem analysis")
     print("  --advocate MODEL     Model for solution generation")
     print("  --critic MODEL       Model for adversarial critique")
@@ -1216,6 +1209,7 @@ def main():
         parser = argparse.ArgumentParser(prog="consult debate", add_help=False)
         parser.add_argument("_debate", nargs=1)  # consume "debate"
         parser.add_argument("problem", nargs="*")
+        parser.add_argument("-f", "--file", action="append", dest="files")
         parser.add_argument("--analyst", default=tribunal_cfg.get("analyst_model") or default_model)
         parser.add_argument("--advocate", default=tribunal_cfg.get("advocate_model") or default_model)
         parser.add_argument("--critic", default=tribunal_cfg.get("critic_model") or default_model)
@@ -1224,10 +1218,28 @@ def main():
         parser.add_argument("--single-pass", action="store_true")
         parser.add_argument("--output", default=".tribunal")
 
-        args = parser.parse_args()
-        problem = " ".join(args.problem) if args.problem else ""
+        args, remaining = parser.parse_known_args()
+        # Collect problem text from both positional and remaining args
+        problem_parts = (args.problem or []) + remaining
+        problem = " ".join(problem_parts)
 
-        if not problem:
+        # Append file contents to problem text
+        if args.files:
+            for fpath in args.files:
+                try:
+                    with open(fpath) as f:
+                        fc = f.read()
+                    problem += f"\n\n--- {fpath} ---\n```\n{fc}\n```"
+                except Exception as e:
+                    print(f"Warning: Cannot read {fpath}: {e}", file=sys.stderr)
+
+        # Append stdin if piped
+        if not sys.stdin.isatty():
+            stdin_data = sys.stdin.read()
+            if stdin_data.strip():
+                problem += f"\n\n--- stdin ---\n```\n{stdin_data}\n```"
+
+        if not problem.strip():
             print("Error: No problem statement provided.", file=sys.stderr)
             print('Usage: consult debate "your problem statement"', file=sys.stderr)
             sys.exit(1)

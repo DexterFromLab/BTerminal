@@ -793,30 +793,29 @@ class MacroDialog(Gtk.Dialog):
 # ─── ClaudeCodeDialog ─────────────────────────────────────────────────────────
 
 
-def _build_intro_prompt(basename):
-    """Build the standard intro prompt for a Claude Code session."""
-    return (
-        f"Wczytaj kontekst projektu poleceniem: ctx get {basename}\n"
-        f"Wykonaj tę komendę i zapoznaj się z kontekstem zanim zaczniesz pracę.\n"
-        f"Kontekst zarządzasz przez: ctx --help\n"
-        f"Ważne odkrycia zapisuj: ctx set {basename} <key> <value>\n"
-        f"Przed zakończeniem sesji: ctx summary {basename} \"<co zrobiliśmy>\"\n"
-        f"\n"
-        f"Konsultacje z zewnętrznymi modelami AI: consult \"pytanie\"\n"
-        f"Konkretny model: consult -m <model_id> \"pytanie\" — ZAWSZE najpierw sprawdź dostępne modele: consult models\n"
-        f"Nazwy modeli to PEŁNE ID z prefixem providera, np. 'google/gemini-2.5-pro', 'openai/gpt-5-codex', 'deepseek/deepseek-r1' — NIE skracaj.\n"
-        f"Dołączanie pliku jako kontekst: consult -f plik.py \"pytanie\"\n"
-        f"Tribunal — debata wielu modeli AI: consult debate \"problem\"\n"
-        f"  Domyślne role: --analyst claude-code/opus --arbiter claude-code/opus\n"
-        f"  Advocate i Critic dobieraj wg potrzeb spośród: openai/gpt-5-codex, deepseek/deepseek-r1, google/gemini-2.5-pro\n"
-        f"  Przykład: consult debate --analyst claude-code/opus --advocate openai/gpt-5-codex --critic deepseek/deepseek-r1 --arbiter claude-code/opus \"problem\"\n"
-        f"\n"
-        f"Dostępne narzędzie 'tasks' — ZEWNĘTRZNY CLI tool uruchamiany w Bash (NIE wbudowany TaskCreate/TaskList).\n"
-        f"NIE pobieraj ani nie wykonuj zadań z listy samodzielnie.\n"
-        f"Jeśli system auto-trigger wyśle Ci polecenie z listą zadań — wtedy wykonuj.\n"
-        f"Po każdym wykonanym zadaniu MUSISZ oznaczyć je jako done: tasks done <project> <task_id>\n"
-        f"Pomoc: tasks --help"
-    )
+def _fetch_ctx_output(project_name):
+    """Run 'ctx get <project>' and return its stdout, or empty string on failure."""
+    try:
+        result = subprocess.run(
+            ["ctx", "get", project_name],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    return ""
+
+
+def _build_intro_prompt(project_name):
+    """Build the standard intro prompt for a Claude Code session.
+
+    Embeds ctx context directly. Tool instructions live in CLAUDE.md (no duplication).
+    """
+    ctx_output = _fetch_ctx_output(project_name)
+    if ctx_output:
+        return f"Kontekst projektu ({project_name}):\n{ctx_output}"
+    return f"Nazwa projektu w ctx/tasks: {project_name}"
 
 
 class ClaudeCodeDialog(Gtk.Dialog):
@@ -1441,24 +1440,23 @@ class CtxSetupWizard(Gtk.Dialog):
                 with open(claude_md, "w") as f:
                     f.write(
                         f"# {name}\n\n"
-                        f"On session start, load context:\n"
-                        f"```bash\n"
-                        f"ctx get {name}\n"
-                        f"```\n\n"
-                        f"Context manager: `ctx --help`\n\n"
+                        f"Context is loaded automatically via intro prompt. No need to run `ctx get` manually.\n\n"
                         f"During work:\n"
                         f"- Save important discoveries: `ctx set {name} <key> <value>`\n"
                         f"- Append to existing: `ctx append {name} <key> <value>`\n"
                         f'- Before ending session: `ctx summary {name} "<what was done>"`\n'
                         f"\n"
-                        f"## External AI consultation (OpenRouter)\n\n"
-                        f"Consult other models (GPT, Gemini, DeepSeek, etc.) for code review, cross-checks, or analysis:\n"
-                        f"```bash\n"
-                        f'consult "question"                        # ask default model\n'
-                        f'consult -m model_id "question"            # ask specific model\n'
-                        f'consult -f file.py "review this code"     # include file\n'
-                        f"consult                                   # show available models\n"
-                        f"```\n\n"
+                        f"## Consult & Tribunal (CLI tools)\n\n"
+                        f"Konsultacje z zewnętrznymi modelami AI: `consult \"pytanie\"`\n"
+                        f"Konkretny model: `consult -m <model_id> \"pytanie\"` — ZAWSZE najpierw sprawdź dostępne modele: `consult models`\n"
+                        f"Nazwy modeli to PEŁNE ID z prefixem providera, np. `google/gemini-2.5-pro`, `openai/gpt-5-codex`, `deepseek/deepseek-r1` — NIE skracaj.\n"
+                        f"Dołączanie pliku jako kontekst: `consult -f plik.py \"pytanie\"`\n"
+                        f"Tribunal — debata wielu modeli AI: `consult debate \"problem\"`\n"
+                        f"  Kontekst pliku: `consult debate -f plik.py \"problem\"`\n"
+                        f"  Domyślne role: `--analyst claude-code/opus --arbiter claude-code/opus`\n"
+                        f"  Advocate i Critic dobieraj wg potrzeb spośród: `openai/gpt-5-codex`, `deepseek/deepseek-r1`, `google/gemini-2.5-pro`\n"
+                        f'  Przykład: `consult debate "problem" --analyst claude-code/opus --advocate openai/gpt-5-codex --critic deepseek/deepseek-r1 --arbiter claude-code/opus`\n'
+                        f"\n"
                         f"## Task management (CLI tool)\n\n"
                         f"IMPORTANT: Use the `tasks` CLI tool via Bash — NOT the built-in TaskCreate/TaskUpdate/TaskList tools.\n"
                         f"The built-in task tools are a different system. Always use `tasks` in Bash.\n\n"
@@ -1897,8 +1895,8 @@ class TerminalTab(Gtk.Box):
         project_dir = config.get("project_dir", "")
         # Build prompt: always start with fresh intro, then append custom part
         if project_dir:
-            basename = os.path.basename(project_dir.rstrip("/"))
-            prompt = _build_intro_prompt(basename)
+            project_name = _resolve_ctx_project_name(project_dir)
+            prompt = _build_intro_prompt(project_name)
             if custom_prompt:
                 prompt += "\n\n" + custom_prompt
         else:
