@@ -5598,8 +5598,26 @@ class BTerminalApp(Gtk.Window):
         self._update_window_title()
 
     def on_tab_child_exited(self, tab):
-        """Called when a terminal's child process exits."""
-        GLib.idle_add(self.close_tab, tab)
+        """Called when a terminal's child process exits.
+
+        Starts a 30-second auto-close timer instead of closing immediately,
+        so the user can read final output. Any keypress cancels the timer.
+        """
+        def _auto_close():
+            tab._dead_timer_id = None
+            self.close_tab(tab)
+            return False
+
+        def _cancel_timer(terminal, event):
+            timer_id = getattr(tab, "_dead_timer_id", None)
+            if timer_id:
+                GLib.source_remove(timer_id)
+                tab._dead_timer_id = None
+            tab._dead_key_handler = None
+            return False
+
+        tab._dead_timer_id = GLib.timeout_add_seconds(30, _auto_close)
+        tab._dead_key_handler = tab.terminal.connect("key-press-event", _cancel_timer)
 
     def update_tab_title(self, tab, title):
         """Update tab label when terminal title changes."""
