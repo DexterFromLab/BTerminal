@@ -790,12 +790,35 @@ def _fetch_ctx_output(project_name):
 def _build_intro_prompt(project_name):
     """Build the standard intro prompt for a Claude Code session.
 
-    Embeds ctx context directly. Tool instructions live in CLAUDE.md (no duplication).
+    Embeds ctx context directly + tool instructions for ctx, consult and tasks.
     """
     ctx_output = _fetch_ctx_output(project_name)
+
+    tools = (
+        f"Kontekst zarządzasz przez: ctx --help\n"
+        f"Ważne odkrycia zapisuj: ctx set {project_name} <key> <value>\n"
+        f"Dołączanie do istniejącego: ctx append {project_name} <key> <value>\n"
+        f'Przed zakończeniem sesji: ctx summary {project_name} "<co zrobiliśmy>"\n'
+        f"\n"
+        f"Konsultacje z zewnętrznymi modelami AI: consult \"pytanie\"\n"
+        f"Konkretny model: consult -m <model_id> \"pytanie\" — ZAWSZE najpierw sprawdź dostępne modele: consult models\n"
+        f"Nazwy modeli to PEŁNE ID z prefixem providera, np. 'google/gemini-2.5-pro', 'openai/gpt-5-codex', 'deepseek/deepseek-r1' — NIE skracaj.\n"
+        f"Dołączanie pliku jako kontekst: consult -f plik.py \"pytanie\"\n"
+        f"Tribunal — debata wielu modeli AI: consult debate \"problem\"\n"
+        f"  Domyślne role: --analyst claude-code/opus --arbiter claude-code/opus\n"
+        f"  Advocate i Critic dobieraj wg potrzeb spośród: openai/gpt-5-codex, deepseek/deepseek-r1, google/gemini-2.5-pro\n"
+        f'  Przykład: consult debate "problem" --analyst claude-code/opus --advocate openai/gpt-5-codex --critic deepseek/deepseek-r1 --arbiter claude-code/opus\n'
+        f"\n"
+        f"Dostępne narzędzie 'tasks' — ZEWNĘTRZNY CLI tool uruchamiany w Bash (NIE wbudowany TaskCreate/TaskList).\n"
+        f"NIE pobieraj ani nie wykonuj zadań z listy samodzielnie.\n"
+        f"Jeśli system auto-trigger wyśle Ci polecenie z listą zadań — wtedy wykonuj.\n"
+        f"Po każdym wykonanym zadaniu MUSISZ oznaczyć je jako done: tasks done {project_name} <task_id>\n"
+        f"Pomoc: tasks --help"
+    )
+
     if ctx_output:
-        return f"Kontekst projektu ({project_name}):\n{ctx_output}"
-    return f"Nazwa projektu w ctx/tasks: {project_name}"
+        return f"Kontekst projektu ({project_name}):\n{ctx_output}\n\n--- Narzędzia ---\n\n{tools}"
+    return f"Nazwa projektu w ctx/tasks: {project_name}\n\n--- Narzędzia ---\n\n{tools}"
 
 
 class ClaudeCodeDialog(Gtk.Dialog):
