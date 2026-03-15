@@ -206,6 +206,24 @@ def _parse_color(hex_str):
     return c
 
 
+def _save_expanded(tree, store, id_col):
+    """Save set of expanded node IDs from a TreeView."""
+    expanded = set()
+    store.foreach(lambda m, path, it: (
+        expanded.add(m.get_value(it, id_col))
+        if tree.row_expanded(path) else None
+    ))
+    return expanded
+
+
+def _restore_expanded(tree, store, id_col, expanded):
+    """Restore expansion state from saved IDs."""
+    def _check(model, path, it):
+        if model.get_value(it, id_col) in expanded:
+            tree.expand_row(path, False)
+    store.foreach(_check)
+
+
 def show_error_dialog(parent, msg):
     """Show a modal error dialog."""
     dlg = Gtk.MessageDialog(
@@ -2362,6 +2380,7 @@ class SessionSidebar(Gtk.Box):
         ])
 
     def refresh(self):
+        expanded = _save_expanded(self.tree, self.store, COL_NAME)
         self.store.clear()
         sessions = self.app.session_manager.all()
 
@@ -2438,7 +2457,10 @@ class SessionSidebar(Gtk.Box):
             for s in claude_ungrouped:
                 self._append_claude_session(None, s)
 
-        self.tree.expand_all()
+        if expanded:
+            _restore_expanded(self.tree, self.store, COL_NAME, expanded)
+        else:
+            self.tree.expand_all()
 
     def _get_selected_session_id(self):
         sel = self.tree.get_selection()
@@ -3474,6 +3496,7 @@ class CtxManagerPanel(Gtk.Box):
 
     def refresh(self):
         """Reload all data from the ctx database."""
+        expanded = _save_expanded(self.tree, self.store, 1)
         self.store.clear()
         self.detail_header.set_text("")
         self.detail_view.get_buffer().set_text("")
@@ -3554,7 +3577,10 @@ class CtxManagerPanel(Gtk.Box):
                 ])
 
         db.close()
-        self.tree.expand_all()
+        if expanded:
+            _restore_expanded(self.tree, self.store, 1, expanded)
+        else:
+            self.tree.expand_all()
 
     def _get_selected_info(self):
         """Returns (project_name, key, row_type) of selected row."""
