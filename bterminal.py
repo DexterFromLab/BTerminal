@@ -208,18 +208,23 @@ def _parse_color(hex_str):
 # ─── SessionManager ──────────────────────────────────────────────────────────
 
 
-class SessionManager:
-    """Zarządzanie zapisanymi sesjami SSH (CRUD + plik JSON)."""
+class JsonListManager:
+    """Generic CRUD manager for a list of dicts stored in a JSON file."""
 
-    def __init__(self):
+    def __init__(self, filepath):
+        self._filepath = filepath
         os.makedirs(CONFIG_DIR, exist_ok=True)
         self.sessions = []
         self.load()
 
+    def validate_entry(self, entry):
+        """Override in subclasses to validate before add/update."""
+        pass
+
     def load(self):
-        if os.path.exists(SESSIONS_FILE):
+        if os.path.exists(self._filepath):
             try:
-                with open(SESSIONS_FILE, "r") as f:
+                with open(self._filepath, "r") as f:
                     self.sessions = json.load(f)
             except (json.JSONDecodeError, IOError):
                 self.sessions = []
@@ -232,13 +237,14 @@ class SessionManager:
         try:
             with os.fdopen(fd, "w") as f:
                 json.dump(self.sessions, f, indent=2)
-            os.replace(tmp, SESSIONS_FILE)
+            os.replace(tmp, self._filepath)
         except Exception:
             if os.path.exists(tmp):
                 os.unlink(tmp)
             raise
 
     def add(self, session):
+        self.validate_entry(session)
         session["id"] = str(uuid.uuid4())
         self.sessions.append(session)
         self.save()
@@ -248,6 +254,7 @@ class SessionManager:
         for i, s in enumerate(self.sessions):
             if s["id"] == session_id:
                 self.sessions[i].update(data)
+                self.validate_entry(self.sessions[i])
                 self.save()
                 return self.sessions[i]
         return None
@@ -266,65 +273,22 @@ class SessionManager:
         return list(self.sessions)
 
 
-# ─── ClaudeSessionManager ────────────────────────────────────────────────────
-
-
-class ClaudeSessionManager:
-    """Zarządzanie zapisanymi konfiguracjami Claude Code (CRUD + plik JSON)."""
+class SessionManager(JsonListManager):
+    """Zarządzanie zapisanymi sesjami SSH."""
 
     def __init__(self):
-        os.makedirs(CONFIG_DIR, exist_ok=True)
-        self.sessions = []
-        self.load()
+        super().__init__(SESSIONS_FILE)
 
-    def load(self):
-        if os.path.exists(CLAUDE_SESSIONS_FILE):
-            try:
-                with open(CLAUDE_SESSIONS_FILE, "r") as f:
-                    self.sessions = json.load(f)
-            except (json.JSONDecodeError, IOError):
-                self.sessions = []
-        else:
-            self.sessions = []
+    def validate_entry(self, entry):
+        if not entry.get("host"):
+            raise ValueError("SSH session requires 'host'")
 
-    def save(self):
-        os.makedirs(CONFIG_DIR, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=CONFIG_DIR, suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w") as f:
-                json.dump(self.sessions, f, indent=2)
-            os.replace(tmp, CLAUDE_SESSIONS_FILE)
-        except Exception:
-            if os.path.exists(tmp):
-                os.unlink(tmp)
-            raise
 
-    def add(self, session):
-        session["id"] = str(uuid.uuid4())
-        self.sessions.append(session)
-        self.save()
-        return session
+class ClaudeSessionManager(JsonListManager):
+    """Zarządzanie zapisanymi konfiguracjami Claude Code."""
 
-    def update(self, session_id, data):
-        for i, s in enumerate(self.sessions):
-            if s["id"] == session_id:
-                self.sessions[i].update(data)
-                self.save()
-                return self.sessions[i]
-        return None
-
-    def delete(self, session_id):
-        self.sessions = [s for s in self.sessions if s["id"] != session_id]
-        self.save()
-
-    def get(self, session_id):
-        for s in self.sessions:
-            if s["id"] == session_id:
-                return s
-        return None
-
-    def all(self):
-        return list(self.sessions)
+    def __init__(self):
+        super().__init__(CLAUDE_SESSIONS_FILE)
 
 
 # ─── ConsultManager ──────────────────────────────────────────────────────────
