@@ -793,6 +793,32 @@ class MacroDialog(Gtk.Dialog):
 # ─── ClaudeCodeDialog ─────────────────────────────────────────────────────────
 
 
+def _build_intro_prompt(basename):
+    """Build the standard intro prompt for a Claude Code session."""
+    return (
+        f"Wczytaj kontekst projektu poleceniem: ctx get {basename}\n"
+        f"Wykonaj tę komendę i zapoznaj się z kontekstem zanim zaczniesz pracę.\n"
+        f"Kontekst zarządzasz przez: ctx --help\n"
+        f"Ważne odkrycia zapisuj: ctx set {basename} <key> <value>\n"
+        f"Przed zakończeniem sesji: ctx summary {basename} \"<co zrobiliśmy>\"\n"
+        f"\n"
+        f"Konsultacje z zewnętrznymi modelami AI: consult \"pytanie\"\n"
+        f"Konkretny model: consult -m <model_id> \"pytanie\" — ZAWSZE najpierw sprawdź dostępne modele: consult models\n"
+        f"Nazwy modeli to PEŁNE ID z prefixem providera, np. 'google/gemini-2.5-pro', 'openai/gpt-5-codex', 'deepseek/deepseek-r1' — NIE skracaj.\n"
+        f"Dołączanie pliku jako kontekst: consult -f plik.py \"pytanie\"\n"
+        f"Tribunal — debata wielu modeli AI: consult debate \"problem\"\n"
+        f"  Domyślne role: --analyst claude-code/opus --arbiter claude-code/opus\n"
+        f"  Advocate i Critic dobieraj wg potrzeb spośród: openai/gpt-5-codex, deepseek/deepseek-r1, google/gemini-2.5-pro\n"
+        f"  Przykład: consult debate --analyst claude-code/opus --advocate openai/gpt-5-codex --critic deepseek/deepseek-r1 --arbiter claude-code/opus \"problem\"\n"
+        f"\n"
+        f"Dostępne narzędzie 'tasks' — ZEWNĘTRZNY CLI tool uruchamiany w Bash (NIE wbudowany TaskCreate/TaskList).\n"
+        f"NIE pobieraj ani nie wykonuj zadań z listy samodzielnie.\n"
+        f"Jeśli system auto-trigger wyśle Ci polecenie z listą zadań — wtedy wykonuj.\n"
+        f"Po każdym wykonanym zadaniu MUSISZ oznaczyć je jako done: tasks done <project> <task_id>\n"
+        f"Pomoc: tasks --help"
+    )
+
+
 class ClaudeCodeDialog(Gtk.Dialog):
     """Dialog konfiguracji sesji Claude Code."""
 
@@ -865,8 +891,8 @@ class ClaudeCodeDialog(Gtk.Dialog):
         self.chk_skip_perms.set_active(True)
         box.pack_start(self.chk_skip_perms, False, False, 0)
 
-        # Initial prompt
-        lbl = Gtk.Label(label="Initial prompt (optional):", halign=Gtk.Align.START)
+        # Custom prompt (appended after standard intro)
+        lbl = Gtk.Label(label="Custom prompt (optional, appended after standard intro):", halign=Gtk.Align.START)
         box.pack_start(lbl, False, False, 0)
 
         scrolled = Gtk.ScrolledWindow()
@@ -943,27 +969,6 @@ class ClaudeCodeDialog(Gtk.Dialog):
             basename = os.path.basename(path.rstrip("/"))
             if not self.entry_name.get_text().strip():
                 self.entry_name.set_text(basename)
-            # Auto-fill prompt with ctx instructions if empty or auto-generated
-            buf = self.textview.get_buffer()
-            start, end = buf.get_bounds()
-            current = buf.get_text(start, end, False).strip()
-            if not current or current.startswith("Wczytaj kontekst"):
-                prompt = (
-                    f"Wczytaj kontekst projektu poleceniem: ctx get {basename}\n"
-                    f"Wykonaj tę komendę i zapoznaj się z kontekstem zanim zaczniesz pracę.\n"
-                    f"Kontekst zarządzasz przez: ctx --help\n"
-                    f"Ważne odkrycia zapisuj: ctx set {basename} <key> <value>\n"
-                    f"Przed zakończeniem sesji: ctx summary {basename} \"<co zrobiliśmy>\"\n"
-                    f"\n"
-                    f"Konsultacje z zewnętrznymi modelami AI (OpenRouter): consult \"pytanie\"\n"
-                    f"Dostępne modele i opcje: consult\n"
-                    f"\n"
-                    f"Dostępne narzędzie 'tasks' — lista zadań zarządzana przez użytkownika.\n"
-                    f"NIE pobieraj ani nie wykonuj zadań z listy samodzielnie.\n"
-                    f"Jeśli system auto-trigger wyśle Ci polecenie z listą zadań — wtedy wykonuj.\n"
-                    f"Pomoc: tasks --help"
-                )
-                buf.set_text(prompt)
             self._update_ctx_status()
         dlg.destroy()
 
@@ -1163,9 +1168,7 @@ def _run_ctx_wizard_if_needed(parent, data):
     if _is_ctx_project_registered(project_name):
         return data
     wizard = CtxSetupWizard(parent, project_dir)
-    if wizard.run_wizard():
-        if not data["prompt"] or data["prompt"].startswith("Wczytaj kontekst"):
-            data["prompt"] = wizard.result_prompt
+    wizard.run_wizard()
     return data
 
 
@@ -1475,22 +1478,7 @@ class CtxSetupWizard(Gtk.Dialog):
                 return False
 
         self.project_name = name
-        self.result_prompt = (
-            f"Wczytaj kontekst projektu poleceniem: ctx get {name}\n"
-            f"Wykonaj t\u0119 komend\u0119 i zapoznaj si\u0119 z kontekstem zanim zaczniesz prac\u0119.\n"
-            f"Kontekst zarz\u0105dzasz przez: ctx --help\n"
-            f"Wa\u017cne odkrycia zapisuj: ctx set {name} <key> <value>\n"
-            f'Przed zako\u0144czeniem sesji: ctx summary {name} "<co zrobili\u015bmy>"\n'
-            f"\n"
-            f"Konsultacje z zewn\u0119trznymi modelami AI (OpenRouter): consult \"pytanie\"\n"
-            f"Dost\u0119pne modele i opcje: consult\n"
-            f"\n"
-            f"Dostępne narzędzie 'tasks' — ZEWNĘTRZNY CLI tool uruchamiany w Bash (NIE wbudowany TaskCreate/TaskList).\n"
-            f"NIE pobieraj ani nie wykonuj zadań z listy samodzielnie.\n"
-            f"Jeśli system auto-trigger wyśle Ci polecenie z listą zadań — wtedy wykonuj.\n"
-            f"Po każdym wykonanym zadaniu MUSISZ oznaczyć je jako done: tasks done <project> <task_id>\n"
-            f"Pomoc: tasks --help"
-        )
+        self.result_prompt = _build_intro_prompt(name)
         self.success = True
         return True
 
@@ -1905,18 +1893,16 @@ class TerminalTab(Gtk.Box):
         if config.get("skip_permissions"):
             flags.append("--dangerously-skip-permissions")
 
-        prompt = config.get("prompt", "")
-        # Dynamically inject task instructions if project has tasks support
+        custom_prompt = config.get("prompt", "")
         project_dir = config.get("project_dir", "")
-        if prompt and project_dir and "tasks" not in prompt:
-            prompt += (
-                f"\n\n"
-                f"Dostępne narzędzie 'tasks' — ZEWNĘTRZNY CLI tool uruchamiany w Bash (NIE wbudowany TaskCreate/TaskList).\n"
-                f"NIE pobieraj ani nie wykonuj zadań z listy samodzielnie.\n"
-                f"Jeśli system auto-trigger wyśle Ci polecenie z listą zadań — wtedy wykonuj.\n"
-                f"Po każdym wykonanym zadaniu MUSISZ oznaczyć je jako done: tasks done <project> <task_id>\n"
-                f"Pomoc: tasks --help"
-            )
+        # Build prompt: always start with fresh intro, then append custom part
+        if project_dir:
+            basename = os.path.basename(project_dir.rstrip("/"))
+            prompt = _build_intro_prompt(basename)
+            if custom_prompt:
+                prompt += "\n\n" + custom_prompt
+        else:
+            prompt = custom_prompt
         prompt_arg = ""
         if prompt:
             escaped = prompt.replace("'", "'\\''")
