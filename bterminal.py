@@ -8,6 +8,7 @@ gi.require_version("Gdk", "3.0")
 
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import tempfile
@@ -1799,21 +1800,24 @@ class _SessionStatsReader:
     """Reads Claude Code JSONL session file for live token/cost stats."""
 
     def __init__(self, project_dir):
-        self._project_dir = project_dir
+        self._project_dir = project_dir.rstrip("/")
         self._start = datetime.now(timezone.utc)
         self._cached = None
 
     def _find_file(self):
         if self._cached and os.path.isfile(self._cached):
             return self._cached
-        key = self._project_dir.replace("/", "-")
+        key = re.sub(r'[^a-zA-Z0-9-]', '-', self._project_dir)
         files = glob.glob(os.path.join(_CLAUDE_PROJECTS_DIR, key, "*.jsonl"))
         if not files:
             return None
         start_epoch = self._start.timestamp()
         recent = [f for f in files if os.path.getmtime(f) >= start_epoch]
-        self._cached = max(recent, key=os.path.getmtime) if recent else max(files, key=os.path.getmtime)
-        return self._cached
+        if recent:
+            self._cached = max(recent, key=os.path.getmtime)
+            return self._cached
+        # Current session's JSONL may not exist yet — return newest but don't cache
+        return max(files, key=os.path.getmtime)
 
     def read(self):
         result = {"model": "", "input": 0, "output": 0, "cache_read": 0,
@@ -1867,6 +1871,8 @@ class SessionStatsBar(Gtk.Box):
         self._reader = _SessionStatsReader(project_dir)
         self._prompt_count = 0
         self._timer = 0
+
+        self.set_size_request(-1, 22)
 
         style = self.get_style_context()
         style.add_class("stats-bar")
@@ -1993,7 +1999,7 @@ class TerminalTab(Gtk.Box):
             if project_dir:
                 self._task_project = _resolve_ctx_project_name(project_dir)
                 self._stats_bar = SessionStatsBar(project_dir)
-                self.pack_start(self._stats_bar, False, False, 0)
+                self.pack_end(self._stats_bar, False, False, 0)
             self.terminal.connect("contents-changed", self._on_contents_changed_tasks)
 
         self.show_all()
