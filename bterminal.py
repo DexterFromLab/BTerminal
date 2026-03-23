@@ -196,6 +196,14 @@ textview.ctx-detail text {{
     background-color: {CATPPUCCIN['crust']};
     color: {CATPPUCCIN['subtext1']};
 }}
+.stats-bar {{
+    background-color: {CATPPUCCIN['mantle']};
+    border-top: 1px solid {CATPPUCCIN['surface0']};
+}}
+.stats-bar label {{
+    color: {CATPPUCCIN['subtext1']};
+    font-size: 10px;
+}}
 """
 
 
@@ -1758,6 +1766,171 @@ class CtxEditDialog(Gtk.Dialog):
         dlg.destroy()
 
 
+# ─── SessionStatsBar (Claude Code session metrics) ───────────────────────────
+
+import glob
+from datetime import datetime, timezone
+
+_STATS_PRICING = {
+    "claude-opus-4-6":   {"input": 15.0,  "output": 75.0,  "cache_read": 1.50,  "cache_write": 18.75},
+    "claude-sonnet-4-6": {"input":  3.0,  "output": 15.0,  "cache_read": 0.30,  "cache_write":  3.75},
+    "claude-haiku-4-5":  {"input":  0.80, "output":  4.0,  "cache_read": 0.08,  "cache_write":  1.00},
+    "claude-opus-4-5":   {"input": 15.0,  "output": 75.0,  "cache_read": 1.50,  "cache_write": 18.75},
+    "claude-sonnet-4-5": {"input":  3.0,  "output": 15.0,  "cache_read": 0.30,  "cache_write":  3.75},
+}
+_STATS_DEFAULT_PRICE = {"input": 3.0, "output": 15.0, "cache_read": 0.30, "cache_write": 3.75}
+_CLAUDE_PROJECTS_DIR = os.path.expanduser("~/.claude/projects")
+
+
+def _fmt_tok(n):
+    if n >= 1_000_000: return f"{n / 1_000_000:.1f}M"
+    if n >= 1_000: return f"{n / 1_000:.1f}K"
+    return str(n)
+
+
+def _fmt_dur(seconds):
+    s = int(seconds)
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    return f"{h}h {m:02d}m" if h else f"{m}m {sec:02d}s"
+
+
+class _SessionStatsReader:
+    """Reads Claude Code JSONL session file for live token/cost stats."""
+
+    def __init__(self, project_dir):
+        self._project_dir = project_dir
+        self._start = datetime.now(timezone.utc)
+        self._cached = None
+
+    def _find_file(self):
+        if self._cached and os.path.isfile(self._cached):
+            return self._cached
+        key = self._project_dir.replace("/", "-")
+        files = glob.glob(os.path.join(_CLAUDE_PROJECTS_DIR, key, "*.jsonl"))
+        if not files:
+            return None
+        start_epoch = self._start.timestamp()
+        recent = [f for f in files if os.path.getmtime(f) >= start_epoch]
+        self._cached = max(recent, key=os.path.getmtime) if recent else max(files, key=os.path.getmtime)
+        return self._cached
+
+    def read(self):
+        result = {"model": "", "input": 0, "output": 0, "cache_read": 0,
+                  "cache_write": 0, "responses": 0, "first_ts": None, "last_ts": None}
+        path = self._find_file()
+        if not path:
+            return result
+        try:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        e = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    ts_str = e.get("timestamp", "")
+                    if ts_str:
+                        try:
+                            ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                            if result["first_ts"] is None or ts < result["first_ts"]:
+                                result["first_ts"] = ts
+                            if result["last_ts"] is None or ts > result["last_ts"]:
+                                result["last_ts"] = ts
+                        except ValueError:
+                            pass
+                    msg = e.get("message", {})
+                    if not isinstance(msg, dict):
+                        continue
+                    if msg.get("role") == "assistant":
+                        result["responses"] += 1
+                        if msg.get("model"):
+                            result["model"] = msg["model"]
+                    usage = msg.get("usage", {})
+                    if usage:
+                        result["input"] += usage.get("input_tokens", 0)
+                        result["output"] += usage.get("output_tokens", 0)
+                        result["cache_read"] += usage.get("cache_read_input_tokens", 0)
+                        result["cache_write"] += usage.get("cache_creation_input_tokens", 0)
+        except OSError:
+            pass
+        return result
+
+
+class SessionStatsBar(Gtk.Box):
+    """Thin status bar showing Claude Code session metrics."""
+
+    def __init__(self, project_dir):
+        super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        self._reader = _SessionStatsReader(project_dir)
+        self._prompt_count = 0
+        self._timer = 0
+
+        style = self.get_style_context()
+        style.add_class("stats-bar")
+
+        self._labels = {}
+        fields = [
+            ("dur",      "⏱ --:--"),     ("s1", " │ "),
+            ("prompts",  "💬 0"),         ("s2", " │ "),
+            ("resp",     "🤖 0"),         ("s3", " │ "),
+            ("tok_in",   "↑ 0"),          ("s3b", " "),
+            ("tok_out",  "↓ 0"),          ("s4", " │ "),
+            ("cache",    "📦 0%"),        ("s5", " │ "),
+            ("cost",     "💰 $0.00"),     ("s6", " │ "),
+            ("tok_h",    "⚡ 0 tok/h"),   ("s7", " │ "),
+            ("model",    ""),
+        ]
+        for key, text in fields:
+            lbl = Gtk.Label(label=text)
+            lbl.set_margin_start(4)
+            lbl.set_margin_end(2)
+            lbl.set_margin_top(2)
+            lbl.set_margin_bottom(2)
+            self._labels[key] = lbl
+            self.pack_start(lbl, False, False, 0)
+
+        self.show_all()
+        self._timer = GLib.timeout_add(5000, self._update)
+
+    def increment_prompt(self):
+        self._prompt_count += 1
+
+    def stop(self):
+        if self._timer:
+            GLib.source_remove(self._timer)
+            self._timer = 0
+
+    def _update(self):
+        s = self._reader.read()
+        M = 1_000_000
+        price = _STATS_PRICING.get(s["model"], _STATS_DEFAULT_PRICE)
+        cost = (s["input"] * price["input"] / M + s["output"] * price["output"] / M
+                + s["cache_read"] * price["cache_read"] / M + s["cache_write"] * price["cache_write"] / M)
+        dur = 0.0
+        if s["first_ts"]:
+            end = s["last_ts"] or datetime.now(timezone.utc)
+            dur = (end - s["first_ts"]).total_seconds()
+        total_tok = s["input"] + s["cache_write"] + s["cache_read"] + s["output"]
+        tok_h = total_tok / (dur / 3600) if dur > 1 else 0
+        total_in = s["input"] + s["cache_write"]
+        cache_pct = int(s["cache_read"] / (total_in + s["cache_read"]) * 100) if (total_in + s["cache_read"]) else 0
+
+        self._labels["dur"].set_text(f"⏱ {_fmt_dur(dur)}")
+        self._labels["prompts"].set_text(f"💬 {self._prompt_count}")
+        self._labels["resp"].set_text(f"🤖 {s['responses']}")
+        self._labels["tok_in"].set_text(f"↑ {_fmt_tok(total_in)}")
+        self._labels["tok_out"].set_text(f"↓ {_fmt_tok(s['output'])}")
+        self._labels["cache"].set_text(f"📦 {cache_pct}%")
+        self._labels["cost"].set_text(f"💰 ${cost:.4f}")
+        self._labels["tok_h"].set_text(f"⚡ {_fmt_tok(int(tok_h))} tok/h")
+        if s["model"]:
+            self._labels["model"].set_text(s["model"].replace("claude-", "").replace("-2024", ""))
+        return True
+
+
 # ─── TerminalTab ──────────────────────────────────────────────────────────────
 
 
@@ -1814,10 +1987,13 @@ class TerminalTab(Gtk.Box):
         # Auto-trigger for task list (Claude Code tabs only)
         self._task_idle_timer = None
         self._task_project = None
+        self._stats_bar = None
         if claude_config:
             project_dir = claude_config.get("project_dir", "")
             if project_dir:
                 self._task_project = _resolve_ctx_project_name(project_dir)
+                self._stats_bar = SessionStatsBar(project_dir)
+                self.pack_start(self._stats_bar, False, False, 0)
             self.terminal.connect("contents-changed", self._on_contents_changed_tasks)
 
         self.show_all()
@@ -2002,6 +2178,10 @@ class TerminalTab(Gtk.Box):
             if idx < self.app.notebook.get_n_pages() - 1:
                 self.app.notebook.set_current_page(idx + 1)
             return True
+
+        # Track Enter key for prompt counter (Claude Code sessions)
+        if self._stats_bar and event.keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            self._stats_bar.increment_prompt()
 
         return False
 
