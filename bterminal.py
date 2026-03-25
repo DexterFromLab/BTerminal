@@ -5302,6 +5302,7 @@ class TaskListPanel(Gtk.Box):
         """Reset all autorun flags on startup so auto-trigger is always OFF."""
         if not os.path.exists(CTX_DB):
             return
+        _ensure_tasks_tables()
         db = sqlite3.connect(CTX_DB)
         db.execute("UPDATE task_config SET autorun = 0 WHERE autorun = 1")
         db.commit()

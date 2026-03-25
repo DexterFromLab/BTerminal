@@ -15,9 +15,37 @@ DESKTOP_DIR="$HOME/.local/share/applications"
 echo "=== BTerminal Installer ==="
 echo ""
 
+# ─── Claude Code ──────────────────────────────────────────────────────
+
+echo "[1/6] Checking Claude Code..."
+
+if command -v claude &>/dev/null; then
+    CLAUDE_VER="$(claude --version 2>/dev/null || echo 'unknown')"
+    echo "  Claude Code already installed: $CLAUDE_VER"
+else
+    echo "  Claude Code not found. Installing via npm..."
+    if ! command -v npm &>/dev/null; then
+        echo "  npm not found. Installing Node.js..."
+        if command -v curl &>/dev/null; then
+            curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash -
+            sudo apt install -y nodejs
+        else
+            sudo apt install -y nodejs npm
+        fi
+    fi
+    # Set up npm prefix for non-root installs
+    NPM_PREFIX="${HOME}/.npm-global"
+    mkdir -p "$NPM_PREFIX"
+    npm config set prefix "$NPM_PREFIX"
+    export PATH="$NPM_PREFIX/bin:$PATH"
+    npm install -g @anthropic-ai/claude-code
+    CLAUDE_VER="$(claude --version 2>/dev/null || echo 'unknown')"
+    echo "  Claude Code installed: $CLAUDE_VER"
+fi
+
 # ─── System dependencies ───────────────────────────────────────────────
 
-echo "[1/5] Checking system dependencies..."
+echo "[2/6] Checking system dependencies..."
 
 MISSING=()
 python3 -c "import gi" 2>/dev/null || MISSING+=("python3-gi")
@@ -27,14 +55,15 @@ python3 -c "import gi; gi.require_version('Vte', '2.91'); from gi.repository imp
 if [ ${#MISSING[@]} -gt 0 ]; then
     echo "  Missing: ${MISSING[*]}"
     echo "  Installing..."
-    sudo apt install -y "${MISSING[@]}"
+    sudo apt-get update -qq
+    sudo apt-get install -y "${MISSING[@]}"
 else
     echo "  All dependencies OK."
 fi
 
 # ─── Install files ─────────────────────────────────────────────────────
 
-echo "[2/5] Installing BTerminal..."
+echo "[3/6] Installing BTerminal..."
 
 mkdir -p "$INSTALL_DIR" "$BIN_DIR" "$CONFIG_DIR" "$CTX_DIR" "$ICON_DIR"
 
@@ -47,7 +76,7 @@ chmod +x "$INSTALL_DIR/bterminal.py" "$INSTALL_DIR/ctx" "$INSTALL_DIR/consult" "
 
 # ─── Symlinks ──────────────────────────────────────────────────────────
 
-echo "[3/5] Creating symlinks in $BIN_DIR..."
+echo "[4/6] Creating symlinks in $BIN_DIR..."
 
 ln -sf "$INSTALL_DIR/bterminal.py" "$BIN_DIR/bterminal"
 ln -sf "$INSTALL_DIR/ctx" "$BIN_DIR/ctx"
@@ -61,18 +90,22 @@ echo "  tasks     -> $INSTALL_DIR/tasks"
 
 # ─── Init ctx database ────────────────────────────────────────────────
 
-echo "[4/5] Initializing context database..."
+echo "[5/6] Initializing context database..."
 
 if [ -f "$CTX_DIR/context.db" ]; then
-    echo "  Database already exists, skipping."
+    echo "  Database already exists, skipping init."
 else
     "$BIN_DIR/ctx" list >/dev/null 2>&1
     echo "  Created $CTX_DIR/context.db"
 fi
 
+# Set default shared context
+"$BIN_DIR/ctx" shared set user_preferences "At the start of each session, tell the user which model you are before beginning work."
+echo "  Shared context: user_preferences set"
+
 # ─── Desktop file ──────────────────────────────────────────────────────
 
-echo "[5/5] Creating desktop entry..."
+echo "[6/6] Creating desktop entry..."
 
 mkdir -p "$DESKTOP_DIR"
 cat > "$DESKTOP_DIR/bterminal.desktop" << EOF
@@ -102,6 +135,5 @@ echo ""
 echo "Task manager:"
 echo "  tasks --help"
 echo ""
-echo "Make sure $BIN_DIR is in your PATH."
-echo "If not, add to ~/.bashrc:"
-echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+echo "Make sure these are in your PATH (add to ~/.bashrc):"
+echo "  export PATH=\"\$HOME/.local/bin:\$HOME/.npm-global/bin:\$PATH\""
