@@ -786,7 +786,7 @@ def _fetch_ctx_output(project_name):
     """Run 'ctx get <project>' and return its stdout, or empty string on failure."""
     try:
         result = subprocess.run(
-            ["ctx", "get", project_name],
+            ["ctx", "get", project_name, "--shared"],
             capture_output=True, text=True, timeout=5,
         )
         if result.returncode == 0 and result.stdout.strip():
