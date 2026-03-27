@@ -103,6 +103,21 @@ window {{
     background-color: {CATPPUCCIN['mantle']};
     border-right: 1px solid {CATPPUCCIN['surface0']};
 }}
+.sidebar * {{
+    min-width: 0;
+}}
+.sidebar button,
+.sidebar combobox,
+.sidebar combobox button,
+.sidebar entry {{
+    min-width: 0;
+    padding: 2px 2px;
+    border: none;
+}}
+.sidebar button label,
+.sidebar label {{
+    min-width: 0;
+}}
 .sidebar-header {{
     background-color: {CATPPUCCIN['crust']};
     padding: 8px 12px;
@@ -116,8 +131,27 @@ window {{
     border: none;
     border-radius: 4px;
     color: {CATPPUCCIN['text']};
-    padding: 4px 10px;
-    min-height: 28px;
+    padding: 4px 4px;
+    min-height: 24px;
+    min-width: 0;
+}}
+.sidebar-tab {{
+    padding: 4px 2px;
+    min-width: 0;
+    min-height: 0;
+    border-radius: 0;
+    border: none;
+    background: {CATPPUCCIN['mantle']};
+    color: {CATPPUCCIN['subtext0']};
+    font-size: 11px;
+    border-bottom: 2px solid transparent;
+}}
+.sidebar-tab:hover {{
+    background: {CATPPUCCIN['surface0']};
+}}
+.sidebar-tab-active {{
+    color: {CATPPUCCIN['blue']};
+    border-bottom: 2px solid {CATPPUCCIN['blue']};
 }}
 .sidebar-btn:hover {{
     background: {CATPPUCCIN['surface1']};
@@ -203,7 +237,7 @@ textview.ctx-detail text {{
 }}
 .stats-bar label {{
     color: {CATPPUCCIN['subtext1']};
-    font-size: 10px;
+    font-size: 13px;
 }}
 """
 
@@ -1872,29 +1906,40 @@ class SessionStatsBar(Gtk.Box):
         self._prompt_count = 0
         self._timer = 0
 
-        self.set_size_request(-1, 22)
+        self.set_size_request(-1, 44)
 
         style = self.get_style_context()
         style.add_class("stats-bar")
 
         self._labels = {}
         fields = [
-            ("dur",      "⏱ --:--"),     ("s1", " │ "),
-            ("prompts",  "💬 0"),         ("s2", " │ "),
-            ("resp",     "🤖 0"),         ("s3", " │ "),
-            ("tok_in",   "↑ 0"),          ("s3b", " "),
-            ("tok_out",  "↓ 0"),          ("s4", " │ "),
-            ("cache",    "📦 0%"),        ("s5", " │ "),
-            ("cost",     "💰 $0.00"),     ("s6", " │ "),
-            ("tok_h",    "⚡ 0 tok/h"),   ("s7", " │ "),
-            ("model",    ""),
+            ("dur",      "⏱ --:--",     "Session duration"),
+            ("s1",       " │ ",          None),
+            ("prompts",  "💬 0",         "Prompts sent"),
+            ("s2",       " │ ",          None),
+            ("resp",     "🤖 0",         "Responses received"),
+            ("s3",       " │ ",          None),
+            ("tok_in",   "↑ 0",          "Input tokens (incl. cache writes)"),
+            ("s3b",      " ",            None),
+            ("tok_out",  "↓ 0",          "Output tokens"),
+            ("s4",       " │ ",          None),
+            ("cache",    "📦 0%",        "Cache hit rate"),
+            ("s5",       " │ ",          None),
+            ("cost",     "💰 $0.00",     "Estimated cost"),
+            ("s6",       " │ ",          None),
+            ("tok_h",    "⚡ 0 tok/h",   "Tokens per hour (throughput)"),
+            ("s7",       " │ ",          None),
+            ("model",    "",             "Model used"),
         ]
-        for key, text in fields:
+        for key, text, tooltip in fields:
             lbl = Gtk.Label(label=text)
             lbl.set_margin_start(4)
             lbl.set_margin_end(2)
-            lbl.set_margin_top(2)
-            lbl.set_margin_bottom(2)
+            lbl.set_margin_top(4)
+            lbl.set_margin_bottom(4)
+            if tooltip:
+                lbl.set_tooltip_text(tooltip)
+                lbl.set_has_tooltip(True)
             self._labels[key] = lbl
             self.pack_start(lbl, False, False, 0)
 
@@ -2477,7 +2522,8 @@ class SessionSidebar(Gtk.Box):
 
         # Header
         header = Gtk.Label(label=f"  {APP_NAME} Sessions")
-        header.set_halign(Gtk.Align.START)
+        header.set_halign(Gtk.Align.FILL)
+        header.set_xalign(0)
         header.get_style_context().add_class("sidebar-header")
         self.pack_start(header, False, False, 0)
 
@@ -2623,17 +2669,8 @@ class SessionSidebar(Gtk.Box):
         # ── Claude Code sessions ──
         claude_sessions = self.app.claude_manager.all()
         if claude_sessions:
-            # Visual separator
-            self.store.append(None, [
-                "",
-                "\u2500" * 26,  # ────────────
-                "",
-                "",
-                CATPPUCCIN["surface2"],
-                Pango.Weight.NORMAL,
-            ])
-            # Section header (bold)
-            self.store.append(None, [
+            # Section header as parent node
+            claude_root = self.store.append(None, [
                 "\U0001F916",  # 🤖
                 "Claude Code",
                 "",
@@ -2652,7 +2689,7 @@ class SessionSidebar(Gtk.Box):
                     claude_ungrouped.append(s)
 
             for folder_name in sorted(claude_folders.keys()):
-                parent = self.store.append(None, [
+                parent = self.store.append(claude_root, [
                     "\U0001F4C1",
                     folder_name,
                     "",
@@ -2664,7 +2701,7 @@ class SessionSidebar(Gtk.Box):
                     self._append_claude_session(parent, s)
 
             for s in claude_ungrouped:
-                self._append_claude_session(None, s)
+                self._append_claude_session(claude_root, s)
 
         if expanded:
             _restore_expanded(self.tree, self.store, COL_NAME, expanded)
@@ -3594,7 +3631,7 @@ class CtxManagerPanel(Gtk.Box):
         tree_scroll = Gtk.ScrolledWindow()
         tree_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         tree_scroll.add(self.tree)
-        paned.pack1(tree_scroll, resize=True, shrink=False)
+        paned.pack1(tree_scroll, resize=True, shrink=True)
 
         # Drag & drop — accept image files
         self.tree.drag_dest_set(
@@ -3640,7 +3677,7 @@ class CtxManagerPanel(Gtk.Box):
 
         detail_box.pack_start(self.detail_stack, True, True, 0)
 
-        paned.pack2(detail_box, resize=False, shrink=False)
+        paned.pack2(detail_box, resize=False, shrink=True)
         paned.set_position(300)
 
         # ── Buttons ──
@@ -5193,10 +5230,11 @@ class TaskListPanel(Gtk.Box):
         self.pack_start(proj_box, False, False, 0)
 
         # ── Task list (TreeView) ──
-        # Columns: done(bool), task_id(str), description(str), status(str)
-        self.store = Gtk.ListStore(bool, str, str, str)
+        # Columns: done(bool), task_id(str), description(str), status(str), is_separator(bool)
+        self.store = Gtk.ListStore(bool, str, str, str, bool)
         self.tree = Gtk.TreeView(model=self.store)
         self.tree.set_headers_visible(True)
+        self.tree.set_row_separator_func(self._row_separator_func)
 
         # Checkbox column
         toggle_renderer = Gtk.CellRendererToggle()
@@ -5211,6 +5249,7 @@ class TaskListPanel(Gtk.Box):
         col_id = Gtk.TreeViewColumn("ID", cell_id, text=1)
         col_id.set_min_width(50)
         col_id.set_max_width(60)
+        col_id.set_cell_data_func(cell_id, self._style_cell)
         self.tree.append_column(col_id)
 
         # Description column
@@ -5218,6 +5257,7 @@ class TaskListPanel(Gtk.Box):
         cell_desc.set_property("ellipsize", Pango.EllipsizeMode.END)
         col_desc = Gtk.TreeViewColumn("Task", cell_desc, text=2)
         col_desc.set_expand(True)
+        col_desc.set_cell_data_func(cell_desc, self._style_cell)
         self.tree.append_column(col_desc)
 
         tree_scroll = Gtk.ScrolledWindow()
@@ -5370,6 +5410,14 @@ class TaskListPanel(Gtk.Box):
             self.project_combo.set_active(active_idx)
 
     def _load_tasks(self):
+        # Preserve scroll position and selection
+        tree_scroll = self.tree.get_parent()
+        vadj = tree_scroll.get_vadjustment() if tree_scroll else None
+        scroll_pos = vadj.get_value() if vadj else 0
+        sel = self.tree.get_selection()
+        _, selected_iter = sel.get_selected()
+        selected_task_id = self.store[selected_iter][1] if selected_iter else None
+
         self.store.clear()
         project = self._get_selected_project()
         if not project or not os.path.exists(CTX_DB):
@@ -5381,11 +5429,49 @@ class TaskListPanel(Gtk.Box):
             (project,),
         ).fetchall()
         db.close()
-        tasks = sorted(rows, key=lambda r: _task_sort_key(r["task_id"]))
-        for t in tasks:
-            done = t["status"] == "done"
+
+        # Split into active (newest first) and done (at bottom)
+        active = [r for r in rows if r["status"] != "done"]
+        done = [r for r in rows if r["status"] == "done"]
+        active.sort(key=lambda r: _task_sort_key(r["task_id"]), reverse=True)
+        done.sort(key=lambda r: _task_sort_key(r["task_id"]))
+
+        restore_path = None
+        for t in active:
             indent = "  " if "." in t["task_id"] else ""
-            self.store.append([done, t["task_id"], f"{indent}{t['description']}", t["status"]])
+            it = self.store.append([False, t["task_id"], f"{indent}{t['description']}", t["status"], False])
+            if t["task_id"] == selected_task_id:
+                restore_path = self.store.get_path(it)
+
+        # Separator row between active and done
+        if active and done:
+            self.store.append([False, "", "", "", True])
+
+        for t in done:
+            indent = "  " if "." in t["task_id"] else ""
+            it = self.store.append([True, t["task_id"], f"{indent}{t['description']}", t["status"], False])
+            if t["task_id"] == selected_task_id:
+                restore_path = self.store.get_path(it)
+
+        # Restore selection and scroll position
+        if restore_path:
+            sel.select_path(restore_path)
+        if vadj:
+            GLib.idle_add(vadj.set_value, scroll_pos)
+
+    @staticmethod
+    def _row_separator_func(model, iter_, data=None):
+        """Return True for separator rows."""
+        return model[iter_][4]
+
+    @staticmethod
+    def _style_cell(column, cell, model, iter_, data=None):
+        """Gray out done tasks."""
+        is_done = model[iter_][0]
+        if is_done:
+            cell.set_property("foreground", CATPPUCCIN["overlay0"])
+        else:
+            cell.set_property("foreground", CATPPUCCIN["text"])
 
     def _load_autorun_state(self):
         project = self._get_selected_project()
@@ -5402,11 +5488,13 @@ class TaskListPanel(Gtk.Box):
         self._update_auto_label(active)
 
     def _on_task_toggled(self, renderer, path):
-        """Toggle task done/undone via checkbox."""
+        """Toggle task done/undone via checkbox and re-sort."""
         project = self._get_selected_project()
         if not project:
             return
         it = self.store.get_iter(path)
+        if self.store[it][4]:  # separator row
+            return
         task_id = self.store[it][1]
         current_done = self.store[it][0]
         new_status = "open" if current_done else "done"
@@ -5419,8 +5507,8 @@ class TaskListPanel(Gtk.Box):
         )
         db.commit()
         db.close()
-        self.store[it][0] = not current_done
-        self.store[it][3] = new_status
+        # Reload to re-sort (active on top, done on bottom)
+        self._load_tasks()
 
     def _on_autorun_toggle(self, enable):
         project = self._get_selected_project()
@@ -5635,6 +5723,23 @@ class TaskListPanel(Gtk.Box):
 # ─── BTerminalApp ─────────────────────────────────────────────────────────────
 
 
+class ShrinkableBin(Gtk.Bin):
+    """Container that reports minimum width as 0, allowing HPaned to shrink it
+    without triggering GTK's right-alignment clipping behavior."""
+
+    def do_get_preferred_width(self):
+        return (0, 0)
+
+    def do_get_preferred_width_for_height(self, height):
+        return (0, 0)
+
+    def do_size_allocate(self, allocation):
+        self.set_allocation(allocation)
+        child = self.get_child()
+        if child and child.get_visible():
+            child.size_allocate(allocation)
+
+
 class BTerminalApp(Gtk.Window):
     """Główne okno aplikacji BTerminal."""
 
@@ -5667,7 +5772,7 @@ class BTerminalApp(Gtk.Window):
         # Sidebar container with stack switcher
         sidebar_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         sidebar_box.get_style_context().add_class("sidebar")
-        sidebar_box.set_size_request(250, -1)
+        sidebar_box.set_size_request(0, -1)
 
         self.sidebar_stack = Gtk.Stack()
         self.sidebar_stack.set_transition_type(
@@ -5686,15 +5791,62 @@ class BTerminalApp(Gtk.Window):
         self.task_panel = TaskListPanel(self)
         self.sidebar_stack.add_titled(self.task_panel, "tasks", "Tasks")
 
-        switcher = Gtk.StackSwitcher()
-        switcher.set_stack(self.sidebar_stack)
-        switcher.set_halign(Gtk.Align.FILL)
-        switcher.set_homogeneous(True)
+        # Custom compact tab switcher that scales down gracefully
+        switcher = Gtk.Box(spacing=0)
+        switcher.get_style_context().add_class("sidebar-switcher")
+        for name, title in [("sessions", "Sessions"), ("ctx", "Ctx"),
+                            ("consult", "Consult"), ("tasks", "Tasks")]:
+            btn = Gtk.Button(label=title)
+            btn.get_style_context().add_class("sidebar-tab")
+            child = btn.get_child()
+            if isinstance(child, Gtk.Label):
+                child.set_ellipsize(Pango.EllipsizeMode.END)
+            btn.connect("clicked", lambda _, n=name: self.sidebar_stack.set_visible_child_name(n))
+            switcher.pack_start(btn, True, True, 0)
+        self._sidebar_switcher = switcher
+        self._sidebar_tab_buttons = list(switcher.get_children())
+        self.sidebar_stack.connect("notify::visible-child-name", self._on_sidebar_tab_changed)
+        self._on_sidebar_tab_changed(None, None)
+
+        # Toggle button to hide sidebar (shown inside switcher bar)
+        self._sidebar_toggle_btn = Gtk.Button(label="◀")
+        self._sidebar_toggle_btn.get_style_context().add_class("sidebar-tab")
+        self._sidebar_toggle_btn.set_tooltip_text("Hide sidebar (Ctrl+B)")
+        self._sidebar_toggle_btn.connect("clicked", lambda _: self.toggle_sidebar())
+        switcher.pack_end(self._sidebar_toggle_btn, False, False, 0)
 
         sidebar_box.pack_start(switcher, False, False, 0)
         sidebar_box.pack_start(self.sidebar_stack, True, True, 0)
 
-        paned.pack1(sidebar_box, resize=False, shrink=False)
+        # Make all sidebar widgets genuinely shrinkable via ellipsize
+        # (ellipsize reduces a label's true minimum width to ~"..." width)
+        def _make_shrinkable(widget):
+            if isinstance(widget, Gtk.Label):
+                widget.set_ellipsize(Pango.EllipsizeMode.END)
+            if isinstance(widget, (Gtk.Entry, Gtk.SpinButton)):
+                widget.set_width_chars(1)
+            if isinstance(widget, Gtk.ComboBoxText):
+                widget.set_size_request(0, -1)
+            if isinstance(widget, Gtk.TreeView):
+                for col in widget.get_columns():
+                    col.set_min_width(0)
+                    col.set_max_width(-1)
+                    col.set_sizing(Gtk.TreeViewColumnSizing.AUTOSIZE)
+            if isinstance(widget, Gtk.ScrolledWindow):
+                widget.set_propagate_natural_width(False)
+            if isinstance(widget, Gtk.Container):
+                widget.forall(_make_shrinkable)
+        # Process ALL stack children explicitly (forall may skip invisible pages)
+        for panel in [self.sidebar, self.ctx_panel, self.consult_panel, self.task_panel]:
+            _make_shrinkable(panel)
+        _make_shrinkable(switcher)
+
+        self._sidebar_wrap = ShrinkableBin()
+        self._sidebar_wrap.add(sidebar_box)
+        self._paned = paned
+        self._sidebar_visible = True
+        self._sidebar_last_pos = 250
+        paned.pack1(self._sidebar_wrap, resize=False, shrink=False)
 
         # Notebook (tabs)
         self.notebook = Gtk.Notebook()
@@ -5702,6 +5854,14 @@ class BTerminalApp(Gtk.Window):
         self.notebook.set_show_border(False)
         self.notebook.popup_disable()
         paned.pack2(self.notebook, resize=True, shrink=False)
+
+        # Show-sidebar button (visible only when sidebar is hidden)
+        self._show_sidebar_btn = Gtk.Button(label="▶")
+        self._show_sidebar_btn.get_style_context().add_class("sidebar-btn")
+        self._show_sidebar_btn.set_tooltip_text("Show sidebar (Ctrl+B)")
+        self._show_sidebar_btn.set_no_show_all(True)
+        self._show_sidebar_btn.connect("clicked", lambda _: self.toggle_sidebar())
+        self.notebook.set_action_widget(self._show_sidebar_btn, Gtk.PackType.START)
 
         paned.set_position(250)
 
@@ -5828,9 +5988,7 @@ class BTerminalApp(Gtk.Window):
         if idx >= 0:
             self.notebook.remove_page(idx)
             tab.destroy()
-        # If no tabs left, open a new local shell
-        if self.notebook.get_n_pages() == 0:
-            self.add_local_tab()
+        # No auto-open — user picks a session from the sidebar
         self._update_window_title()
 
     def on_tab_child_exited(self, tab):
@@ -5876,10 +6034,39 @@ class BTerminalApp(Gtk.Window):
             return tab.terminal
         return None
 
+    def toggle_sidebar(self):
+        """Show/hide the sidebar panel."""
+        if self._sidebar_visible:
+            self._sidebar_last_pos = self._paned.get_position()
+            self._sidebar_wrap.hide()
+            self._paned.set_position(0)
+            self._show_sidebar_btn.show()
+        else:
+            self._sidebar_wrap.show()
+            self._paned.set_position(self._sidebar_last_pos)
+            self._show_sidebar_btn.hide()
+        self._sidebar_visible = not self._sidebar_visible
+
+    def _on_sidebar_tab_changed(self, _stack, _param):
+        """Update active tab styling in custom sidebar switcher."""
+        active_name = self.sidebar_stack.get_visible_child_name()
+        tab_names = ["sessions", "ctx", "consult", "tasks"]
+        for btn, name in zip(self._sidebar_tab_buttons, tab_names):
+            ctx = btn.get_style_context()
+            if name == active_name:
+                ctx.add_class("sidebar-tab-active")
+            else:
+                ctx.remove_class("sidebar-tab-active")
+
     def _on_key_press(self, widget, event):
         mod = event.state & Gtk.accelerator_get_default_mod_mask()
         ctrl = Gdk.ModifierType.CONTROL_MASK
         shift = Gdk.ModifierType.SHIFT_MASK
+
+        # Ctrl+B: toggle sidebar
+        if mod == ctrl and event.keyval == Gdk.KEY_b:
+            self.toggle_sidebar()
+            return True
 
         # Ctrl+T: new local tab
         if mod == ctrl and event.keyval == Gdk.KEY_t:
@@ -5912,6 +6099,17 @@ class BTerminalApp(Gtk.Window):
                         tab._paste_clipboard_image_path()
                         return True
                     tab.terminal.paste_clipboard()
+            return True
+
+        # Ctrl+Tab: next tab (wrap around)
+        if mod == ctrl and event.keyval in (Gdk.KEY_Tab, Gdk.KEY_ISO_Left_Tab):
+            n = self.notebook.get_n_pages()
+            if n > 1:
+                idx = self.notebook.get_current_page()
+                if event.state & shift:
+                    self.notebook.set_current_page((idx - 1) % n)
+                else:
+                    self.notebook.set_current_page((idx + 1) % n)
             return True
 
         # Ctrl+PageUp: previous tab
