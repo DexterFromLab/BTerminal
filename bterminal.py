@@ -29,6 +29,8 @@ SESSIONS_FILE = os.path.join(CONFIG_DIR, "sessions.json")
 CLAUDE_SESSIONS_FILE = os.path.join(CONFIG_DIR, "claude_sessions.json")
 CONSULT_CONFIG_FILE = os.path.join(CONFIG_DIR, "consult.json")
 SSH_PATH = "/usr/bin/ssh"
+_repo_path_file = os.path.join(os.path.expanduser("~/.config/bterminal"), "repo_path")
+REPO_DIR = open(_repo_path_file).read().strip() if os.path.isfile(_repo_path_file) else None
 
 def _find_claude_path():
     for p in [
@@ -6519,6 +6521,118 @@ class BTerminalApp(Gtk.Window):
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
+def _check_for_updates(window):
+    """Check for updates on master in a background thread, prompt user if available."""
+    if not REPO_DIR or not os.path.isdir(os.path.join(REPO_DIR, ".git")):
+        return
+
+    def _fetch():
+        try:
+            subprocess.run(
+                ["git", "fetch", "origin", "master"],
+                cwd=REPO_DIR, capture_output=True, timeout=15,
+            )
+            local = subprocess.run(
+                ["git", "rev-parse", "master"],
+                cwd=REPO_DIR, capture_output=True, text=True, timeout=5,
+            ).stdout.strip()
+            remote = subprocess.run(
+                ["git", "rev-parse", "origin/master"],
+                cwd=REPO_DIR, capture_output=True, text=True, timeout=5,
+            ).stdout.strip()
+            if local and remote and local != remote:
+                log = subprocess.run(
+                    ["git", "log", "--oneline", f"{local}..{remote}"],
+                    cwd=REPO_DIR, capture_output=True, text=True, timeout=5,
+                ).stdout.strip()
+                GLib.idle_add(_prompt_update, window, log)
+        except Exception:
+            pass  # silent fail — no network etc.
+
+    threading.Thread(target=_fetch, daemon=True).start()
+
+
+def _prompt_update(window, log):
+    """Show update dialog on the main thread."""
+    dialog = Gtk.MessageDialog(
+        transient_for=window,
+        modal=True,
+        message_type=Gtk.MessageType.QUESTION,
+        buttons=Gtk.ButtonsType.YES_NO,
+        text="Dostępna nowa wersja BTerminal",
+    )
+    msg = "Czy chcesz pobrać i zainstalować aktualizację?"
+    if log:
+        msg += f"\n\nNowe zmiany:\n{log}"
+    dialog.format_secondary_text(msg)
+    response = dialog.run()
+    dialog.destroy()
+    if response == Gtk.ResponseType.YES:
+        _do_update(window)
+    return False
+
+
+def _do_update(window):
+    """Pull changes and run install.sh in a background thread."""
+    spinner_dialog = Gtk.MessageDialog(
+        transient_for=window,
+        modal=True,
+        message_type=Gtk.MessageType.INFO,
+        text="Aktualizacja w toku...",
+    )
+    spinner_dialog.format_secondary_text("Pobieranie i instalacja nowej wersji.")
+    spinner_dialog.set_deletable(False)
+    spinner = Gtk.Spinner()
+    spinner.start()
+    spinner_dialog.get_content_area().pack_start(spinner, False, False, 10)
+    spinner_dialog.show_all()
+
+    def _run():
+        try:
+            result = subprocess.run(
+                ["git", "pull", "origin", "master"],
+                cwd=REPO_DIR, capture_output=True, text=True, timeout=30,
+            )
+            if result.returncode != 0:
+                GLib.idle_add(_update_done, window, spinner_dialog,
+                              f"git pull failed:\n{result.stderr}")
+                return
+            install = subprocess.run(
+                ["bash", os.path.join(REPO_DIR, "install.sh"),
+                 "--no-sudo"],
+                capture_output=True, text=True, timeout=60,
+            )
+            if install.returncode != 0:
+                GLib.idle_add(_update_done, window, spinner_dialog,
+                              f"install.sh failed:\n{install.stderr}")
+                return
+            GLib.idle_add(_update_done, window, spinner_dialog, None)
+        except Exception as e:
+            GLib.idle_add(_update_done, window, spinner_dialog, str(e))
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
+def _update_done(window, spinner_dialog, error):
+    """Handle update result on the main thread."""
+    spinner_dialog.destroy()
+    if error:
+        show_error_dialog(window, f"Update error:\n{error}")
+    else:
+        dialog = Gtk.MessageDialog(
+            transient_for=window,
+            modal=True,
+            message_type=Gtk.MessageType.INFO,
+            buttons=Gtk.ButtonsType.OK,
+            text="Aktualizacja zakończona",
+        )
+        dialog.format_secondary_text(
+            "Uruchom ponownie BTerminal, aby zastosować zmiany.")
+        dialog.run()
+        dialog.destroy()
+    return False
+
+
 def main():
     GLib.set_prgname("bterminal")
     GLib.set_application_name("BTerminal")
@@ -6535,6 +6649,7 @@ def main():
             return
         win = BTerminalApp()
         app.add_window(win)
+        _check_for_updates(win)
 
     application.connect("activate", on_activate)
     application.run(None)

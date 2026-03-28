@@ -12,6 +12,11 @@ CTX_DIR="$HOME/.claude-context"
 ICON_DIR="$HOME/.local/share/icons/hicolor/scalable/apps"
 DESKTOP_DIR="$HOME/.local/share/applications"
 
+NO_SUDO=false
+if [[ "${1:-}" == "--no-sudo" ]]; then
+    NO_SUDO=true
+fi
+
 echo "=== BTerminal Installer ==="
 echo ""
 
@@ -22,6 +27,8 @@ echo "[1/6] Checking Claude Code..."
 if command -v claude &>/dev/null; then
     CLAUDE_VER="$(claude --version 2>/dev/null || echo 'unknown')"
     echo "  Claude Code already installed: $CLAUDE_VER"
+elif [[ "$NO_SUDO" == true ]]; then
+    echo "  Claude Code not found (skipped — no-sudo mode)."
 else
     echo "  Claude Code not found. Installing via npm..."
     if ! command -v npm &>/dev/null; then
@@ -48,15 +55,20 @@ fi
 echo "[2/6] Checking system dependencies..."
 
 MISSING=()
+command -v git &>/dev/null || MISSING+=("git")
 python3 -c "import gi" 2>/dev/null || MISSING+=("python3-gi")
 python3 -c "import gi; gi.require_version('Gtk', '3.0'); from gi.repository import Gtk" 2>/dev/null || MISSING+=("gir1.2-gtk-3.0")
 python3 -c "import gi; gi.require_version('Vte', '2.91'); from gi.repository import Vte" 2>/dev/null || MISSING+=("gir1.2-vte-2.91")
 
 if [ ${#MISSING[@]} -gt 0 ]; then
-    echo "  Missing: ${MISSING[*]}"
-    echo "  Installing..."
-    sudo apt-get update -qq
-    sudo apt-get install -y "${MISSING[@]}"
+    if [[ "$NO_SUDO" == true ]]; then
+        echo "  Missing: ${MISSING[*]} (skipped — no-sudo mode)"
+    else
+        echo "  Missing: ${MISSING[*]}"
+        echo "  Installing..."
+        sudo apt-get update -qq
+        sudo apt-get install -y "${MISSING[@]}"
+    fi
 else
     echo "  All dependencies OK."
 fi
@@ -73,6 +85,10 @@ cp "$SCRIPT_DIR/consult" "$INSTALL_DIR/consult"
 cp "$SCRIPT_DIR/tasks" "$INSTALL_DIR/tasks"
 cp "$SCRIPT_DIR/bterminal.svg" "$ICON_DIR/bterminal.svg"
 chmod +x "$INSTALL_DIR/bterminal.py" "$INSTALL_DIR/ctx" "$INSTALL_DIR/consult" "$INSTALL_DIR/tasks"
+
+# Save repo path for auto-update
+echo "$SCRIPT_DIR" > "$CONFIG_DIR/repo_path"
+echo "  Repo path saved: $SCRIPT_DIR"
 
 # ─── Symlinks ──────────────────────────────────────────────────────────
 
