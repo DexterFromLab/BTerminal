@@ -2322,9 +2322,10 @@ class TerminalTab(Gtk.Box):
                 self.app.notebook.set_current_page(idx + 1)
             return True
 
-        # Ctrl+G: toggle git panel (forward to app)
+        # Ctrl+G: toggle git panel (only for Claude Code tabs)
         if mod == ctrl and event.keyval == Gdk.KEY_g:
-            self.app.toggle_git_panel()
+            if self.claude_config:
+                self.app.toggle_git_panel()
             return True
 
         # Track Enter key for prompt counter (Claude Code sessions)
@@ -6721,6 +6722,17 @@ class GitPanel(Gtk.Box):
     def _on_git_init(self, _btn):
         if not self._git_dir:
             return
+        dlg = Gtk.MessageDialog(
+            transient_for=self.app, modal=True,
+            message_type=Gtk.MessageType.QUESTION,
+            buttons=Gtk.ButtonsType.YES_NO,
+            text="Initialize git repository?",
+        )
+        dlg.format_secondary_text(f"This will run 'git init' in:\n{self._git_dir}")
+        resp = dlg.run()
+        dlg.destroy()
+        if resp != Gtk.ResponseType.YES:
+            return
         try:
             subprocess.run(
                 ["git", "init"], cwd=self._git_dir,
@@ -6937,10 +6949,9 @@ class BTerminalApp(Gtk.Window):
 
         paned.set_position(250)
 
-        # Git panel starts hidden, show-git button visible
+        # Git panel starts fully hidden (no Claude tab active yet)
         self._git_wrap.set_no_show_all(True)
         self._git_wrap.hide()
-        self._show_git_btn.show()
 
         # Auto-refresh panels when switching to them
         def _on_sidebar_switch(stack, _param):
@@ -6986,9 +6997,16 @@ class BTerminalApp(Gtk.Window):
         # Auto-select project in Task panel based on active Claude Code tab
         if isinstance(page, TerminalTab) and page._task_project:
             GLib.idle_add(self._sync_task_panel_project, page._task_project)
-        # Sync git panel to new tab
-        if self._git_visible:
-            GLib.idle_add(self._sync_git_panel)
+        # Git panel: show only for Claude Code tabs
+        is_claude = isinstance(page, TerminalTab) and page.claude_config is not None
+        if is_claude:
+            self._show_git_btn.show()
+            if self._git_visible:
+                GLib.idle_add(self._sync_git_panel)
+        else:
+            if self._git_visible:
+                self.toggle_git_panel()
+            self._show_git_btn.hide()
 
     def _sync_task_panel_project(self, project_name):
         """Set Task panel's project combo to match the active tab's project."""
