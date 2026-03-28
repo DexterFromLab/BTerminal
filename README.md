@@ -1,6 +1,6 @@
 # BTerminal
 
-GTK 3 terminal with SSH & Claude Code session management, macros, cross-session context database, AI model consultation via OpenRouter, multi-model debate (Tribunal), and task management with auto-trigger. Catppuccin Mocha theme.
+GTK 3 terminal with SSH & Claude Code session management, macros, cross-session context database, AI model consultation via OpenRouter, multi-model debate (Tribunal), and task management with auto-trigger. Catppuccin Mocha/Latte themes with day/night toggle.
 
 ![BTerminal](screenshot.png)
 
@@ -14,9 +14,11 @@ GTK 3 terminal with SSH & Claude Code session management, macros, cross-session 
 - **Folder grouping** — organize both SSH and Claude Code sessions in collapsible sidebar folders with rename, move and ungroup
 - **Session colors** — 10 Catppuccin accent colors with visual swatch picker
 - **Open with** — right-click Claude Code sessions to open the project directory in File Manager, VS Code, Zed or a custom command
-- **Sudo askpass** — temporary helper for Claude Code sudo mode: password entered once, auto-cleanup on exit
+- **Git panel** — right-side panel for Claude Code tabs with accordion sections: Branch, Changes (with numstat), Stash, LFS/Binary, Activity and Log; auto-refresh every 3 s, file monitoring, `git init` button for uninitialized repos
+- **Clipboard image paste** — `Ctrl+Shift+V` saves clipboard screenshots to `copied_images/` in the project directory and pastes the file path into the terminal; right-click menu option to paste image directly into ctx
+- **Sudo askpass** — temporary helper for Claude Code sudo mode: password entered once, retry on wrong password, auto-cleanup on exit
 - **Auto-update** — checks `origin/master` on startup, prompts to pull and reinstall if new version available
-- **Catppuccin Mocha** — full theme across terminal, sidebar, tabs, dialogs and scrollbars
+- **Day/night theme** — toggle between Catppuccin Mocha (dark) and Latte (light) with a single click; re-colors terminal, sidebar, tabs, dialogs and scrollbars live
 
 ### Consult (AI Models)
 
@@ -76,7 +78,7 @@ sudo apt install python3-gi gir1.2-gtk-3.0 gir1.2-vte-2.91
 bterminal
 ```
 
-The sidebar has four tabs: **Sessions** (SSH & Claude Code), **Ctx** (context manager), **Consult** (AI models & debate) and **Tasks** (task lists & auto-trigger).
+The sidebar has four tabs: **Sessions** (SSH & Claude Code), **Ctx** (context manager), **Consult** (AI models & debate) and **Tasks** (task lists & auto-trigger). Claude Code tabs also get a **Git panel** on the right side (toggle with `Ctrl+G`).
 
 ## Context Manager (ctx)
 
@@ -184,8 +186,9 @@ Context database: `~/.claude-context/context.db`
 | `Ctrl+B` | Toggle sidebar |
 | `Ctrl+Tab` | Next tab (wrap around) |
 | `Ctrl+Shift+W` | Close tab |
+| `Ctrl+G` | Toggle Git panel (Claude Code tabs) |
 | `Ctrl+Shift+C` | Copy |
-| `Ctrl+Shift+V` | Paste |
+| `Ctrl+Shift+V` | Paste (image → save & paste path) |
 | `Ctrl+PageUp/Down` | Previous/next tab |
 
 ## License
