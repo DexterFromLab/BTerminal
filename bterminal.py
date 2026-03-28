@@ -49,7 +49,7 @@ FONT = "Monospace 11"
 SCROLLBACK_LINES = 10000
 
 # Catppuccin Mocha
-CATPPUCCIN = {
+CATPPUCCIN_MOCHA = {
     "rosewater": "#f5e0dc",
     "flamingo":  "#f2cdcd",
     "pink":      "#f5c2e7",
@@ -78,18 +78,66 @@ CATPPUCCIN = {
     "crust":     "#11111b",
 }
 
-TERMINAL_PALETTE = [
+CATPPUCCIN_LATTE = {
+    "rosewater": "#dc8a78",
+    "flamingo":  "#dd7878",
+    "pink":      "#ea76cb",
+    "mauve":     "#8839ef",
+    "red":       "#d20f39",
+    "maroon":    "#e64553",
+    "peach":     "#fe640b",
+    "yellow":    "#df8e1d",
+    "green":     "#40a02b",
+    "teal":      "#179299",
+    "sky":       "#04a5e5",
+    "sapphire":  "#209fb5",
+    "blue":      "#1e66f5",
+    "lavender":  "#7287fd",
+    "text":      "#3c3f58",
+    "subtext1":  "#4c4f67",
+    "subtext0":  "#5c5f75",
+    "overlay2":  "#7c7f93",
+    "overlay1":  "#8c8fa1",
+    "overlay0":  "#9ca0b0",
+    "surface2":  "#acb0be",
+    "surface1":  "#bcc0cc",
+    "surface0":  "#ccd0da",
+    "base":      "#eff1f5",
+    "mantle":    "#e6e9ef",
+    "crust":     "#dce0e8",
+}
+
+# Active theme — mutable, switched at runtime
+CATPPUCCIN = dict(CATPPUCCIN_MOCHA)
+
+TERMINAL_PALETTE_MOCHA = [
     "#45475a", "#f38ba8", "#a6e3a1", "#f9e2af",
     "#89b4fa", "#f5c2e7", "#94e2d5", "#bac2de",
     "#585b70", "#f38ba8", "#a6e3a1", "#f9e2af",
     "#89b4fa", "#f5c2e7", "#94e2d5", "#a6adc8",
 ]
 
-SESSION_COLORS = [
-    "#89b4fa", "#a6e3a1", "#f9e2af", "#f38ba8",
-    "#f5c2e7", "#94e2d5", "#fab387", "#b4befe",
-    "#74c7ec", "#cba6f7",
+TERMINAL_PALETTE_LATTE = [
+    "#e6e9ef", "#d20f39", "#40a02b", "#df8e1d",
+    "#1e66f5", "#ea76cb", "#179299", "#5c5f77",
+    "#dce0e8", "#d20f39", "#40a02b", "#df8e1d",
+    "#1e66f5", "#ea76cb", "#179299", "#6c6f85",
 ]
+
+TERMINAL_PALETTE = list(TERMINAL_PALETTE_MOCHA)
+
+# Fixed session type colors per theme (SSH, Claude Code)
+_THEME_COLORS = {
+    "dark":  {"ssh": "#89b4fa", "claude": "#89b4fa"},
+    "light": {"ssh": "#5c5f77", "claude": "#6c6f85"},
+}
+
+_current_theme = "dark"  # "dark" or "light"
+
+
+def _session_color(session_type="ssh"):
+    """Return the fixed color for a session type in current theme."""
+    return _THEME_COLORS[_current_theme].get(session_type, CATPPUCCIN["text"])
 
 KEY_MAP = {
     "Enter": "\r",
@@ -99,188 +147,76 @@ KEY_MAP = {
     "Ctrl+D": "\x04",
 }
 
-CSS = f"""
-window {{
-    background-color: {CATPPUCCIN['base']};
-}}
-.sidebar {{
-    background-color: {CATPPUCCIN['mantle']};
-    border-right: 1px solid {CATPPUCCIN['surface0']};
-}}
-.git-panel {{
-    border-right: none;
-    border-left: 1px solid {CATPPUCCIN['surface0']};
-}}
-.git-header {{
-    background-color: {CATPPUCCIN['crust']};
-    padding: 6px 10px;
-    border-bottom: 1px solid {CATPPUCCIN['surface0']};
-}}
-.git-header label {{
-    font-weight: bold;
-    font-size: 13px;
-    color: {CATPPUCCIN['blue']};
-}}
-.git-header button {{
-    min-width: 28px;
-    min-height: 28px;
-    padding: 2px;
-    border-radius: 4px;
-    font-size: 14px;
-}}
-.git-section-title {{
-    background-color: {CATPPUCCIN['surface0']};
-    padding: 5px 10px;
-    font-weight: bold;
-    font-size: 11px;
-    color: {CATPPUCCIN['subtext1']};
-    border-top: 1px solid {CATPPUCCIN['surface1']};
-}}
-.git-section-body {{
-    padding: 6px 10px;
-}}
-.git-branch-name {{
-    font-weight: bold;
-    font-size: 14px;
-    color: {CATPPUCCIN['green']};
-}}
-.sidebar * {{
-    min-width: 0;
-}}
-.sidebar button,
-.sidebar combobox,
-.sidebar combobox button,
-.sidebar entry {{
-    min-width: 0;
-    padding: 2px 2px;
-    border: none;
-}}
-.sidebar button label,
-.sidebar label {{
-    min-width: 0;
-}}
-.sidebar-header {{
-    background-color: {CATPPUCCIN['crust']};
-    padding: 8px 12px;
-    font-weight: bold;
-    font-size: 13px;
-    color: {CATPPUCCIN['blue']};
-    border-bottom: 1px solid {CATPPUCCIN['surface0']};
-}}
-.sidebar-btn {{
-    background: {CATPPUCCIN['surface0']};
-    border: none;
-    border-radius: 4px;
-    color: {CATPPUCCIN['text']};
-    padding: 4px 4px;
-    min-height: 24px;
-    min-width: 0;
-}}
-.sidebar-tab {{
-    padding: 4px 2px;
-    min-width: 0;
-    min-height: 0;
-    border-radius: 0;
-    border: none;
-    background: {CATPPUCCIN['mantle']};
-    color: {CATPPUCCIN['subtext0']};
-    font-size: 11px;
-    border-bottom: 2px solid transparent;
-}}
-.sidebar-tab:hover {{
-    background: {CATPPUCCIN['surface0']};
-}}
-.sidebar-tab-active {{
-    color: {CATPPUCCIN['blue']};
-    border-bottom: 2px solid {CATPPUCCIN['blue']};
-}}
-.sidebar-btn:hover {{
-    background: {CATPPUCCIN['surface1']};
-}}
-.sidebar-btn:active {{
-    background: {CATPPUCCIN['surface2']};
-}}
-notebook header tab {{
-    background: {CATPPUCCIN['mantle']};
-    color: {CATPPUCCIN['subtext0']};
-    border: none;
-    padding: 4px 12px;
-    border-radius: 6px 6px 0 0;
-    margin: 0 1px;
-}}
-notebook header tab:checked {{
-    background: {CATPPUCCIN['surface0']};
-    color: {CATPPUCCIN['text']};
-}}
-notebook header {{
-    background: {CATPPUCCIN['crust']};
-}}
-notebook {{
-    background: {CATPPUCCIN['base']};
-}}
-treeview {{
-    background-color: {CATPPUCCIN['mantle']};
-    color: {CATPPUCCIN['text']};
-}}
-treeview:selected {{
-    background-color: {CATPPUCCIN['surface1']};
-    color: {CATPPUCCIN['text']};
-}}
-treeview:hover {{
-    background-color: {CATPPUCCIN['surface0']};
-}}
-.tab-close-btn {{
-    background: transparent;
-    border: none;
-    border-radius: 4px;
-    padding: 0;
-    min-width: 20px;
-    min-height: 20px;
-    color: {CATPPUCCIN['overlay1']};
-}}
-.tab-close-btn:hover {{
-    background: {CATPPUCCIN['surface2']};
-    color: {CATPPUCCIN['red']};
-}}
-stackswitcher {{
-    background: {CATPPUCCIN['crust']};
-    border-bottom: 1px solid {CATPPUCCIN['surface0']};
-}}
-stackswitcher button {{
-    background: {CATPPUCCIN['crust']};
-    color: {CATPPUCCIN['subtext0']};
-    border: none;
-    border-radius: 0;
-    padding: 6px 16px;
-    border-bottom: 2px solid transparent;
-    font-weight: bold;
-    font-size: 12px;
-}}
-stackswitcher button:checked {{
-    background: {CATPPUCCIN['mantle']};
-    color: {CATPPUCCIN['blue']};
-    border-bottom: 2px solid {CATPPUCCIN['blue']};
-}}
-stackswitcher button:hover {{
-    background: {CATPPUCCIN['surface0']};
-}}
-textview.ctx-detail {{
-    font-family: monospace;
-    font-size: 10pt;
-}}
-textview.ctx-detail text {{
-    background-color: {CATPPUCCIN['crust']};
-    color: {CATPPUCCIN['subtext1']};
-}}
-.stats-bar {{
-    background-color: {CATPPUCCIN['mantle']};
-    border-top: 1px solid {CATPPUCCIN['surface0']};
-}}
-.stats-bar label {{
-    color: {CATPPUCCIN['subtext1']};
-    font-size: 13px;
-}}
+def _build_css(t):
+    """Generate CSS from a Catppuccin theme dict."""
+    return f"""
+window {{ background-color: {t['base']}; color: {t['text']}; }}
+.sidebar {{ background-color: {t['mantle']}; border-right: 1px solid {t['surface0']}; color: {t['text']}; }}
+.sidebar label {{ color: {t['text']}; }}
+.git-panel {{ border-right: none; border-left: 1px solid {t['surface0']}; }}
+.git-header {{ background-color: {t['crust']}; padding: 6px 10px; border-bottom: 1px solid {t['surface0']}; }}
+.git-header label {{ font-weight: bold; font-size: 13px; color: {t['blue']}; }}
+.git-header button {{ min-width: 28px; min-height: 28px; padding: 2px; border-radius: 4px; font-size: 14px; color: {t['text']}; }}
+.git-section-title {{ background-color: {t['surface0']}; padding: 5px 10px; font-weight: bold; font-size: 11px; color: {t['subtext1']}; border-top: 1px solid {t['surface1']}; }}
+.git-section-body {{ padding: 6px 10px; color: {t['text']}; }}
+.git-section-body label {{ color: {t['text']}; }}
+.git-branch-name {{ font-weight: bold; font-size: 14px; color: {t['green']}; }}
+.sidebar * {{ min-width: 0; }}
+.sidebar button, .sidebar combobox, .sidebar combobox button, .sidebar entry {{ min-width: 0; padding: 2px 2px; border: none; }}
+.sidebar button label {{ min-width: 0; }}
+.sidebar-header {{ background-color: {t['crust']}; padding: 8px 12px; font-weight: bold; font-size: 13px; color: {t['blue']}; border-bottom: 1px solid {t['surface0']}; }}
+.sidebar-btn {{ background: {t['surface0']}; border: none; border-radius: 4px; color: {t['text']}; padding: 4px 4px; min-height: 24px; min-width: 0; }}
+.sidebar-tab {{ padding: 4px 2px; min-width: 0; min-height: 0; border-radius: 0; border: none; background: {t['mantle']}; color: {t['subtext0']}; font-size: 11px; border-bottom: 2px solid transparent; }}
+.sidebar-tab:hover {{ background: {t['surface0']}; }}
+.sidebar-tab-active {{ color: {t['blue']}; border-bottom: 2px solid {t['blue']}; }}
+.sidebar-btn:hover {{ background: {t['surface1']}; }}
+.sidebar-btn:active {{ background: {t['surface2']}; }}
+notebook header tab {{ background: {t['mantle']}; color: {t['subtext0']}; border: none; padding: 4px 12px; border-radius: 6px 6px 0 0; margin: 0 1px; }}
+notebook header tab:checked {{ background: {t['surface0']}; color: {t['text']}; }}
+notebook header {{ background: {t['crust']}; }}
+notebook {{ background: {t['base']}; }}
+treeview {{ background-color: {t['mantle']}; color: {t['text']}; }}
+treeview:selected {{ background-color: {t['surface1']}; color: {t['text']}; }}
+treeview:hover {{ background-color: {t['surface0']}; }}
+textview text {{ background-color: {t['base']}; color: {t['text']}; }}
+.tab-close-btn {{ background: transparent; border: none; border-radius: 4px; padding: 0; min-width: 20px; min-height: 20px; color: {t['overlay1']}; }}
+.tab-close-btn:hover {{ background: {t['surface2']}; color: {t['red']}; }}
+stackswitcher {{ background: {t['crust']}; border-bottom: 1px solid {t['surface0']}; }}
+stackswitcher button {{ background: {t['crust']}; color: {t['subtext0']}; border: none; border-radius: 0; padding: 6px 16px; border-bottom: 2px solid transparent; font-weight: bold; font-size: 12px; }}
+stackswitcher button:checked {{ background: {t['mantle']}; color: {t['blue']}; border-bottom: 2px solid {t['blue']}; }}
+stackswitcher button:hover {{ background: {t['surface0']}; }}
+textview.ctx-detail {{ font-family: monospace; font-size: 10pt; }}
+textview.ctx-detail text {{ background-color: {t['crust']}; color: {t['subtext1']}; }}
+.stats-bar {{ background-color: {t['mantle']}; border-top: 1px solid {t['surface0']}; }}
+.stats-bar label {{ color: {t['subtext1']}; font-size: 13px; }}
+.theme-toggle {{ background: {t['surface0']}; border: none; border-radius: 12px; padding: 2px 10px; min-height: 26px; min-width: 26px; color: {t['yellow']}; font-size: 16px; }}
+.theme-toggle:hover {{ background: {t['surface1']}; }}
+dialog {{ background-color: {t['base']}; color: {t['text']}; }}
+dialog box, dialog grid, dialog label {{ color: {t['text']}; }}
+entry {{ background-color: {t['mantle']}; color: {t['text']}; border: 1px solid {t['surface1']}; border-radius: 4px; }}
+combobox window menu {{ background-color: {t['mantle']}; color: {t['text']}; }}
+combobox button {{ background-color: {t['mantle']}; color: {t['text']}; }}
+menu {{ background-color: {t['mantle']}; color: {t['text']}; border: 1px solid {t['surface1']}; }}
+menu menuitem {{ color: {t['text']}; }}
+menu menuitem:hover {{ background-color: {t['surface1']}; }}
+checkbutton {{ color: {t['text']}; }}
+button {{ background-color: {t['surface0']}; color: {t['text']}; border: 1px solid {t['surface1']}; }}
+button:hover {{ background-color: {t['surface1']}; }}
+dialog button {{ background-color: {t['surface0']}; color: {t['text']}; border: 1px solid {t['surface1']}; border-radius: 4px; padding: 6px 16px; }}
+dialog button:hover {{ background-color: {t['surface1']}; }}
+headerbar {{ background-color: {t['crust']}; color: {t['text']}; }}
+headerbar button {{ color: {t['text']}; }}
+messagedialog {{ background-color: {t['base']}; color: {t['text']}; }}
+messagedialog label {{ color: {t['text']}; }}
+dialog headerbar {{ background-color: {t['crust']}; color: {t['text']}; }}
+dialog decoration {{ background-color: {t['crust']}; }}
+spinbutton {{ background-color: {t['mantle']}; color: {t['text']}; }}
+scrollbar {{ background-color: {t['mantle']}; }}
+scrollbar slider {{ background-color: {t['surface1']}; border-radius: 4px; }}
+scrollbar slider:hover {{ background-color: {t['surface2']}; }}
 """
+
+CSS = _build_css(CATPPUCCIN)
 
 
 def _parse_color(hex_str):
@@ -587,7 +523,7 @@ class SessionDialog(Gtk.Dialog):
         grid = Gtk.Grid(column_spacing=12, row_spacing=8)
         box.pack_start(grid, True, True, 0)
 
-        labels = ["Name:", "Host:", "Port:", "Username:", "SSH Key:", "Folder:", "Color:"]
+        labels = ["Name:", "Host:", "Port:", "Username:", "SSH Key:", "Folder:"]
         for i, text in enumerate(labels):
             lbl = Gtk.Label(label=text, halign=Gtk.Align.END)
             grid.attach(lbl, 0, i, 1, 1)
@@ -609,15 +545,12 @@ class SessionDialog(Gtk.Dialog):
             self.folder_combo.append_text(f)
         self.folder_combo.get_child().set_placeholder_text("(optional) folder for grouping")
 
-        self.color_combo = _create_color_combo()
-
         grid.attach(self.entry_name, 1, 0, 1, 1)
         grid.attach(self.entry_host, 1, 1, 1, 1)
         grid.attach(self.entry_port, 1, 2, 1, 1)
         grid.attach(self.entry_username, 1, 3, 1, 1)
         grid.attach(self.entry_key, 1, 4, 1, 1)
         grid.attach(self.folder_combo, 1, 5, 1, 1)
-        grid.attach(self.color_combo, 1, 6, 1, 1)
 
         # Edit mode: fill fields
         if session:
@@ -627,9 +560,6 @@ class SessionDialog(Gtk.Dialog):
             self.entry_username.set_text(session.get("username", ""))
             self.entry_key.set_text(session.get("key_file", ""))
             self.folder_combo.get_child().set_text(session.get("folder", ""))
-            color = session.get("color", SESSION_COLORS[0])
-            idx = SESSION_COLORS.index(color) if color in SESSION_COLORS else 0
-            self.color_combo.set_active(idx)
 
         self.show_all()
 
@@ -641,14 +571,7 @@ class SessionDialog(Gtk.Dialog):
             "username": self.entry_username.get_text().strip(),
             "key_file": self.entry_key.get_text().strip(),
             "folder": self.folder_combo.get_child().get_text().strip(),
-            "color": self._get_active_color(),
         }
-
-    def _get_active_color(self):
-        it = self.color_combo.get_active_iter()
-        if it:
-            return self.color_combo.get_model().get_value(it, 0)
-        return SESSION_COLORS[0]
 
     def validate(self):
         data = self.get_data()
@@ -963,7 +886,7 @@ class ClaudeCodeDialog(Gtk.Dialog):
         grid = Gtk.Grid(column_spacing=12, row_spacing=8)
         box.pack_start(grid, False, False, 0)
 
-        for i, text in enumerate(["Name:", "Folder:", "Color:", "Project dir:"]):
+        for i, text in enumerate(["Name:", "Folder:", "Project dir:"]):
             lbl = Gtk.Label(label=text, halign=Gtk.Align.END)
             grid.attach(lbl, 0, i, 1, 1)
 
@@ -981,9 +904,6 @@ class ClaudeCodeDialog(Gtk.Dialog):
         self.folder_combo.get_child().set_placeholder_text("(optional) folder for grouping")
         grid.attach(self.folder_combo, 1, 1, 1, 1)
 
-        self.color_combo = _create_color_combo()
-        grid.attach(self.color_combo, 1, 2, 1, 1)
-
         dir_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         self.entry_project_dir = Gtk.Entry(hexpand=True)
         self.entry_project_dir.set_placeholder_text("path to project directory (required)")
@@ -991,10 +911,10 @@ class ClaudeCodeDialog(Gtk.Dialog):
         btn_browse = Gtk.Button(label="Browse…")
         btn_browse.connect("clicked", self._on_browse_dir)
         dir_box.pack_start(btn_browse, False, False, 0)
-        grid.attach(dir_box, 1, 3, 1, 1)
+        grid.attach(dir_box, 1, 2, 1, 1)
 
         self.lbl_ctx_status = Gtk.Label(xalign=0)
-        grid.attach(self.lbl_ctx_status, 1, 4, 1, 1)
+        grid.attach(self.lbl_ctx_status, 1, 3, 1, 1)
 
         # Separator
         box.pack_start(Gtk.Separator(), False, False, 2)
@@ -1030,9 +950,6 @@ class ClaudeCodeDialog(Gtk.Dialog):
         if session:
             self.entry_name.set_text(session.get("name", ""))
             self.folder_combo.get_child().set_text(session.get("folder", ""))
-            color = session.get("color", SESSION_COLORS[0])
-            idx = SESSION_COLORS.index(color) if color in SESSION_COLORS else 0
-            self.color_combo.set_active(idx)
             self.chk_sudo.set_active(session.get("sudo", True))
             self.chk_resume.set_active(session.get("resume", True))
             self.chk_skip_perms.set_active(session.get("skip_permissions", True))
@@ -1051,19 +968,12 @@ class ClaudeCodeDialog(Gtk.Dialog):
         return {
             "name": self.entry_name.get_text().strip(),
             "folder": self.folder_combo.get_child().get_text().strip(),
-            "color": self._get_active_color(),
             "sudo": self.chk_sudo.get_active(),
             "resume": self.chk_resume.get_active(),
             "skip_permissions": self.chk_skip_perms.get_active(),
             "prompt": prompt,
             "project_dir": self.entry_project_dir.get_text().strip(),
         }
-
-    def _get_active_color(self):
-        it = self.color_combo.get_active_iter()
-        if it:
-            return self.color_combo.get_model().get_value(it, 0)
-        return SESSION_COLORS[0]
 
     def validate(self):
         data = self.get_data()
@@ -2783,7 +2693,7 @@ class SessionSidebar(Gtk.Box):
             session["name"],
             session["id"],
             tooltip,
-            session.get("color", SESSION_COLORS[0]),
+            _session_color("ssh"),
             Pango.Weight.NORMAL,
         ])
         for macro in session.get("macros", []):
@@ -2812,7 +2722,7 @@ class SessionSidebar(Gtk.Box):
             session["name"],
             f"claude:{session['id']}",
             tooltip,
-            session.get("color", SESSION_COLORS[0]),
+            _session_color("claude"),
             Pango.Weight.NORMAL,
         ])
 
@@ -6178,6 +6088,13 @@ class GitPanel(Gtk.Box):
         # ── Header bar ──
         header = Gtk.Box(spacing=6)
         header.get_style_context().add_class("git-header")
+
+        self._btn_toggle = Gtk.Button(label="▶")
+        self._btn_toggle.get_style_context().add_class("sidebar-btn")
+        self._btn_toggle.set_tooltip_text("Hide Git panel (Ctrl+G)")
+        self._btn_toggle.connect("clicked", lambda _: self.app.toggle_git_panel())
+        header.pack_start(self._btn_toggle, False, False, 0)
+
         lbl = Gtk.Label(label="Git")
         lbl.set_xalign(0)
         header.pack_start(lbl, True, True, 0)
@@ -6187,12 +6104,6 @@ class GitPanel(Gtk.Box):
         self._btn_refresh.set_tooltip_text("Refresh (F5)")
         self._btn_refresh.connect("clicked", lambda _: self.refresh())
         header.pack_end(self._btn_refresh, False, False, 0)
-
-        self._btn_toggle = Gtk.Button(label="✕")
-        self._btn_toggle.get_style_context().add_class("sidebar-btn")
-        self._btn_toggle.set_tooltip_text("Close Git panel (Ctrl+G)")
-        self._btn_toggle.connect("clicked", lambda _: self.app.toggle_git_panel())
-        header.pack_end(self._btn_toggle, False, False, 0)
 
         self.pack_start(header, False, False, 0)
 
@@ -6404,7 +6315,8 @@ class GitPanel(Gtk.Box):
         if not branch:
             branch = (self._git("rev-parse", "--short", "HEAD") or "detached").strip()
 
-        lines = [f"<span size='large' foreground='#a6e3a1'><b>{branch}</b></span>"]
+        c_grn, c_red, c_dim = CATPPUCCIN["green"], CATPPUCCIN["red"], CATPPUCCIN["overlay0"]
+        lines = [f"<span size='large' foreground='{c_grn}'><b>{branch}</b></span>"]
 
         # Upstream tracking
         upstream = self._git("rev-parse", "--abbrev-ref", "@{upstream}")
@@ -6414,9 +6326,9 @@ class GitPanel(Gtk.Box):
             behind = (self._git("rev-list", "--count", f"HEAD..{upstream}") or "0").strip()
             parts = []
             if ahead != "0":
-                parts.append(f"<span foreground='#a6e3a1'>↑{ahead}</span>")
+                parts.append(f"<span foreground='{c_grn}'>↑{ahead}</span>")
             if behind != "0":
-                parts.append(f"<span foreground='#f38ba8'>↓{behind}</span>")
+                parts.append(f"<span foreground='{c_red}'>↓{behind}</span>")
             if parts:
                 lines.append(f"{' '.join(parts)}  vs  {upstream}")
             else:
@@ -6431,18 +6343,19 @@ class GitPanel(Gtk.Box):
                 if name not in seen:
                     seen.add(name)
                     url = line.split()[1] if len(line.split()) > 1 else ""
-                    lines.append(f"<small><span foreground='#6c7086'>{name}  {url}</span></small>")
+                    lines.append(f"<small><span foreground='{c_dim}'>{name}  {url}</span></small>")
 
         self._branch_label.set_markup("\n".join(lines))
 
     def _refresh_changes(self):
         self._changes_store.clear()
-        # Status with porcelain (preserve leading spaces — they encode staged status)
         status = self._git("status", "--porcelain=v1") or ""
         files = status.rstrip().splitlines() if status.rstrip() else []
         total_add, total_del = 0, 0
+        c_grn = CATPPUCCIN["green"]
+        c_red = CATPPUCCIN["red"]
+        c_yel = CATPPUCCIN["yellow"]
 
-        # Get numstat — combine unstaged and staged diffs
         numstat = {}
         for diff_args in [("diff", "--numstat", "HEAD")]:
             raw = self._git(*diff_args) or ""
@@ -6453,7 +6366,6 @@ class GitPanel(Gtk.Box):
                     d = parts[1] if parts[1] != "-" else "bin"
                     fname = parts[2]
                     if fname in numstat and numstat[fname] != ("bin", "bin"):
-                        # Accumulate
                         pa, pd = numstat[fname]
                         a = str(int(pa) + int(a)) if pa.isdigit() and a.isdigit() else a
                         d = str(int(pd) + int(d)) if pd.isdigit() and d.isdigit() else d
@@ -6473,18 +6385,17 @@ class GitPanel(Gtk.Box):
             if adds or dels:
                 parts = []
                 if adds and adds != "0":
-                    parts.append(f"<span foreground='#a6e3a1'>+{adds}</span>")
+                    parts.append(f"<span foreground='{c_grn}'>+{adds}</span>")
                 if dels and dels != "0":
-                    parts.append(f"<span foreground='#f38ba8'>-{dels}</span>")
+                    parts.append(f"<span foreground='{c_red}'>-{dels}</span>")
                 if adds == "bin":
-                    parts = [f"<span foreground='#f9e2af'>bin</span>"]
+                    parts = [f"<span foreground='{c_yel}'>bin</span>"]
                 stat_str = " ".join(parts)
-            # Color the status indicator
             s = st.strip()
             status_colors = {
-                "M": "#f9e2af", "A": "#a6e3a1", "D": "#f38ba8",
-                "R": "#89b4fa", "C": "#89b4fa", "U": "#f38ba8",
-                "??": "#6c7086",
+                "M": c_yel, "A": c_grn, "D": c_red,
+                "R": CATPPUCCIN["blue"], "C": CATPPUCCIN["blue"],
+                "U": c_red, "??": CATPPUCCIN["overlay0"],
             }
             color = status_colors.get(s, CATPPUCCIN["text"])
             st_markup = f"<span foreground='{color}'><b>{s}</b></span>"
@@ -6494,63 +6405,58 @@ class GitPanel(Gtk.Box):
         if n:
             self._changes_summary.set_markup(
                 f"{n} file{'s' if n != 1 else ''}  "
-                f"<span foreground='#a6e3a1'><b>+{total_add}</b></span>  "
-                f"<span foreground='#f38ba8'><b>-{total_del}</b></span>"
+                f"<span foreground='{c_grn}'><b>+{total_add}</b></span>  "
+                f"<span foreground='{c_red}'><b>-{total_del}</b></span>"
             )
         else:
             self._changes_summary.set_markup(
-                f"<span foreground='#a6e3a1'>✓ Working tree clean</span>")
+                f"<span foreground='{c_grn}'>✓ Working tree clean</span>")
 
     # ANSI color code → Catppuccin palette mapping for git log
-    _ANSI_COLORS = {
-        "31": "#f38ba8",  # red
-        "32": "#a6e3a1",  # green
-        "33": "#f9e2af",  # yellow
-        "34": "#89b4fa",  # blue
-        "35": "#f5c2e7",  # magenta
-        "36": "#94e2d5",  # cyan
-        "1;31": "#f38ba8", "1;32": "#a6e3a1", "1;33": "#f9e2af",
-        "1;34": "#89b4fa", "1;35": "#f5c2e7", "1;36": "#94e2d5",
-        "1": "#cdd6f4",    # bold white
-    }
+    @staticmethod
+    def _ansi_colors():
+        return {
+            "31": CATPPUCCIN["red"], "32": CATPPUCCIN["green"],
+            "33": CATPPUCCIN["yellow"], "34": CATPPUCCIN["blue"],
+            "35": CATPPUCCIN["pink"], "36": CATPPUCCIN["teal"],
+            "1;31": CATPPUCCIN["red"], "1;32": CATPPUCCIN["green"],
+            "1;33": CATPPUCCIN["yellow"], "1;34": CATPPUCCIN["blue"],
+            "1;35": CATPPUCCIN["pink"], "1;36": CATPPUCCIN["teal"],
+            "1": CATPPUCCIN["text"],
+        }
 
     def _refresh_log(self):
         log = self._git(
             "log", "--oneline", "--decorate", "--graph", "--color=always", "-40",
             timeout=10,
         ) or "(no commits)"
-        buf = self._log_view.get_buffer()
-        buf.set_text("")
-        # Parse ANSI escape sequences and apply TextTags
-        tag_table = buf.get_tag_table()
+        # Fresh buffer to get clean tags for current theme
+        buf = Gtk.TextBuffer()
+        ansi = self._ansi_colors()
+        tags = {}
         end_iter = buf.get_end_iter
         for line in log.rstrip().splitlines():
             parts = re.split(r'\x1b\[([0-9;]*)m', line)
-            # parts = [text, code, text, code, text, ...]
             current_tag = None
             for i, part in enumerate(parts):
                 if i % 2 == 1:
-                    # ANSI code
                     if part == "0" or part == "":
                         current_tag = None
-                    else:
-                        color = self._ANSI_COLORS.get(part)
-                        if color:
-                            tag_name = f"ansi_{part}"
-                            tag = tag_table.lookup(tag_name)
-                            if not tag:
-                                tag = buf.create_tag(tag_name, foreground=color)
-                                if part.startswith("1"):
-                                    tag.set_property("weight", Pango.Weight.BOLD)
-                            current_tag = tag
+                    elif part in ansi:
+                        if part not in tags:
+                            tag = buf.create_tag(None, foreground=ansi[part])
+                            if part.startswith("1"):
+                                tag.set_property("weight", Pango.Weight.BOLD)
+                            tags[part] = tag
+                        current_tag = tags[part]
                 else:
-                    # Text
                     if part:
                         if current_tag:
                             buf.insert_with_tags(end_iter(), part, current_tag)
                         else:
                             buf.insert(end_iter(), part)
             buf.insert(end_iter(), "\n")
+        self._log_view.set_buffer(buf)
 
     def _refresh_stash(self):
         stash = (self._git("stash", "list") or "").strip()
@@ -6808,17 +6714,17 @@ class BTerminalApp(Gtk.Window):
         self.set_icon_name("bterminal")
 
         # Apply CSS
-        css_provider = Gtk.CssProvider()
-        css_provider.load_from_data(CSS.encode())
+        self._css_provider = Gtk.CssProvider()
+        self._css_provider.load_from_data(CSS.encode())
         Gtk.StyleContext.add_provider_for_screen(
             Gdk.Screen.get_default(),
-            css_provider,
+            self._css_provider,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
         )
 
         # Dark theme
-        settings = Gtk.Settings.get_default()
-        settings.set_property("gtk-application-prefer-dark-theme", True)
+        self._gtk_settings = Gtk.Settings.get_default()
+        self._gtk_settings.set_property("gtk-application-prefer-dark-theme", True)
 
         # Session managers
         self.session_manager = SessionManager()
@@ -6937,13 +6843,24 @@ class BTerminalApp(Gtk.Window):
         self._show_sidebar_btn.connect("clicked", lambda _: self.toggle_sidebar())
         self.notebook.set_action_widget(self._show_sidebar_btn, Gtk.PackType.START)
 
-        # Show-git button (visible only when git panel is hidden)
+        # Right action area: theme toggle + git button
+        end_box = Gtk.Box(spacing=4)
+
+        self._theme_btn = Gtk.Button(label="☀")
+        self._theme_btn.get_style_context().add_class("theme-toggle")
+        self._theme_btn.set_tooltip_text("Toggle light/dark theme")
+        self._theme_btn.connect("clicked", lambda _: self._toggle_theme())
+        end_box.pack_start(self._theme_btn, False, False, 0)
+
         self._show_git_btn = Gtk.Button(label="Git ◀")
         self._show_git_btn.get_style_context().add_class("sidebar-btn")
         self._show_git_btn.set_tooltip_text("Show Git panel (Ctrl+G)")
         self._show_git_btn.set_no_show_all(True)
         self._show_git_btn.connect("clicked", lambda _: self.toggle_git_panel())
-        self.notebook.set_action_widget(self._show_git_btn, Gtk.PackType.END)
+        end_box.pack_start(self._show_git_btn, False, False, 0)
+
+        end_box.show_all()
+        self.notebook.set_action_widget(end_box, Gtk.PackType.END)
 
         paned.set_position(250)
 
@@ -7178,6 +7095,44 @@ class BTerminalApp(Gtk.Window):
             self._paned.set_position(self._sidebar_last_pos)
             self._show_sidebar_btn.hide()
         self._sidebar_visible = not self._sidebar_visible
+
+    def _toggle_theme(self):
+        """Switch between Catppuccin Mocha (dark) and Latte (light)."""
+        global _current_theme, CSS
+        if _current_theme == "dark":
+            _current_theme = "light"
+            CATPPUCCIN.update(CATPPUCCIN_LATTE)
+            TERMINAL_PALETTE[:] = TERMINAL_PALETTE_LATTE
+            self._gtk_settings.set_property("gtk-application-prefer-dark-theme", False)
+            self._theme_btn.set_label("☾")
+        else:
+            _current_theme = "dark"
+            CATPPUCCIN.update(CATPPUCCIN_MOCHA)
+            TERMINAL_PALETTE[:] = TERMINAL_PALETTE_MOCHA
+            self._gtk_settings.set_property("gtk-application-prefer-dark-theme", True)
+            self._theme_btn.set_label("☀")
+        # Reload CSS
+        CSS = _build_css(CATPPUCCIN)
+        self._css_provider.load_from_data(CSS.encode())
+        # Re-color all open terminals
+        fg = _parse_color(CATPPUCCIN["text"])
+        bg = _parse_color(CATPPUCCIN["base"])
+        palette = [_parse_color(c) for c in TERMINAL_PALETTE]
+        cursor = _parse_color(CATPPUCCIN["rosewater"])
+        cursor_fg = _parse_color(CATPPUCCIN["crust"])
+        for i in range(self.notebook.get_n_pages()):
+            tab = self.notebook.get_nth_page(i)
+            if isinstance(tab, TerminalTab):
+                tab.terminal.set_colors(fg, bg, palette)
+                tab.terminal.set_color_cursor(cursor)
+                tab.terminal.set_color_cursor_foreground(cursor_fg)
+                # Reset terminal colors for already-rendered content
+                tab.terminal.feed(b"\x1b[0m")
+        # Refresh sidebar (session colors change per theme)
+        self.sidebar.refresh()
+        # Refresh git panel if visible
+        if self._git_visible:
+            self.git_panel.refresh()
 
     def toggle_git_panel(self):
         """Show/hide the right-side Git panel (mirror of toggle_sidebar)."""
