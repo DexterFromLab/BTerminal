@@ -1,52 +1,119 @@
 # BTerminal
 
-GTK 3 terminal with SSH & Claude Code session management, macros, cross-session context database, AI model consultation via OpenRouter, multi-model debate (Tribunal), and task management with auto-trigger. Catppuccin Mocha/Latte themes with day/night toggle.
+A GTK 3 terminal emulator built for developers who work with SSH servers and Claude Code. Combines session management, macro automation, a persistent context database, multi-model AI consultation, task orchestration, and git awareness in a single window. Ships with Catppuccin Mocha (dark) and Latte (light) themes.
 
 ![BTerminal](screenshot.png)
 
 ## Features
 
-- **SSH sessions** — saved configs (host, port, user, key, folder, color), one-click connect from sidebar
-- **Claude Code sessions** — saved configs with sudo askpass, resume, skip-permissions, initial prompt and project directory
-- **Session stats bar** — live metrics for Claude Code sessions: duration, prompts, responses, tokens, cache hit rate, cost estimate and throughput
-- **SSH macros** — multi-step automation (text, key press, delay) bound to sessions, runnable from sidebar
-- **Tabs** — multiple terminals in tabs with reordering, auto-close and shell respawn
-- **Folder grouping** — organize both SSH and Claude Code sessions in collapsible sidebar folders with rename, move and ungroup
-- **Session colors** — 10 Catppuccin accent colors with visual swatch picker
-- **Open with** — right-click Claude Code sessions to open the project directory in File Manager, VS Code, Zed or a custom command
-- **Git panel** — right-side panel for Claude Code tabs with accordion sections: Branch, Changes (with numstat), Stash, LFS/Binary, Activity and Log; auto-refresh every 3 s, file monitoring, `git init` button for uninitialized repos
-- **Clipboard image paste** — `Ctrl+Shift+V` saves clipboard screenshots to `copied_images/` in the project directory and pastes the file path into the terminal; right-click menu option to paste image directly into ctx
-- **Sudo askpass** — temporary helper for Claude Code sudo mode: password entered once, retry on wrong password, auto-cleanup on exit
-- **Auto-update** — checks `origin/master` on startup, prompts to pull and reinstall if new version available
-- **Day/night theme** — toggle between Catppuccin Mocha (dark) and Latte (light) with a single click; re-colors terminal, sidebar, tabs, dialogs and scrollbars live
+### Terminal
+
+- Tabbed interface with VTE terminals, drag-to-reorder, and 10 000-line scrollback
+- Local shell tabs (`Ctrl+T`) and SSH connections with saved configs (host, port, user, key file)
+- Folder grouping for sessions in the sidebar with collapse, rename, move and ungroup
+- Per-session accent colors (10 Catppuccin palette choices)
+- Clipboard image detection on paste (`Ctrl+Shift+V`) — saves the image to `copied_images/` in the project directory and pastes the path; right-click option to paste directly into ctx
+- Drag-and-drop file URIs into the terminal to paste paths
+
+### Claude Code
+
+- Saved Claude Code session configs: project directory, initial prompt, sudo askpass, resume flag, permission skip
+- Sudo elevation via a temporary `SUDO_ASKPASS` helper — password entered once, retried on failure, cleaned up on exit
+- Session metrics bar showing live duration, prompts, responses, tokens, cache hit rate, cost and throughput (parsed from Claude Code JSONL output)
+- Emoji-tagged tabs for quick visual identification across multiple sessions
+- "Open with" context menu — open a project directory in File Manager, VS Code, Zed or a custom command
+
+### Git Panel
+
+A right-side panel that appears only on Claude Code tabs (`Ctrl+G` to toggle). Auto-refreshes every 3 seconds and monitors `.git/` for changes.
+
+Accordion sections: **Branch** (current branch + HEAD), **Changes** (unstaged/untracked with numstat), **Stash**, **LFS/Binary** (detection + setup), **Activity** (recent commits), **Log** (last 20 oneline entries). Includes a `git init` button for uninitialized repos.
+
+### SSH Macros
+
+Multi-step automation sequences bound to sessions. Each step can be a text input, key press (Enter, Tab, Escape, Ctrl+C, Ctrl+D) or a timed delay. Steps are drag-reorderable in the editor and executed sequentially with 50 ms spacing.
+
+### Context Manager (ctx)
+
+SQLite-backed persistent context that survives across Claude Code sessions. Uses FTS5 full-text search and WAL journal mode.
+
+```bash
+ctx init myproject "description" /path/to/project
+ctx get myproject                      # load project context
+ctx get myproject --shared             # include shared (global) entries
+ctx set myproject key "value"          # store an entry
+ctx append myproject key "more"        # append to an existing entry
+ctx shared set preferences "value"     # global context for all projects
+ctx summary myproject "what was done"  # save session summary
+ctx search "query"                     # full-text search
+ctx list                               # list projects
+ctx history myproject                  # session history
+ctx export                             # export all data as JSON
+ctx delete myproject [key]             # delete project or entry
+ctx --help
+```
+
+The sidebar **Ctx** tab provides a tree view of all projects and entries, a detail/image preview pane, add/edit/delete operations, and selective import/export via JSON with a checkbox UI. A Setup Wizard walks through project registration and can auto-generate `CLAUDE.md`.
+
+Images can be dragged into the ctx tree — they are stored in `~/.claude-context/images/` and indexed in the database.
 
 ### Consult (AI Models)
 
-- **Consult CLI** — query external AI models via OpenRouter from the terminal (`consult 'question'`)
-- **Consult panel** — sidebar tab for model management: enable/disable models, set default, fetch available models from OpenRouter
-- **Pipe support** — pipe any output to consult for analysis (`cat log.txt | consult 'what went wrong?'`)
-- **File context** — attach files to queries (`consult -f code.py 'review this'`)
-- **Tribunal (debate)** — multi-model adversarial debate with configurable roles (Analyst, Advocate, Critic, Arbiter), per-project presets, and max rounds setting
+Query external AI models through [OpenRouter](https://openrouter.ai) from the terminal or the sidebar panel.
+
+```bash
+consult "question"                     # ask the default model
+consult -m google/gemini-2.5-pro "q"   # specific model (full ID with provider prefix)
+consult -f code.py "review this"       # attach a file
+cat log.txt | consult "what failed?"   # pipe input
+consult models                         # list available models
+```
+
+The sidebar **Consult** tab manages API keys, enables/disables individual models, sets the default, and fetches the latest model list from OpenRouter. Supports both OpenRouter models and Claude Code native models (Opus, Sonnet, Haiku).
+
+#### Tribunal (Multi-Model Debate)
+
+Adversarial debate across multiple AI models with four roles: Analyst, Advocate, Critic and Arbiter. Configurable round count (1-6), single-pass mode, and per-project presets.
+
+```bash
+consult debate "problem"
+consult debate "problem" \
+  --analyst claude-code/opus \
+  --advocate openai/gpt-5-codex \
+  --critic deepseek/deepseek-r1 \
+  --arbiter claude-code/opus
+```
 
 ### Task Management
 
-- **Tasks CLI** — per-project task lists with hierarchical IDs (`tasks add project "description"`, `tasks done project id`)
-- **Task List panel** — sidebar tab for browsing and managing tasks per project
-- **Task claiming** — sessions atomically claim the next unclaimed task to prevent conflicts in multi-session setups
-- **Auto-trigger** — start/stop buttons in the Task panel to continuously send pending tasks to Claude Code sessions until all are done; auto-trigger flags reset to OFF on app startup for safety
+Per-project task lists with hierarchical IDs (1, 1.a, 1.b, 2, ...) and states: open, in_progress, completed.
 
-### Context Manager
+```bash
+tasks list myproject
+tasks context myproject                # tasks + next-task instructions
+tasks context myproject --session ID   # session-specific claiming
+tasks add myproject "description"
+tasks add myproject 1 "subtask"        # creates 1.a
+tasks done myproject <task_id>
+tasks pending myproject
+tasks --help
+```
 
-- **ctx CLI** — SQLite-based tool for persistent context across Claude Code sessions
-- **Ctx Manager panel** — sidebar tab for browsing, editing and managing all project contexts
-- **Ctx Setup Wizard** — step-by-step project setup with auto-detection from README and CLAUDE.md generation
-- **Import / Export** — selective import and export of projects, entries, summaries and shared context via JSON with checkbox tree UI
+The sidebar **Tasks** tab shows a per-project task list with checkboxes, add/edit/delete, and a 2-second auto-refresh poll. An **auto-trigger** system (start/stop buttons) continuously feeds pending tasks to Claude Code sessions — task claims are atomic to prevent collisions in multi-session setups. Auto-trigger flags reset to OFF on every app startup for safety.
+
+### Theme
+
+Toggle between Catppuccin Mocha (dark) and Latte (light) with the sun/moon button. The switch re-colors the terminal palette, sidebar, tabs, dialogs and scrollbars live without restarting.
+
+### Auto-Update
+
+On startup BTerminal checks `origin/master` for new commits. If an update is available it shows a prompt with the new commit list and can pull + reinstall in one click.
 
 ## Requirements
 
-- **Python 3** with GTK 3 and VTE bindings
-- **Claude Code** — active Claude subscription (Max or Pro plan); the installer will auto-install Claude Code CLI if not found
-- **OpenRouter account** *(optional)* — required only for the Consult feature; needs API credits on [openrouter.ai](https://openrouter.ai)
+- **Python 3** with PyGObject, GTK 3 and VTE 2.91 bindings
+- **Claude Code** CLI — requires an active Claude subscription (Max or Pro); the installer will set it up if missing
+- **OpenRouter account** *(optional)* — needed only for the Consult feature; requires API credits at [openrouter.ai](https://openrouter.ai)
 
 ## Installation
 
@@ -57,16 +124,16 @@ cd BTerminal
 ```
 
 The installer will:
-1. Install system dependencies (python3-gi, GTK3, VTE)
-2. Install Claude Code CLI via npm if not already present (installs Node.js if needed)
-3. Copy files to `~/.local/share/bterminal/`
-4. Create symlinks: `bterminal`, `ctx`, `consult` and `tasks` in `~/.local/bin/`
-5. Initialize context database at `~/.claude-context/context.db`
-6. Add desktop entry and icon to application menu
+1. Install system dependencies (`python3-gi`, GTK 3, VTE 2.91, `git`, `git-lfs`)
+2. Install Claude Code CLI via npm (installs Node.js first if needed)
+3. Copy `bterminal.py`, `ctx`, `consult` and `tasks` to `~/.local/share/bterminal/`
+4. Create symlinks in `~/.local/bin/` (`bterminal`, `ctx`, `consult`, `tasks`)
+5. Initialize the context database at `~/.claude-context/context.db`
+6. Add a desktop entry and icon to the application menu
 
-Use `./install.sh --no-sudo` for a non-root install (configures npm prefix at `~/.npm-global`).
+Use `./install.sh --no-sudo` for a non-root install (sets npm prefix to `~/.npm-global`).
 
-### Manual dependency install (Debian/Ubuntu/Pop!_OS)
+### Manual dependencies (Debian / Ubuntu / Pop!_OS)
 
 ```bash
 sudo apt install python3-gi gir1.2-gtk-3.0 gir1.2-vte-2.91
@@ -78,118 +145,33 @@ sudo apt install python3-gi gir1.2-gtk-3.0 gir1.2-vte-2.91
 bterminal
 ```
 
-The sidebar has four tabs: **Sessions** (SSH & Claude Code), **Ctx** (context manager), **Consult** (AI models & debate) and **Tasks** (task lists & auto-trigger). Claude Code tabs also get a **Git panel** on the right side (toggle with `Ctrl+G`).
-
-## Context Manager (ctx)
-
-`ctx` is a SQLite-based tool for managing persistent context across Claude Code sessions. It uses FTS5 full-text search and WAL journal mode.
-
-```bash
-ctx init myproject "Project description" /path/to/project
-ctx get myproject                    # Load project context
-ctx get myproject --shared           # Include shared context
-ctx set myproject key "value"        # Save a context entry
-ctx append myproject key "more"      # Append to existing entry
-ctx shared set preferences "value"   # Save shared context (all projects)
-ctx summary myproject "What was done" # Save session summary
-ctx search "query"                   # Full-text search across everything
-ctx list                             # List all projects
-ctx history myproject                # Show session history
-ctx export                           # Export all data as JSON
-ctx delete myproject [key]           # Delete project or entry
-ctx --help                           # All commands
-```
-
-### Ctx Manager Panel
-
-The sidebar **Ctx** tab provides a GUI for the context database:
-
-- Browse all projects and their entries in a tree view
-- View entry values and project details in the detail pane
-- Add, edit and delete projects and entries
-- **Export** — select specific projects, entries, summaries and shared context to save as JSON
-- **Import** — load a JSON file, preview contents with checkboxes, optionally overwrite existing entries
-
-### Integration with Claude Code
-
-Add a `CLAUDE.md` to your project root (the Ctx Setup Wizard can generate this automatically):
-
-```markdown
-On session start, load context:
-  ctx get myproject
-
-Save important discoveries: ctx set myproject <key> <value>
-Before ending session: ctx summary myproject "<what was done>"
-```
-
-Claude Code reads `CLAUDE.md` automatically and will maintain the context database.
-
-## Consult
-
-`consult` queries external AI models via OpenRouter API.
-
-```bash
-consult 'question'                   # Ask the default model
-consult -m model_id 'question'       # Ask a specific model (full ID, e.g. google/gemini-2.5-pro)
-consult -f code.py 'review this'     # Attach a file for context
-cat log.txt | consult 'what failed?' # Pipe input for analysis
-consult models                       # List available models
-```
-
-### Tribunal (Multi-Model Debate)
-
-```bash
-consult debate "problem"             # Run a debate with default roles
-consult debate "problem" \
-  --analyst claude-code/opus \
-  --advocate openai/gpt-5-codex \
-  --critic deepseek/deepseek-r1 \
-  --arbiter claude-code/opus         # Custom role assignment
-```
-
-The Consult panel in the sidebar provides a GUI for configuring debate roles, saving per-project presets and launching debates.
-
-Configuration: `~/.config/bterminal/consult.json` (API key and model settings).
-
-## Tasks
-
-`tasks` manages per-project task lists for Claude Code sessions.
-
-```bash
-tasks list myproject                 # Show all tasks
-tasks context myproject              # Show tasks + next task instructions
-tasks context myproject --session ID # Session-specific task claiming
-tasks add myproject "description"    # Add a task
-tasks add myproject 1 "subtask"      # Add a subtask (hierarchical ID: 1.a)
-tasks done myproject <task_id>       # Mark task as done
-tasks pending myproject              # Count of open tasks
-tasks --help                         # Full help
-```
-
-## Configuration
-
-Config files in `~/.config/bterminal/`:
-
-| File | Description |
-|------|-------------|
-| `sessions.json` | SSH sessions and macros |
-| `claude_sessions.json` | Claude Code session configs |
-| `consult.json` | Consult API key and model settings |
-
-Context database: `~/.claude-context/context.db`
+The sidebar has four tabs: **Sessions**, **Ctx**, **Consult** and **Tasks**. Claude Code tabs also get a **Git panel** on the right.
 
 ## Keyboard Shortcuts
 
 | Shortcut | Action |
 |----------|--------|
-| `Ctrl+T` | New tab (local shell) |
+| `Ctrl+T` | New local shell tab |
+| `Ctrl+Shift+W` | Close current tab |
+| `Ctrl+Tab` | Next tab (wraps around) |
+| `Ctrl+PageUp` / `Ctrl+PageDown` | Previous / next tab |
 | `Ctrl+B` | Toggle sidebar |
-| `Ctrl+Tab` | Next tab (wrap around) |
-| `Ctrl+Shift+W` | Close tab |
 | `Ctrl+G` | Toggle Git panel (Claude Code tabs) |
+| `F5` | Refresh Git panel |
 | `Ctrl+Shift+C` | Copy |
-| `Ctrl+Shift+V` | Paste (image → save & paste path) |
-| `Ctrl+PageUp/Down` | Previous/next tab |
+| `Ctrl+Shift+V` | Paste (detects clipboard images) |
+
+## Configuration
+
+Files in `~/.config/bterminal/`:
+
+| File | Contents |
+|------|----------|
+| `sessions.json` | SSH sessions and macros |
+| `claude_sessions.json` | Claude Code session configs |
+| `consult.json` | OpenRouter API key, models and tribunal presets |
+
+Context database: `~/.claude-context/context.db`
 
 ## License
 
