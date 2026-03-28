@@ -1,18 +1,21 @@
 # BTerminal
 
-GTK 3 terminal with SSH & Claude Code session management, macros, cross-session context database, AI model consultation via OpenRouter, and task management with auto-trigger. Catppuccin Mocha theme.
+GTK 3 terminal with SSH & Claude Code session management, macros, cross-session context database, AI model consultation via OpenRouter, multi-model debate (Tribunal), and task management with auto-trigger. Catppuccin Mocha theme.
 
 ![BTerminal](screenshot.png)
 
 ## Features
 
 - **SSH sessions** — saved configs (host, port, user, key, folder, color), one-click connect from sidebar
-- **Claude Code sessions** — saved configs with sudo askpass, resume, skip-permissions and initial prompt
+- **Claude Code sessions** — saved configs with sudo askpass, resume, skip-permissions, initial prompt and project directory
+- **Session stats bar** — live metrics for Claude Code sessions: duration, prompts, responses, tokens, cache hit rate, cost estimate and throughput
 - **SSH macros** — multi-step automation (text, key press, delay) bound to sessions, runnable from sidebar
 - **Tabs** — multiple terminals in tabs with reordering, auto-close and shell respawn
-- **Folder grouping** — organize both SSH and Claude Code sessions in collapsible sidebar folders
-- **Session colors** — 10 Catppuccin accent colors for quick visual identification
+- **Folder grouping** — organize both SSH and Claude Code sessions in collapsible sidebar folders with rename, move and ungroup
+- **Session colors** — 10 Catppuccin accent colors with visual swatch picker
+- **Open with** — right-click Claude Code sessions to open the project directory in File Manager, VS Code, Zed or a custom command
 - **Sudo askpass** — temporary helper for Claude Code sudo mode: password entered once, auto-cleanup on exit
+- **Auto-update** — checks `origin/master` on startup, prompts to pull and reinstall if new version available
 - **Catppuccin Mocha** — full theme across terminal, sidebar, tabs, dialogs and scrollbars
 
 ### Consult (AI Models)
@@ -21,12 +24,14 @@ GTK 3 terminal with SSH & Claude Code session management, macros, cross-session 
 - **Consult panel** — sidebar tab for model management: enable/disable models, set default, fetch available models from OpenRouter
 - **Pipe support** — pipe any output to consult for analysis (`cat log.txt | consult 'what went wrong?'`)
 - **File context** — attach files to queries (`consult -f code.py 'review this'`)
+- **Tribunal (debate)** — multi-model adversarial debate with configurable roles (Analyst, Advocate, Critic, Arbiter), per-project presets, and max rounds setting
 
 ### Task Management
 
-- **Tasks CLI** — per-project task lists (`tasks add project "description"`, `tasks done project id`)
+- **Tasks CLI** — per-project task lists with hierarchical IDs (`tasks add project "description"`, `tasks done project id`)
 - **Task List panel** — sidebar tab for browsing and managing tasks per project
-- **Auto-trigger** — automatically trigger Claude Code sessions to pick up and execute pending tasks
+- **Task claiming** — sessions atomically claim the next unclaimed task to prevent conflicts in multi-session setups
+- **Auto-trigger** — start/stop buttons in the Task panel to continuously send pending tasks to Claude Code sessions until all are done; auto-trigger flags reset to OFF on app startup for safety
 
 ### Context Manager
 
@@ -37,7 +42,8 @@ GTK 3 terminal with SSH & Claude Code session management, macros, cross-session 
 
 ## Requirements
 
-- **Claude Code** — active Claude subscription (Max or Pro plan) with Claude Code CLI installed
+- **Python 3** with GTK 3 and VTE bindings
+- **Claude Code** — active Claude subscription (Max or Pro plan); the installer will auto-install Claude Code CLI if not found
 - **OpenRouter account** *(optional)* — required only for the Consult feature; needs API credits on [openrouter.ai](https://openrouter.ai)
 
 ## Installation
@@ -50,10 +56,13 @@ cd BTerminal
 
 The installer will:
 1. Install system dependencies (python3-gi, GTK3, VTE)
-2. Copy files to `~/.local/share/bterminal/`
-3. Create symlinks: `bterminal`, `ctx`, and `consult` in `~/.local/bin/`
-4. Initialize context database at `~/.claude-context/context.db`
-5. Add desktop entry and icon to application menu
+2. Install Claude Code CLI via npm if not already present (installs Node.js if needed)
+3. Copy files to `~/.local/share/bterminal/`
+4. Create symlinks: `bterminal`, `ctx`, `consult` and `tasks` in `~/.local/bin/`
+5. Initialize context database at `~/.claude-context/context.db`
+6. Add desktop entry and icon to application menu
+
+Use `./install.sh --no-sudo` for a non-root install (configures npm prefix at `~/.npm-global`).
 
 ### Manual dependency install (Debian/Ubuntu/Pop!_OS)
 
@@ -66,6 +75,8 @@ sudo apt install python3-gi gir1.2-gtk-3.0 gir1.2-vte-2.91
 ```bash
 bterminal
 ```
+
+The sidebar has four tabs: **Sessions** (SSH & Claude Code), **Ctx** (context manager), **Consult** (AI models & debate) and **Tasks** (task lists & auto-trigger).
 
 ## Context Manager (ctx)
 
@@ -117,11 +128,24 @@ Claude Code reads `CLAUDE.md` automatically and will maintain the context databa
 
 ```bash
 consult 'question'                   # Ask the default model
-consult -m gpt-4 'question'         # Ask a specific model
-consult -f code.py 'review this'    # Attach a file for context
+consult -m model_id 'question'       # Ask a specific model (full ID, e.g. google/gemini-2.5-pro)
+consult -f code.py 'review this'     # Attach a file for context
 cat log.txt | consult 'what failed?' # Pipe input for analysis
 consult models                       # List available models
 ```
+
+### Tribunal (Multi-Model Debate)
+
+```bash
+consult debate "problem"             # Run a debate with default roles
+consult debate "problem" \
+  --analyst claude-code/opus \
+  --advocate openai/gpt-5-codex \
+  --critic deepseek/deepseek-r1 \
+  --arbiter claude-code/opus         # Custom role assignment
+```
+
+The Consult panel in the sidebar provides a GUI for configuring debate roles, saving per-project presets and launching debates.
 
 Configuration: `~/.config/bterminal/consult.json` (API key and model settings).
 
@@ -132,8 +156,11 @@ Configuration: `~/.config/bterminal/consult.json` (API key and model settings).
 ```bash
 tasks list myproject                 # Show all tasks
 tasks context myproject              # Show tasks + next task instructions
+tasks context myproject --session ID # Session-specific task claiming
 tasks add myproject "description"    # Add a task
+tasks add myproject 1 "subtask"      # Add a subtask (hierarchical ID: 1.a)
 tasks done myproject <task_id>       # Mark task as done
+tasks pending myproject              # Count of open tasks
 tasks --help                         # Full help
 ```
 
@@ -154,6 +181,8 @@ Context database: `~/.claude-context/context.db`
 | Shortcut | Action |
 |----------|--------|
 | `Ctrl+T` | New tab (local shell) |
+| `Ctrl+B` | Toggle sidebar |
+| `Ctrl+Tab` | Next tab (wrap around) |
 | `Ctrl+Shift+W` | Close tab |
 | `Ctrl+Shift+C` | Copy |
 | `Ctrl+Shift+V` | Paste |
