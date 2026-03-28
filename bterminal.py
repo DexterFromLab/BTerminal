@@ -10,6 +10,7 @@ import json
 import os
 import random
 import re
+import shutil
 import sqlite3
 import subprocess
 import tempfile
@@ -248,6 +249,27 @@ def _parse_color(hex_str):
     c = Gdk.RGBA()
     c.parse(hex_str)
     return c
+
+
+def _create_color_combo():
+    """Create a ComboBox with color swatches for SESSION_COLORS."""
+    store = Gtk.ListStore(str, GdkPixbuf.Pixbuf)
+    for hex_color in SESSION_COLORS:
+        r = int(hex_color[1:3], 16)
+        g = int(hex_color[3:5], 16)
+        b = int(hex_color[5:7], 16)
+        pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, 20, 14)
+        pixbuf.fill((r << 24) | (g << 16) | (b << 8) | 0xFF)
+        store.append([hex_color, pixbuf])
+    combo = Gtk.ComboBox(model=store, hexpand=True)
+    renderer_pixbuf = Gtk.CellRendererPixbuf()
+    combo.pack_start(renderer_pixbuf, False)
+    combo.add_attribute(renderer_pixbuf, "pixbuf", 1)
+    renderer_text = Gtk.CellRendererText()
+    combo.pack_start(renderer_text, True)
+    combo.add_attribute(renderer_text, "text", 0)
+    combo.set_active(0)
+    return combo
 
 
 def _save_expanded(tree, store, id_col):
@@ -548,10 +570,7 @@ class SessionDialog(Gtk.Dialog):
             self.folder_combo.append_text(f)
         self.folder_combo.get_child().set_placeholder_text("(optional) folder for grouping")
 
-        self.color_combo = Gtk.ComboBoxText()
-        for c in SESSION_COLORS:
-            self.color_combo.append(c, c)
-        self.color_combo.set_active(0)
+        self.color_combo = _create_color_combo()
 
         grid.attach(self.entry_name, 1, 0, 1, 1)
         grid.attach(self.entry_host, 1, 1, 1, 1)
@@ -570,7 +589,8 @@ class SessionDialog(Gtk.Dialog):
             self.entry_key.set_text(session.get("key_file", ""))
             self.folder_combo.get_child().set_text(session.get("folder", ""))
             color = session.get("color", SESSION_COLORS[0])
-            self.color_combo.set_active_id(color)
+            idx = SESSION_COLORS.index(color) if color in SESSION_COLORS else 0
+            self.color_combo.set_active(idx)
 
         self.show_all()
 
@@ -582,8 +602,14 @@ class SessionDialog(Gtk.Dialog):
             "username": self.entry_username.get_text().strip(),
             "key_file": self.entry_key.get_text().strip(),
             "folder": self.folder_combo.get_child().get_text().strip(),
-            "color": self.color_combo.get_active_id() or SESSION_COLORS[0],
+            "color": self._get_active_color(),
         }
+
+    def _get_active_color(self):
+        it = self.color_combo.get_active_iter()
+        if it:
+            return self.color_combo.get_model().get_value(it, 0)
+        return SESSION_COLORS[0]
 
     def validate(self):
         data = self.get_data()
@@ -916,10 +942,7 @@ class ClaudeCodeDialog(Gtk.Dialog):
         self.folder_combo.get_child().set_placeholder_text("(optional) folder for grouping")
         grid.attach(self.folder_combo, 1, 1, 1, 1)
 
-        self.color_combo = Gtk.ComboBoxText()
-        for c in SESSION_COLORS:
-            self.color_combo.append(c, c)
-        self.color_combo.set_active(0)
+        self.color_combo = _create_color_combo()
         grid.attach(self.color_combo, 1, 2, 1, 1)
 
         dir_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
@@ -968,7 +991,8 @@ class ClaudeCodeDialog(Gtk.Dialog):
             self.entry_name.set_text(session.get("name", ""))
             self.folder_combo.get_child().set_text(session.get("folder", ""))
             color = session.get("color", SESSION_COLORS[0])
-            self.color_combo.set_active_id(color)
+            idx = SESSION_COLORS.index(color) if color in SESSION_COLORS else 0
+            self.color_combo.set_active(idx)
             self.chk_sudo.set_active(session.get("sudo", False))
             self.chk_resume.set_active(session.get("resume", True))
             self.chk_skip_perms.set_active(session.get("skip_permissions", True))
@@ -987,13 +1011,19 @@ class ClaudeCodeDialog(Gtk.Dialog):
         return {
             "name": self.entry_name.get_text().strip(),
             "folder": self.folder_combo.get_child().get_text().strip(),
-            "color": self.color_combo.get_active_id() or SESSION_COLORS[0],
+            "color": self._get_active_color(),
             "sudo": self.chk_sudo.get_active(),
             "resume": self.chk_resume.get_active(),
             "skip_permissions": self.chk_skip_perms.get_active(),
             "prompt": prompt,
             "project_dir": self.entry_project_dir.get_text().strip(),
         }
+
+    def _get_active_color(self):
+        it = self.color_combo.get_active_iter()
+        if it:
+            return self.color_combo.get_model().get_value(it, 0)
+        return SESSION_COLORS[0]
 
     def validate(self):
         data = self.get_data()
@@ -2918,6 +2948,14 @@ class SessionSidebar(Gtk.Box):
                     item_ctx.connect("activate", lambda _, cid=claude_id: self._edit_ctx(cid))
                     menu.append(item_ctx)
 
+                    project_dir = config.get("project_dir", "") if config else ""
+                    if project_dir and os.path.isdir(project_dir):
+                        menu.append(Gtk.SeparatorMenuItem())
+                        item_open = Gtk.MenuItem(label="Open with \u25B8")
+                        item_open.set_submenu(
+                            self._build_open_with_submenu(project_dir))
+                        menu.append(item_open)
+
                     menu.append(Gtk.SeparatorMenuItem())
 
                     item_folder = Gtk.MenuItem(label="Move to folder \u25B8")
@@ -3219,6 +3257,76 @@ class SessionSidebar(Gtk.Box):
                 break
         if macro:
             self.app.open_ssh_tab_with_macro(session, macro)
+
+    # ── Open with ──
+
+    def _build_open_with_submenu(self, project_dir):
+        submenu = Gtk.Menu()
+
+        item_fm = Gtk.MenuItem(label="File Manager")
+        item_fm.connect("activate",
+                        lambda _, d=project_dir: self._open_with_app("xdg-open", d))
+        submenu.append(item_fm)
+
+        for name, cmd in [("VS Code", "code"), ("Zed", "zed")]:
+            if shutil.which(cmd):
+                item = Gtk.MenuItem(label=name)
+                item.connect("activate",
+                             lambda _, c=cmd, d=project_dir: self._open_with_app(c, d))
+                submenu.append(item)
+
+        submenu.append(Gtk.SeparatorMenuItem())
+
+        item_custom = Gtk.MenuItem(label="Custom\u2026")
+        item_custom.connect("activate",
+                            lambda _, d=project_dir: self._open_with_custom(d))
+        submenu.append(item_custom)
+        return submenu
+
+    def _open_with_app(self, command, project_dir):
+        try:
+            subprocess.Popen([command, project_dir],
+                             start_new_session=True,
+                             stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+        except FileNotFoundError:
+            dlg = Gtk.MessageDialog(
+                transient_for=self.app, modal=True,
+                message_type=Gtk.MessageType.ERROR,
+                buttons=Gtk.ButtonsType.OK,
+                text=f"Command '{command}' not found.")
+            dlg.run()
+            dlg.destroy()
+
+    def _open_with_custom(self, project_dir):
+        dlg = Gtk.Dialog(
+            title="Open with custom command",
+            transient_for=self.app, modal=True)
+        dlg.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                        Gtk.STOCK_OK, Gtk.ResponseType.OK)
+        box = dlg.get_content_area()
+        box.set_spacing(8)
+        box.set_margin_start(12)
+        box.set_margin_end(12)
+        box.set_margin_top(12)
+        box.set_margin_bottom(12)
+
+        lbl = Gtk.Label(label=f"Command to run in:\n{project_dir}")
+        lbl.set_xalign(0)
+        box.pack_start(lbl, False, False, 0)
+
+        entry = Gtk.Entry()
+        entry.set_placeholder_text("e.g. idea, nautilus, kitty")
+        entry.set_activates_default(True)
+        box.pack_start(entry, False, False, 0)
+
+        dlg.set_default_response(Gtk.ResponseType.OK)
+        dlg.show_all()
+        if dlg.run() == Gtk.ResponseType.OK:
+            cmd = entry.get_text().strip()
+            if cmd:
+                self._open_with_app(cmd, project_dir)
+        dlg.destroy()
 
     # ── Claude Code CRUD ──
 
