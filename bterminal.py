@@ -2293,8 +2293,14 @@ class TerminalTab(Gtk.Box):
             item_copy.connect("activate", lambda _: terminal.copy_clipboard_format(Vte.Format.TEXT))
             menu.append(item_copy)
 
+            clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+            has_image = clipboard.wait_is_image_available()
+
             item_paste = Gtk.MenuItem(label="Paste")
-            item_paste.connect("activate", lambda _: terminal.paste_clipboard())
+            if has_image:
+                item_paste.connect("activate", lambda _: self._paste_clipboard_image_path())
+            else:
+                item_paste.connect("activate", lambda _: terminal.paste_clipboard())
             menu.append(item_paste)
 
             menu.append(Gtk.SeparatorMenuItem())
@@ -2305,7 +2311,7 @@ class TerminalTab(Gtk.Box):
 
             menu.append(Gtk.SeparatorMenuItem())
 
-            item_paste_img = Gtk.MenuItem(label="Paste Image to Ctx")
+            item_paste_img = Gtk.MenuItem(label="Paste Image")
             item_paste_img.set_sensitive(_clipboard_has_image_or_path())
             item_paste_img.connect("activate", lambda _: self._on_paste_image_to_ctx())
             menu.append(item_paste_img)
@@ -2434,22 +2440,34 @@ class TerminalTab(Gtk.Box):
             return None
 
     def _paste_clipboard_image_path(self):
-        """Save clipboard image to ctx and paste its path into terminal."""
+        """Save clipboard image to project copied_images/ and paste path."""
         clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
         pixbuf = clipboard.wait_for_image()
         if not pixbuf:
             return
-        project = self._detect_ctx_project()
-        if not project:
-            return
-        filename = _save_ctx_image(project, pixbuf)
-        path = os.path.join(CTX_IMAGES_DIR, project, filename)
+        # Determine target directory
+        base_dir = None
+        if self.claude_config:
+            proj_dir = self.claude_config.get("project_dir", "")
+            if proj_dir and os.path.isdir(proj_dir):
+                base_dir = proj_dir
+        if not base_dir:
+            base_dir = os.path.expanduser("~")
+        images_dir = os.path.join(base_dir, "copied_images")
+        os.makedirs(images_dir, exist_ok=True)
+        filename = f"{uuid.uuid4().hex[:12]}.png"
+        dest = os.path.join(images_dir, filename)
+        pixbuf.savev(dest, "png", [], [])
         # Replace clipboard with path text and use native VTE paste
-        clipboard.set_text(path, -1)
+        clipboard.set_text(dest, -1)
         clipboard.store()
         self.terminal.paste_clipboard()
-        if hasattr(self.app, "ctx_panel"):
-            self.app.ctx_panel.refresh()
+        # Also register in ctx if available
+        project = self._detect_ctx_project()
+        if project:
+            _save_ctx_image(project, dest, original_name="clipboard.png")
+            if hasattr(self.app, "ctx_panel"):
+                self.app.ctx_panel.refresh()
 
     def _detect_ctx_project(self):
         """Auto-detect ctx project from tab config, or ask user."""
