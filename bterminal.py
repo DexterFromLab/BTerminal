@@ -986,7 +986,7 @@ class ClaudeCodeDialog(Gtk.Dialog):
 
         dir_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         self.entry_project_dir = Gtk.Entry(hexpand=True)
-        self.entry_project_dir.set_placeholder_text("(optional) path to project directory")
+        self.entry_project_dir.set_placeholder_text("path to project directory (required)")
         dir_box.pack_start(self.entry_project_dir, True, True, 0)
         btn_browse = Gtk.Button(label="Browse…")
         btn_browse.connect("clicked", self._on_browse_dir)
@@ -1001,11 +1001,12 @@ class ClaudeCodeDialog(Gtk.Dialog):
 
         # Sudo checkbox
         self.chk_sudo = Gtk.CheckButton(label="Run with sudo (asks for password)")
+        self.chk_sudo.set_active(True)
         box.pack_start(self.chk_sudo, False, False, 0)
 
         # Resume session checkbox
         self.chk_resume = Gtk.CheckButton(label="Resume last session (--resume)")
-        self.chk_resume.set_active(True)
+        self.chk_resume.set_active(False)
         box.pack_start(self.chk_resume, False, False, 0)
 
         # Skip permissions checkbox
@@ -1032,7 +1033,7 @@ class ClaudeCodeDialog(Gtk.Dialog):
             color = session.get("color", SESSION_COLORS[0])
             idx = SESSION_COLORS.index(color) if color in SESSION_COLORS else 0
             self.color_combo.set_active(idx)
-            self.chk_sudo.set_active(session.get("sudo", False))
+            self.chk_sudo.set_active(session.get("sudo", True))
             self.chk_resume.set_active(session.get("resume", True))
             self.chk_skip_perms.set_active(session.get("skip_permissions", True))
             self.entry_project_dir.set_text(session.get("project_dir", ""))
@@ -1068,6 +1069,12 @@ class ClaudeCodeDialog(Gtk.Dialog):
         data = self.get_data()
         if not data["name"]:
             self._show_error("Name is required.")
+            return False
+        if not data["project_dir"]:
+            self._show_error("Project directory is required.")
+            return False
+        if not os.path.isdir(data["project_dir"]):
+            self._show_error(f"Directory does not exist:\n{data['project_dir']}")
             return False
         return True
 
@@ -2284,12 +2291,12 @@ class TerminalTab(Gtk.Box):
                 terminal.copy_clipboard_format(Vte.Format.TEXT)
             return True
 
-        # Ctrl+Shift+V: paste (clipboard image → save to ctx & paste path)
+        # Ctrl+Shift+V: paste (clipboard image → save & paste path, else text)
         if mod == (ctrl | shift) and event.keyval in (Gdk.KEY_V, Gdk.KEY_v):
             clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
             if clipboard.wait_is_image_available():
-                self._paste_clipboard_image_path()
-                return True
+                if self._paste_clipboard_image_path():
+                    return True
             terminal.paste_clipboard()
             return True
 
@@ -2340,7 +2347,9 @@ class TerminalTab(Gtk.Box):
 
             item_paste = Gtk.MenuItem(label="Paste")
             if has_image:
-                item_paste.connect("activate", lambda _: self._paste_clipboard_image_path())
+                item_paste.connect("activate",
+                                   lambda _: self._paste_clipboard_image_path() or
+                                   terminal.paste_clipboard())
             else:
                 item_paste.connect("activate", lambda _: terminal.paste_clipboard())
             menu.append(item_paste)
@@ -2482,11 +2491,28 @@ class TerminalTab(Gtk.Box):
             return None
 
     def _paste_clipboard_image_path(self):
-        """Save clipboard image to project copied_images/ and paste path."""
+        """Save clipboard image to project copied_images/ and paste path.
+        Returns True on success, False if no image could be retrieved."""
         clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
         pixbuf = clipboard.wait_for_image()
+
+        # Fallback: try raw PNG data from clipboard targets
         if not pixbuf:
-            return
+            sel_data = clipboard.wait_for_contents(Gdk.Atom.intern("image/png", False))
+            if sel_data:
+                raw = sel_data.get_data()
+                if raw:
+                    loader = GdkPixbuf.PixbufLoader.new_with_type("png")
+                    try:
+                        loader.write(raw)
+                        loader.close()
+                        pixbuf = loader.get_pixbuf()
+                    except GLib.Error:
+                        pixbuf = None
+
+        if not pixbuf:
+            return False
+
         # Determine target directory
         base_dir = None
         if self.claude_config:
@@ -2510,6 +2536,7 @@ class TerminalTab(Gtk.Box):
             _save_ctx_image(project, dest, original_name="clipboard.png")
             if hasattr(self.app, "ctx_panel"):
                 self.app.ctx_panel.refresh()
+        return True
 
     def _detect_ctx_project(self):
         """Auto-detect ctx project from tab config, or ask user."""
@@ -7236,8 +7263,8 @@ class BTerminalApp(Gtk.Window):
                 if isinstance(tab, TerminalTab):
                     clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
                     if clipboard.wait_is_image_available():
-                        tab._paste_clipboard_image_path()
-                        return True
+                        if tab._paste_clipboard_image_path():
+                            return True
                     tab.terminal.paste_clipboard()
             return True
 
