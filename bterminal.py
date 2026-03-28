@@ -8,6 +8,7 @@ gi.require_version("Gdk", "3.0")
 
 import json
 import os
+import random
 import re
 import sqlite3
 import subprocess
@@ -537,8 +538,15 @@ class SessionDialog(Gtk.Dialog):
         self.entry_username = Gtk.Entry(hexpand=True)
         self.entry_key = Gtk.Entry(hexpand=True)
         self.entry_key.set_placeholder_text("(optional) path to private key")
-        self.entry_folder = Gtk.Entry(hexpand=True)
-        self.entry_folder.set_placeholder_text("(optional) folder for grouping")
+        self.folder_combo = Gtk.ComboBoxText.new_with_entry()
+        self.folder_combo.set_hexpand(True)
+        for f in sorted({
+            s.get("folder", "").strip()
+            for s in parent.session_manager.all()
+            if s.get("folder", "").strip()
+        }):
+            self.folder_combo.append_text(f)
+        self.folder_combo.get_child().set_placeholder_text("(optional) folder for grouping")
 
         self.color_combo = Gtk.ComboBoxText()
         for c in SESSION_COLORS:
@@ -550,7 +558,7 @@ class SessionDialog(Gtk.Dialog):
         grid.attach(self.entry_port, 1, 2, 1, 1)
         grid.attach(self.entry_username, 1, 3, 1, 1)
         grid.attach(self.entry_key, 1, 4, 1, 1)
-        grid.attach(self.entry_folder, 1, 5, 1, 1)
+        grid.attach(self.folder_combo, 1, 5, 1, 1)
         grid.attach(self.color_combo, 1, 6, 1, 1)
 
         # Edit mode: fill fields
@@ -560,7 +568,7 @@ class SessionDialog(Gtk.Dialog):
             self.entry_port.set_value(int(session.get("port", 22)))
             self.entry_username.set_text(session.get("username", ""))
             self.entry_key.set_text(session.get("key_file", ""))
-            self.entry_folder.set_text(session.get("folder", ""))
+            self.folder_combo.get_child().set_text(session.get("folder", ""))
             color = session.get("color", SESSION_COLORS[0])
             self.color_combo.set_active_id(color)
 
@@ -573,7 +581,7 @@ class SessionDialog(Gtk.Dialog):
             "port": int(self.entry_port.get_value()),
             "username": self.entry_username.get_text().strip(),
             "key_file": self.entry_key.get_text().strip(),
-            "folder": self.entry_folder.get_text().strip(),
+            "folder": self.folder_combo.get_child().get_text().strip(),
             "color": self.color_combo.get_active_id() or SESSION_COLORS[0],
         }
 
@@ -897,9 +905,16 @@ class ClaudeCodeDialog(Gtk.Dialog):
         self.entry_name = Gtk.Entry(hexpand=True)
         grid.attach(self.entry_name, 1, 0, 1, 1)
 
-        self.entry_folder = Gtk.Entry(hexpand=True)
-        self.entry_folder.set_placeholder_text("(optional) folder for grouping")
-        grid.attach(self.entry_folder, 1, 1, 1, 1)
+        self.folder_combo = Gtk.ComboBoxText.new_with_entry()
+        self.folder_combo.set_hexpand(True)
+        for f in sorted({
+            s.get("folder", "").strip()
+            for s in parent.claude_manager.all()
+            if s.get("folder", "").strip()
+        }):
+            self.folder_combo.append_text(f)
+        self.folder_combo.get_child().set_placeholder_text("(optional) folder for grouping")
+        grid.attach(self.folder_combo, 1, 1, 1, 1)
 
         self.color_combo = Gtk.ComboBoxText()
         for c in SESSION_COLORS:
@@ -951,7 +966,7 @@ class ClaudeCodeDialog(Gtk.Dialog):
         # Edit mode: fill fields
         if session:
             self.entry_name.set_text(session.get("name", ""))
-            self.entry_folder.set_text(session.get("folder", ""))
+            self.folder_combo.get_child().set_text(session.get("folder", ""))
             color = session.get("color", SESSION_COLORS[0])
             self.color_combo.set_active_id(color)
             self.chk_sudo.set_active(session.get("sudo", False))
@@ -971,7 +986,7 @@ class ClaudeCodeDialog(Gtk.Dialog):
         prompt = buf.get_text(start, end, False).strip()
         return {
             "name": self.entry_name.get_text().strip(),
-            "folder": self.entry_folder.get_text().strip(),
+            "folder": self.folder_combo.get_child().get_text().strip(),
             "color": self.color_combo.get_active_id() or SESSION_COLORS[0],
             "sudo": self.chk_sudo.get_active(),
             "resume": self.chk_resume.get_active(),
@@ -2038,6 +2053,7 @@ class TerminalTab(Gtk.Box):
         # Auto-trigger for task list (Claude Code tabs only)
         self._task_idle_timer = None
         self._task_project = None
+        self._task_session_id = str(uuid.uuid4())
         self._stats_bar = None
         if claude_config:
             project_dir = claude_config.get("project_dir", "")
@@ -2277,8 +2293,9 @@ class TerminalTab(Gtk.Box):
                 # SSH tab: keep session name, show VTE title in window title only
                 self.app.update_tab_title(self, self.session.get("name", "SSH"))
             elif self.claude_config:
-                # Claude Code tab: keep config name instead of generic VTE title
-                self.app.update_tab_title(self, self.claude_config.get("name", "Claude Code"))
+                # Claude Code tab: keep decorated tab name with number + emoji
+                display = getattr(self, "_claude_tab_display", self.claude_config.get("name", "Claude Code"))
+                self.app.update_tab_title(self, display)
             else:
                 self.app.update_tab_title(self, title)
 
@@ -2310,21 +2327,18 @@ class TerminalTab(Gtk.Box):
                 db.close()
                 return False
 
-            # Check pending tasks
-            count = db.execute(
-                "SELECT COUNT(*) as c FROM tasks WHERE project = ? AND status = 'open'",
-                (self._task_project,),
-            ).fetchone()
+            # Atomically find and claim next open unclaimed task
+            task = self._claim_next_task(db, self._task_project, self._task_session_id)
             db.close()
 
-            if count["c"] == 0:
+            if not task:
                 return False
 
-            # Trigger: feed task instruction to Claude Code terminal
+            # Trigger: feed task instruction with specific claimed task
             message = (
-                f"[AUTO-TRIGGER] Sprawdź listę zadań: tasks context {self._task_project} "
-                f"— wykonaj następne otwarte zadanie. "
-                f"MUSISZ oznaczyć KAŻDE wykonane zadanie: tasks done {self._task_project} <task_id> (w Bash). "
+                f"[AUTO-TRIGGER] Twoje przypisane zadanie: {task['task_id']} — {task['description']}\n"
+                f"Sprawdź pełną listę: tasks context {self._task_project} --session {self._task_session_id}\n"
+                f"MUSISZ oznaczyć po wykonaniu: tasks done {self._task_project} {task['task_id']} (w Bash). "
                 f"Pętla auto-trigger kończy się DOPIERO gdy WSZYSTKIE zadania są zamknięte (done). "
                 f"Jeśli nie oznaczysz — ta wiadomość będzie się powtarzać.\r"
             )
@@ -2336,6 +2350,56 @@ class TerminalTab(Gtk.Box):
         except Exception:
             pass
         return False
+
+    @staticmethod
+    def _claim_next_task(db, project, session_id):
+        """Atomically find and claim the next open unclaimed task. Returns task dict or None."""
+        # First check if this session already has a claimed open task
+        existing = db.execute(
+            """SELECT t.task_id, t.description FROM tasks t
+               JOIN task_claims c ON c.project = t.project AND c.task_id = t.task_id
+               WHERE t.project = ? AND c.session_id = ? AND t.status = 'open'
+               ORDER BY t.task_id LIMIT 1""",
+            (project, session_id),
+        ).fetchone()
+        if existing:
+            return existing
+
+        # Find next open task not claimed by anyone
+        rows = db.execute(
+            """SELECT t.task_id, t.description FROM tasks t
+               LEFT JOIN task_claims c ON c.project = t.project AND c.task_id = t.task_id
+               WHERE t.project = ? AND t.status = 'open' AND c.task_id IS NULL""",
+            (project,),
+        ).fetchall()
+        if not rows:
+            return None
+
+        # Sort by task_id naturally and pick the first
+        def _sort_key(task_id):
+            parts = task_id.split(".")
+            result = []
+            for p in parts:
+                try:
+                    result.append((0, int(p), ""))
+                except ValueError:
+                    result.append((1, 0, p))
+            return result
+
+        rows_sorted = sorted(rows, key=lambda r: _sort_key(r["task_id"]))
+        task = rows_sorted[0]
+
+        # Claim it
+        try:
+            db.execute(
+                "INSERT INTO task_claims (project, task_id, session_id) VALUES (?, ?, ?)",
+                (project, task["task_id"], session_id),
+            )
+            db.commit()
+            return task
+        except sqlite3.IntegrityError:
+            # Race condition — another session claimed it between SELECT and INSERT
+            return None
 
     def _paste_clipboard_image_path(self):
         """Save clipboard image to ctx and paste its path into terminal."""
@@ -2496,7 +2560,7 @@ class TerminalTab(Gtk.Box):
 
     def get_label(self):
         if self.claude_config:
-            return self.claude_config.get("name", "Claude Code")
+            return getattr(self, "_claude_tab_display", self.claude_config.get("name", "Claude Code"))
         if self.session:
             return self.session.get("name", "SSH")
         return "Terminal"
@@ -2635,7 +2699,7 @@ class SessionSidebar(Gtk.Box):
         ])
 
     def refresh(self):
-        expanded = _save_expanded(self.tree, self.store, COL_NAME)
+        expanded = _save_expanded(self.tree, self.store, COL_ID)
         self.store.clear()
         sessions = self.app.session_manager.all()
 
@@ -2651,13 +2715,14 @@ class SessionSidebar(Gtk.Box):
 
         # Grouped sessions
         for folder_name in sorted(folders.keys()):
+            count = len(folders[folder_name])
             parent = self.store.append(None, [
                 "\U0001F4C1",  # folder icon
-                folder_name,
-                "",
+                f"{folder_name} ({count})",
+                f"folder:{folder_name}",
                 folder_name,
                 CATPPUCCIN["subtext1"],
-                Pango.Weight.NORMAL,
+                Pango.Weight.BOLD,
             ])
             for s in folders[folder_name]:
                 self._append_session(parent, s)
@@ -2673,7 +2738,7 @@ class SessionSidebar(Gtk.Box):
             claude_root = self.store.append(None, [
                 "\U0001F916",  # 🤖
                 "Claude Code",
-                "",
+                "section:claude",
                 "Claude Code sessions",
                 CATPPUCCIN["mauve"],
                 Pango.Weight.BOLD,
@@ -2689,13 +2754,14 @@ class SessionSidebar(Gtk.Box):
                     claude_ungrouped.append(s)
 
             for folder_name in sorted(claude_folders.keys()):
+                count = len(claude_folders[folder_name])
                 parent = self.store.append(claude_root, [
                     "\U0001F4C1",
-                    folder_name,
-                    "",
+                    f"{folder_name} ({count})",
+                    f"cfolder:{folder_name}",
                     folder_name,
                     CATPPUCCIN["subtext1"],
-                    Pango.Weight.NORMAL,
+                    Pango.Weight.BOLD,
                 ])
                 for s in claude_folders[folder_name]:
                     self._append_claude_session(parent, s)
@@ -2704,9 +2770,11 @@ class SessionSidebar(Gtk.Box):
                 self._append_claude_session(claude_root, s)
 
         if expanded:
-            _restore_expanded(self.tree, self.store, COL_NAME, expanded)
+            _restore_expanded(self.tree, self.store, COL_ID, expanded)
         else:
             self.tree.expand_all()
+
+    _FOLDER_PREFIXES = ("folder:", "cfolder:", "section:")
 
     def _get_selected_session_id(self):
         sel = self.tree.get_selection()
@@ -2714,7 +2782,9 @@ class SessionSidebar(Gtk.Box):
         if it is None:
             return None
         col_id = model.get_value(it, COL_ID)
-        if col_id and not col_id.startswith("macro:"):
+        if col_id and not col_id.startswith("macro:") and not any(
+            col_id.startswith(p) for p in self._FOLDER_PREFIXES
+        ):
             return col_id
         return None
 
@@ -2729,10 +2799,48 @@ class SessionSidebar(Gtk.Box):
             config = self.app.claude_manager.get(claude_id)
             if config:
                 self.app.open_claude_tab(config)
+        elif col_id and any(col_id.startswith(p) for p in self._FOLDER_PREFIXES):
+            # Toggle expand/collapse for folder and section nodes
+            if tree.row_expanded(path):
+                tree.collapse_row(path)
+            else:
+                tree.expand_row(path, False)
         elif col_id:
             session = self.app.session_manager.get(col_id)
             if session:
                 self.app.open_ssh_tab(session)
+
+    def _build_move_to_folder_submenu(self, session_id, manager, current_folder=""):
+        """Build 'Move to folder' submenu with existing folders + New/Remove."""
+        submenu = Gtk.Menu()
+        existing = sorted({
+            s.get("folder", "").strip()
+            for s in manager.all()
+            if s.get("folder", "").strip()
+        })
+        for fname in existing:
+            if fname == current_folder:
+                continue
+            item = Gtk.MenuItem(label=fname)
+            item.connect("activate",
+                         lambda _, sid=session_id, f=fname, m=manager:
+                         self._move_to_folder(sid, f, m))
+            submenu.append(item)
+        if existing:
+            submenu.append(Gtk.SeparatorMenuItem())
+        item_new = Gtk.MenuItem(label="New folder\u2026")
+        item_new.connect("activate",
+                         lambda _, sid=session_id, m=manager:
+                         self._move_to_new_folder(sid, m))
+        submenu.append(item_new)
+        if current_folder:
+            submenu.append(Gtk.SeparatorMenuItem())
+            item_rm = Gtk.MenuItem(label="Remove from folder")
+            item_rm.connect("activate",
+                            lambda _, sid=session_id, m=manager:
+                            self._move_to_folder(sid, "", m))
+            submenu.append(item_rm)
+        return submenu
 
     def _on_button_press(self, widget, event):
         if event.button == 3:  # right click
@@ -2764,9 +2872,32 @@ class SessionSidebar(Gtk.Box):
                     menu.show_all()
                     menu.popup_at_pointer(event)
 
+                elif col_id and (col_id.startswith("folder:") or col_id.startswith("cfolder:")):
+                    # Folder context menu
+                    is_claude = col_id.startswith("cfolder:")
+                    folder_name = col_id.split(":", 1)[1]
+                    manager = self.app.claude_manager if is_claude else self.app.session_manager
+                    menu = Gtk.Menu()
+
+                    item_rename = Gtk.MenuItem(label="Rename folder\u2026")
+                    item_rename.connect(
+                        "activate",
+                        lambda _, fn=folder_name, m=manager: self._rename_folder(fn, m))
+                    menu.append(item_rename)
+
+                    item_delete = Gtk.MenuItem(label="Ungroup all")
+                    item_delete.connect(
+                        "activate",
+                        lambda _, fn=folder_name, m=manager: self._ungroup_folder(fn, m))
+                    menu.append(item_delete)
+
+                    menu.show_all()
+                    menu.popup_at_pointer(event)
+
                 elif col_id and col_id.startswith("claude:"):
                     # Claude Code session context menu
                     claude_id = col_id[7:]
+                    config = self.app.claude_manager.get(claude_id)
                     menu = Gtk.Menu()
 
                     item_connect = Gtk.MenuItem(label="Connect")
@@ -2787,12 +2918,22 @@ class SessionSidebar(Gtk.Box):
                     item_ctx.connect("activate", lambda _, cid=claude_id: self._edit_ctx(cid))
                     menu.append(item_ctx)
 
+                    menu.append(Gtk.SeparatorMenuItem())
+
+                    item_folder = Gtk.MenuItem(label="Move to folder \u25B8")
+                    cur_folder = config.get("folder", "").strip() if config else ""
+                    item_folder.set_submenu(
+                        self._build_move_to_folder_submenu(
+                            claude_id, self.app.claude_manager, cur_folder))
+                    menu.append(item_folder)
+
                     menu.show_all()
                     menu.popup_at_pointer(event)
 
-                elif col_id:
+                elif col_id and not col_id.startswith("section:"):
                     # Session context menu
                     session_id = col_id
+                    session = self.app.session_manager.get(session_id)
                     menu = Gtk.Menu()
 
                     item_connect = Gtk.MenuItem(label="Connect")
@@ -2812,6 +2953,15 @@ class SessionSidebar(Gtk.Box):
                     item_add_macro = Gtk.MenuItem(label="Add Macro...")
                     item_add_macro.connect("activate", lambda _: self._add_macro(session_id))
                     menu.append(item_add_macro)
+
+                    menu.append(Gtk.SeparatorMenuItem())
+
+                    item_folder = Gtk.MenuItem(label="Move to folder \u25B8")
+                    cur_folder = session.get("folder", "").strip() if session else ""
+                    item_folder.set_submenu(
+                        self._build_move_to_folder_submenu(
+                            session_id, self.app.session_manager, cur_folder))
+                    menu.append(item_folder)
 
                     menu.show_all()
                     menu.popup_at_pointer(event)
@@ -2857,7 +3007,11 @@ class SessionSidebar(Gtk.Box):
         col_id = model.get_value(it, COL_ID)
         if col_id and col_id.startswith("claude:"):
             self._edit_claude(col_id[7:])
-        elif col_id and not col_id.startswith("macro:"):
+        elif col_id and col_id.startswith("folder:"):
+            self._rename_folder(col_id.split(":", 1)[1], self.app.session_manager)
+        elif col_id and col_id.startswith("cfolder:"):
+            self._rename_folder(col_id.split(":", 1)[1], self.app.claude_manager)
+        elif col_id and not col_id.startswith("macro:") and not col_id.startswith("section:"):
             self._edit_session(col_id)
 
     def _edit_session(self, session_id):
@@ -2884,7 +3038,11 @@ class SessionSidebar(Gtk.Box):
         col_id = model.get_value(it, COL_ID)
         if col_id and col_id.startswith("claude:"):
             self._delete_claude(col_id[7:])
-        elif col_id and not col_id.startswith("macro:"):
+        elif col_id and col_id.startswith("folder:"):
+            self._ungroup_folder(col_id.split(":", 1)[1], self.app.session_manager)
+        elif col_id and col_id.startswith("cfolder:"):
+            self._ungroup_folder(col_id.split(":", 1)[1], self.app.claude_manager)
+        elif col_id and not col_id.startswith("macro:") and not col_id.startswith("section:"):
             self._delete_session(col_id)
 
     def _delete_session(self, session_id):
@@ -2902,6 +3060,85 @@ class SessionSidebar(Gtk.Box):
             self.app.session_manager.delete(session_id)
             self.refresh()
         dlg.destroy()
+
+    # ── Folder management ──
+
+    def _move_to_folder(self, session_id, folder_name, manager):
+        """Move a session to a folder (or remove from folder if empty)."""
+        session = manager.get(session_id)
+        if session:
+            session["folder"] = folder_name
+            manager.update(session_id, session)
+            self.refresh()
+
+    def _move_to_new_folder(self, session_id, manager):
+        """Prompt for new folder name and move session there."""
+        dlg = Gtk.Dialog(
+            title="New folder",
+            transient_for=self.app,
+            modal=True,
+            destroy_with_parent=True,
+        )
+        dlg.add_buttons(
+            Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+            Gtk.STOCK_OK, Gtk.ResponseType.OK,
+        )
+        dlg.set_default_response(Gtk.ResponseType.OK)
+        box = dlg.get_content_area()
+        box.set_border_width(12)
+        box.set_spacing(8)
+        lbl = Gtk.Label(label="Folder name:")
+        box.pack_start(lbl, False, False, 0)
+        entry = Gtk.Entry()
+        entry.set_activates_default(True)
+        box.pack_start(entry, False, False, 0)
+        dlg.show_all()
+        if dlg.run() == Gtk.ResponseType.OK:
+            name = entry.get_text().strip()
+            if name:
+                self._move_to_folder(session_id, name, manager)
+        dlg.destroy()
+
+    def _rename_folder(self, old_name, manager):
+        """Rename a folder — updates all sessions that belong to it."""
+        dlg = Gtk.Dialog(
+            title="Rename folder",
+            transient_for=self.app,
+            modal=True,
+            destroy_with_parent=True,
+        )
+        dlg.add_buttons(
+            Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+            Gtk.STOCK_OK, Gtk.ResponseType.OK,
+        )
+        dlg.set_default_response(Gtk.ResponseType.OK)
+        box = dlg.get_content_area()
+        box.set_border_width(12)
+        box.set_spacing(8)
+        lbl = Gtk.Label(label="New name:")
+        box.pack_start(lbl, False, False, 0)
+        entry = Gtk.Entry()
+        entry.set_text(old_name)
+        entry.set_activates_default(True)
+        box.pack_start(entry, False, False, 0)
+        dlg.show_all()
+        if dlg.run() == Gtk.ResponseType.OK:
+            new_name = entry.get_text().strip()
+            if new_name and new_name != old_name:
+                for s in manager.all():
+                    if s.get("folder", "").strip() == old_name:
+                        s["folder"] = new_name
+                        manager.update(s["id"], s)
+                self.refresh()
+        dlg.destroy()
+
+    def _ungroup_folder(self, folder_name, manager):
+        """Remove folder assignment from all sessions in this folder."""
+        for s in manager.all():
+            if s.get("folder", "").strip() == folder_name:
+                s["folder"] = ""
+                manager.update(s["id"], s)
+        self.refresh()
 
     # ── Macro CRUD ──
 
@@ -5194,6 +5431,13 @@ def _ensure_tasks_tables():
             project TEXT PRIMARY KEY,
             autorun INTEGER DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS task_claims (
+            project TEXT NOT NULL,
+            task_id TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            claimed_at TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (project, task_id)
+        );
     """)
     db.close()
 
@@ -5345,6 +5589,7 @@ class TaskListPanel(Gtk.Box):
         _ensure_tasks_tables()
         db = sqlite3.connect(CTX_DB)
         db.execute("UPDATE task_config SET autorun = 0 WHERE autorun = 1")
+        db.execute("DELETE FROM task_claims")
         db.commit()
         db.close()
 
@@ -5530,32 +5775,28 @@ class TaskListPanel(Gtk.Box):
             self._trigger_first_task(project)
 
     def _trigger_first_task(self, project):
-        """Find a Claude Code tab matching this project and send trigger."""
+        """Find Claude Code tabs matching this project and send claim-based triggers."""
         if not os.path.exists(CTX_DB):
             return
         db = sqlite3.connect(CTX_DB)
         db.row_factory = sqlite3.Row
-        count = db.execute(
-            "SELECT COUNT(*) as c FROM tasks WHERE project = ? AND status = 'open'",
-            (project,),
-        ).fetchone()
-        db.close()
-        if count["c"] == 0:
-            return
 
-        # Find matching Claude Code tab
+        # Send trigger to each matching tab — each claims its own task
         for i in range(self.app.notebook.get_n_pages()):
             tab = self.app.notebook.get_nth_page(i)
             if isinstance(tab, TerminalTab) and tab._task_project == project:
+                task = TerminalTab._claim_next_task(db, project, tab._task_session_id)
+                if not task:
+                    break
                 message = (
-                    f"[AUTO-TRIGGER] Sprawdź listę zadań: tasks context {project} "
-                    f"— wykonaj następne otwarte zadanie. "
-                    f"MUSISZ oznaczyć KAŻDE wykonane zadanie: tasks done {project} <task_id> (w Bash). "
+                    f"[AUTO-TRIGGER] Twoje przypisane zadanie: {task['task_id']} — {task['description']}\n"
+                    f"Sprawdź pełną listę: tasks context {project} --session {tab._task_session_id}\n"
+                    f"MUSISZ oznaczyć po wykonaniu: tasks done {project} {task['task_id']} (w Bash). "
                     f"Pętla auto-trigger kończy się DOPIERO gdy WSZYSTKIE zadania są zamknięte (done). "
                     f"Jeśli nie oznaczysz — ta wiadomość będzie się powtarzać.\r"
                 )
                 tab.terminal.feed_child(message.encode())
-                return
+        db.close()
 
     def _on_add_task(self):
         project = self._get_selected_project()
@@ -5973,9 +6214,33 @@ class BTerminalApp(Gtk.Window):
         tab.run_macro(macro)
         self._update_window_title()
 
+    _TAB_EMOJIS = [
+        "🦊", "🐙", "🎯", "🚀", "⚡", "🔮", "🎲", "🌀", "🦋", "🐺",
+        "🎸", "🌊", "🔥", "💎", "🦅", "🐍", "🎪", "🌵", "🦈", "🍄",
+        "🎭", "🏴\u200d☠️", "🛸", "🧊", "🦎", "🐝", "🌻", "🎱", "🦜", "🐲",
+    ]
+
     def open_claude_tab(self, config):
         tab = TerminalTab(self, claude_config=config)
-        tab_name = config.get("name", "Claude Code")
+        base_name = config.get("name", "Claude Code")
+        # Count existing tabs with the same base config name
+        count = 0
+        for i in range(self.notebook.get_n_pages()):
+            page = self.notebook.get_nth_page(i)
+            if isinstance(page, TerminalTab) and page.claude_config:
+                if page.claude_config.get("name") == config.get("name"):
+                    count += 1
+        # Pick a random emoji not already used by sibling tabs
+        used = set()
+        for i in range(self.notebook.get_n_pages()):
+            page = self.notebook.get_nth_page(i)
+            if isinstance(page, TerminalTab) and hasattr(page, "_claude_tab_emoji"):
+                used.add(page._claude_tab_emoji)
+        available = [e for e in self._TAB_EMOJIS if e not in used] or self._TAB_EMOJIS
+        emoji = random.choice(available)
+        tab._claude_tab_emoji = emoji
+        tab_name = f"{base_name} #{count + 1} {emoji}"
+        tab._claude_tab_display = tab_name
         label = self._build_tab_label(tab_name, tab)
         idx = self.notebook.append_page(tab, label)
         self.notebook.set_current_page(idx)
@@ -5984,6 +6249,18 @@ class BTerminalApp(Gtk.Window):
         self._update_window_title()
 
     def close_tab(self, tab):
+        # Release task claims for this tab's session
+        if getattr(tab, "_task_project", None) and getattr(tab, "_task_session_id", None):
+            try:
+                db = sqlite3.connect(CTX_DB)
+                db.execute(
+                    "DELETE FROM task_claims WHERE project = ? AND session_id = ?",
+                    (tab._task_project, tab._task_session_id),
+                )
+                db.commit()
+                db.close()
+            except Exception:
+                pass
         idx = self.notebook.page_num(tab)
         if idx >= 0:
             self.notebook.remove_page(idx)
@@ -6140,7 +6417,7 @@ def main():
 
     application = Gtk.Application(
         application_id="com.github.DexterFromLab.BTerminal",
-        flags=Gio.ApplicationFlags.FLAGS_NONE,
+        flags=Gio.ApplicationFlags.NON_UNIQUE,
     )
 
     def on_activate(app):
