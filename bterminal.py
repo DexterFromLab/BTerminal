@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """BTerminal — Terminal SSH z panelem sesji, w stylu MobaXterm."""
+# v2025.03.31
 
 import gi
 gi.require_version("Gtk", "3.0")
