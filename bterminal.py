@@ -1803,10 +1803,109 @@ class CtxEditDialog(Gtk.Dialog):
         dlg.destroy()
 
 
-# ─── SessionStatsBar (Claude Code session metrics) ───────────────────────────
+# ─── Claude plan usage cache (shared across all tabs) ────────────────────────
 
 import glob
+import time as _time_mod
 from datetime import datetime, timezone
+
+_CLAUDE_CREDENTIALS_FILE = os.path.expanduser("~/.claude/.credentials.json")
+_CLAUDE_USAGE_API = "https://api.anthropic.com/api/oauth/usage"
+_CLAUDE_OAUTH_BETA = "oauth-2025-04-20"
+
+# Module-level cache: {data: dict|None, fetched_at: float}
+_usage_cache = {"data": None, "fetched_at": 0.0, "fetching": False}
+_USAGE_TTL = 60.0  # seconds
+
+
+def _get_claude_oauth_token():
+    """Read OAuth access token from Claude credentials file."""
+    try:
+        with open(_CLAUDE_CREDENTIALS_FILE, encoding="utf-8") as fh:
+            creds = json.load(fh)
+        oauth = creds.get("claudeAiOauth", {})
+        token = oauth.get("accessToken")
+        expires = oauth.get("expiresAt", 0)
+        if token and expires > _time_mod.time() * 1000:
+            return token
+    except (OSError, json.JSONDecodeError, KeyError):
+        pass
+    return None
+
+
+def _fetch_claude_usage():
+    """Fetch usage data from Claude API. Returns dict or None on failure."""
+    token = _get_claude_oauth_token()
+    if not token:
+        return None
+    req = urllib.request.Request(
+        _CLAUDE_USAGE_API,
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "claude-code/2.1.90",
+            "Authorization": f"Bearer {token}",
+            "anthropic-beta": _CLAUDE_OAUTH_BETA,
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+            if "error" not in data:
+                return data
+    except Exception:
+        pass
+    return None
+
+
+def _refresh_usage_cache():
+    """Fetch usage in background thread and update cache."""
+    if _usage_cache["fetching"]:
+        return
+    _usage_cache["fetching"] = True
+
+    def _bg():
+        data = _fetch_claude_usage()
+        _usage_cache["fetching"] = False
+        if data is not None:
+            _usage_cache["data"] = data
+            _usage_cache["fetched_at"] = _time_mod.time()
+
+    threading.Thread(target=_bg, daemon=True).start()
+
+
+def _get_usage_cache():
+    """Return cached usage data, triggering background refresh if stale."""
+    age = _time_mod.time() - _usage_cache["fetched_at"]
+    if age > _USAGE_TTL:
+        _refresh_usage_cache()
+    return _usage_cache["data"]
+
+
+def _fmt_reset_time(resets_at):
+    """Format reset time as human-readable relative string.
+
+    *resets_at* can be a Unix epoch (int/float) or an ISO-8601 string.
+    """
+    if isinstance(resets_at, str):
+        try:
+            dt = datetime.fromisoformat(resets_at)
+            epoch = dt.timestamp()
+        except (ValueError, TypeError):
+            return "?"
+    else:
+        epoch = float(resets_at)
+    diff = epoch - _time_mod.time()
+    if diff <= 0:
+        return "now"
+    if diff < 3600:
+        return f"{int(diff / 60)}min"
+    hours = diff / 3600
+    if hours < 24:
+        return f"{hours:.1f}h"
+    return f"{hours / 24:.1f}d"
+
+
+# ─── SessionStatsBar (Claude Code session metrics) ───────────────────────────
 
 _STATS_PRICING = {
     "claude-opus-4-6":   {"input": 15.0,  "output": 75.0,  "cache_read": 1.50,  "cache_write": 18.75},
@@ -1932,6 +2031,10 @@ class SessionStatsBar(Gtk.Box):
             ("tok_h",    "⚡ 0 tok/h",   "Tokens per hour (throughput)"),
             ("s7",       " │ ",          None),
             ("model",    "",             "Model used"),
+            ("s8",       " │ ",          None),
+            ("usage_5h", "🔋 5h –",      "Plan usage: current session (5h window)"),
+            ("s9",       " ",            None),
+            ("usage_7d", "7d –",         "Plan usage: weekly (7d window)"),
         ]
         for key, text, tooltip in fields:
             lbl = Gtk.Label(label=text)
@@ -1981,6 +2084,29 @@ class SessionStatsBar(Gtk.Box):
         self._labels["tok_h"].set_text(f"⚡ {_fmt_tok(int(tok_h))} tok/h")
         if s["model"]:
             self._labels["model"].set_text(s["model"].replace("claude-", "").replace("-2024", ""))
+
+        usage = _get_usage_cache()
+        for key, lbl_key in [("five_hour", "usage_5h"), ("seven_day", "usage_7d")]:
+            prefix = "5h" if key == "five_hour" else "7d"
+            info = usage.get(key) if usage else None
+            icon = "🔋 " if key == "five_hour" else ""
+            if not info:
+                self._labels[lbl_key].set_text(f"{icon}{prefix} –")
+                self._labels[lbl_key].set_tooltip_text(
+                    "Plan usage: current session (5h window)" if key == "five_hour"
+                    else "Plan usage: weekly (7d window)"
+                )
+            else:
+                util = info.get("utilization", 0)
+                # API returns percentage directly (e.g. 36.0 = 36%)
+                pct = int(util) if util is not None else 0
+                resets_at = info.get("resets_at")
+                tip = f"{prefix}: {pct}% used"
+                if resets_at:
+                    tip += f" · resets in {_fmt_reset_time(resets_at)}"
+                self._labels[lbl_key].set_text(f"{icon}{prefix} {pct}%")
+                self._labels[lbl_key].set_tooltip_text(tip)
+
         return True
 
 
