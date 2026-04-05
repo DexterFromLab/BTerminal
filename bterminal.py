@@ -167,7 +167,7 @@ window {{ background-color: {t['base']}; color: {t['text']}; }}
 .sidebar button label {{ min-width: 0; }}
 .sidebar-header {{ background-color: {t['crust']}; padding: 8px 12px; font-weight: bold; font-size: 13px; color: {t['blue']}; border-bottom: 1px solid {t['surface0']}; }}
 .sidebar-btn {{ background: {t['surface0']}; border: none; border-radius: 4px; color: {t['text']}; padding: 4px 4px; min-height: 24px; min-width: 0; }}
-.sidebar-tab {{ padding: 4px 2px; min-width: 0; min-height: 0; border-radius: 0; border: none; background: {t['mantle']}; color: {t['subtext0']}; font-size: 11px; border-bottom: 2px solid transparent; }}
+.sidebar-tab {{ padding: 4px 2px; min-width: 0; min-height: 0; border-radius: 0; border: none; background: {t['mantle']}; color: {t['subtext0']}; font-size: 13px; border-bottom: 2px solid transparent; }}
 .sidebar-tab:hover {{ background: {t['surface0']}; }}
 .sidebar-tab-active {{ color: {t['blue']}; border-bottom: 2px solid {t['blue']}; }}
 .sidebar-btn:hover {{ background: {t['surface1']}; }}
@@ -5911,7 +5911,7 @@ class TaskListPanel(Gtk.Box):
         # Split into active (newest first) and done (at bottom)
         active = [r for r in rows if r["status"] != "done"]
         done = [r for r in rows if r["status"] == "done"]
-        active.sort(key=lambda r: _task_sort_key(r["task_id"]), reverse=True)
+        active.sort(key=lambda r: _task_sort_key(r["task_id"]))
         done.sort(key=lambda r: _task_sort_key(r["task_id"]))
 
         restore_path = None
