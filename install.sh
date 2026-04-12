@@ -56,6 +56,7 @@ echo "[2/6] Checking system dependencies..."
 
 MISSING=()
 command -v git &>/dev/null || MISSING+=("git")
+command -v git-lfs &>/dev/null || MISSING+=("git-lfs")
 python3 -c "import gi" 2>/dev/null || MISSING+=("python3-gi")
 python3 -c "import gi; gi.require_version('Gtk', '3.0'); from gi.repository import Gtk" 2>/dev/null || MISSING+=("gir1.2-gtk-3.0")
 python3 -c "import gi; gi.require_version('Vte', '2.91'); from gi.repository import Vte" 2>/dev/null || MISSING+=("gir1.2-vte-2.91")
@@ -71,6 +72,12 @@ if [ ${#MISSING[@]} -gt 0 ]; then
     fi
 else
     echo "  All dependencies OK."
+fi
+
+# Initialize git-lfs if available
+if command -v git-lfs &>/dev/null; then
+    git lfs install --skip-repo >/dev/null 2>&1
+    echo "  git-lfs initialized."
 fi
 
 # ─── Install files ─────────────────────────────────────────────────────

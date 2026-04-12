@@ -101,6 +101,18 @@ tasks --help
 
 The sidebar **Tasks** tab shows a per-project task list with checkboxes, add/edit/delete, and a 2-second auto-refresh poll. An **auto-trigger** system (start/stop buttons) continuously feeds pending tasks to Claude Code sessions — task claims are atomic to prevent collisions in multi-session setups. Auto-trigger flags reset to OFF on every app startup for safety.
 
+### Plugins
+
+Extend BTerminal with Python plugins loaded from `~/.config/bterminal/plugins/`. Each plugin can register a sidebar panel, keyboard shortcuts, and inject extra context into Claude Code session intro prompts.
+
+- Plugins are single `.py` files or packages (directories with `__init__.py`)
+- State (enabled/disabled) is persisted in `~/.config/bterminal/plugins.json`
+- The sidebar **Plugins** tab lists installed plugins with version, author and status (Loaded / Disabled / Error), plus Add File / Add Folder / Remove actions
+- Plugins have their own repositories — install them by cloning into `~/.config/bterminal/plugins/` or using the Add Folder button
+- Changes to enable/disable state require a BTerminal restart
+
+Full plugin API and a minimal example: [docs/plugin-spec.md](docs/plugin-spec.md).
+
 ### Theme
 
 Toggle between Catppuccin Mocha (dark) and Latte (light) with the sun/moon button. The switch re-colors the terminal palette, sidebar, tabs, dialogs and scrollbars live without restarting.
@@ -108,6 +120,10 @@ Toggle between Catppuccin Mocha (dark) and Latte (light) with the sun/moon butto
 ### Auto-Update
 
 On startup BTerminal checks `origin/master` for new commits. If an update is available it shows a prompt with the new commit list and can pull + reinstall in one click.
+
+### Multi-Window
+
+Launching `bterminal` while another instance is already running opens a new independent window instead of focusing the existing one.
 
 ## Requirements
 
@@ -145,7 +161,7 @@ sudo apt install python3-gi gir1.2-gtk-3.0 gir1.2-vte-2.91
 bterminal
 ```
 
-The sidebar has four tabs: **Sessions**, **Ctx**, **Consult** and **Tasks**. Claude Code tabs also get a **Git panel** on the right.
+The sidebar has five built-in tabs: **Sessions**, **Ctx**, **Consult**, **Tasks** and **Plugins**. Claude Code tabs also get a **Git panel** on the right. Installed plugins can add their own sidebar tabs.
 
 ## Keyboard Shortcuts
 

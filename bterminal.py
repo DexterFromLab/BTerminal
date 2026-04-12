@@ -19,6 +19,7 @@ import threading
 import urllib.error
 import urllib.request
 import uuid
+import importlib
 
 from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk, Pango, Vte
 
@@ -29,6 +30,8 @@ CONFIG_DIR = os.path.expanduser("~/.config/bterminal")
 SESSIONS_FILE = os.path.join(CONFIG_DIR, "sessions.json")
 CLAUDE_SESSIONS_FILE = os.path.join(CONFIG_DIR, "claude_sessions.json")
 CONSULT_CONFIG_FILE = os.path.join(CONFIG_DIR, "consult.json")
+PLUGINS_DIR = os.path.join(CONFIG_DIR, "plugins")
+PLUGINS_CONFIG_FILE = os.path.join(CONFIG_DIR, "plugins.json")
 SSH_PATH = "/usr/bin/ssh"
 _repo_path_file = os.path.join(os.path.expanduser("~/.config/bterminal"), "repo_path")
 REPO_DIR = open(_repo_path_file).read().strip() if os.path.isfile(_repo_path_file) else None
@@ -2013,10 +2016,14 @@ class TerminalTab(Gtk.Box):
         self.terminal.set_color_cursor(_parse_color(CATPPUCCIN["rosewater"]))
         self.terminal.set_color_cursor_foreground(_parse_color(CATPPUCCIN["crust"]))
 
-        scrolled = Gtk.ScrolledWindow()
-        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scrolled.add(self.terminal)
-        self.pack_start(scrolled, True, True, 0)
+        term_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        term_box.pack_start(self.terminal, True, True, 0)
+        scrollbar = Gtk.Scrollbar(
+            orientation=Gtk.Orientation.VERTICAL,
+            adjustment=self.terminal.get_vadjustment(),
+        )
+        term_box.pack_start(scrollbar, False, False, 0)
+        self.pack_start(term_box, True, True, 0)
 
         self.terminal.connect("child-exited", self._on_child_exited)
         self.terminal.connect("window-title-changed", self._on_title_changed)
@@ -2120,6 +2127,14 @@ class TerminalTab(Gtk.Box):
                 prompt += "\n\n" + custom_prompt
         else:
             prompt = custom_prompt
+        # Inject plugin session context
+        for plugin in self.app._plugins.values():
+            try:
+                ctx = plugin.get_session_context()
+                if ctx:
+                    prompt = (prompt + "\n\n" + ctx) if prompt else ctx
+            except Exception:
+                pass
         prompt_arg = ""
         if prompt:
             escaped = prompt.replace("'", "'\\''")
@@ -6706,6 +6721,335 @@ class ShrinkableBin(Gtk.Bin):
             child.size_allocate(allocation)
 
 
+class BTerminalPlugin:
+    """Base class for BTerminal plugins."""
+    name = ""
+    title = ""
+    version = ""
+    description = ""
+    author = ""
+
+    def activate(self, app):
+        return None
+
+    def deactivate(self):
+        pass
+
+    def get_keyboard_shortcuts(self):
+        return []
+
+    def on_sidebar_shown(self):
+        pass
+
+    def get_session_context(self):
+        """Return extra context string to inject into Claude Code intro prompt, or None."""
+        return None
+
+
+class PluginManagerPanel(Gtk.Box):
+    """Panel for managing BTerminal plugins."""
+
+    def __init__(self, app):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL)
+        self.app = app
+
+        # ── Plugin list (TreeView) ──
+        # Columns: enabled(bool), name(str), version(str), author(str), status(str), mod_name(str)
+        self.store = Gtk.ListStore(bool, str, str, str, str, str)
+        self.tree = Gtk.TreeView(model=self.store)
+        self.tree.set_headers_visible(True)
+
+        # Enabled toggle column
+        toggle_renderer = Gtk.CellRendererToggle()
+        toggle_renderer.connect("toggled", self._on_enabled_toggled)
+        col_enabled = Gtk.TreeViewColumn("", toggle_renderer, active=0)
+        col_enabled.set_min_width(30)
+        col_enabled.set_max_width(30)
+        self.tree.append_column(col_enabled)
+
+        # Name column
+        cell_name = Gtk.CellRendererText()
+        cell_name.set_property("ellipsize", Pango.EllipsizeMode.END)
+        col_name = Gtk.TreeViewColumn("Name", cell_name, text=1)
+        col_name.set_expand(True)
+        self.tree.append_column(col_name)
+
+        # Version column
+        cell_ver = Gtk.CellRendererText()
+        col_ver = Gtk.TreeViewColumn("Ver", cell_ver, text=2)
+        col_ver.set_min_width(40)
+        col_ver.set_max_width(60)
+        self.tree.append_column(col_ver)
+
+        # Author column
+        cell_author = Gtk.CellRendererText()
+        cell_author.set_property("ellipsize", Pango.EllipsizeMode.END)
+        col_author = Gtk.TreeViewColumn("Author", cell_author, text=3)
+        col_author.set_min_width(60)
+        col_author.set_max_width(100)
+        self.tree.append_column(col_author)
+
+        # Status column (Loaded / Disabled / Error)
+        cell_status = Gtk.CellRendererText()
+        col_status = Gtk.TreeViewColumn("Status", cell_status, text=4)
+        col_status.set_min_width(50)
+        col_status.set_max_width(70)
+        col_status.set_cell_data_func(cell_status, self._style_status_cell)
+        self.tree.append_column(col_status)
+
+        tree_scroll = Gtk.ScrolledWindow()
+        tree_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        tree_scroll.add(self.tree)
+
+        # ── Detail area ──
+        detail_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        detail_box.set_border_width(6)
+        self.detail_label = Gtk.Label()
+        self.detail_label.set_xalign(0)
+        self.detail_label.set_yalign(0)
+        self.detail_label.set_line_wrap(True)
+        self.detail_label.set_selectable(True)
+        self.detail_label.set_markup(
+            f'<span foreground="{CATPPUCCIN["overlay1"]}">Select a plugin to see details</span>'
+        )
+        detail_box.pack_start(self.detail_label, True, True, 0)
+
+        # VPaned: tree on top, detail on bottom
+        paned = Gtk.VPaned()
+        paned.pack1(tree_scroll, resize=True, shrink=True)
+        paned.pack2(detail_box, resize=False, shrink=False)
+        self.pack_start(paned, True, True, 0)
+
+        self.tree.get_selection().connect("changed", self._on_selection_changed)
+
+        # ── Action buttons ──
+        btn_box = Gtk.Box(spacing=4)
+        btn_box.set_border_width(6)
+
+        btn_add = Gtk.Button(label="Add File")
+        btn_add.get_style_context().add_class("sidebar-btn")
+        btn_add.connect("clicked", lambda _: self._on_add_file())
+        btn_box.pack_start(btn_add, True, True, 0)
+
+        btn_add_dir = Gtk.Button(label="Add Folder")
+        btn_add_dir.get_style_context().add_class("sidebar-btn")
+        btn_add_dir.connect("clicked", lambda _: self._on_add_folder())
+        btn_box.pack_start(btn_add_dir, True, True, 0)
+
+        btn_remove = Gtk.Button(label="Remove")
+        btn_remove.get_style_context().add_class("sidebar-btn")
+        btn_remove.connect("clicked", lambda _: self._on_remove_plugin())
+        btn_box.pack_start(btn_remove, True, True, 0)
+
+        btn_refresh = Gtk.Button(label="\u21bb")
+        btn_refresh.get_style_context().add_class("sidebar-btn")
+        btn_refresh.set_tooltip_text("Refresh")
+        btn_refresh.connect("clicked", lambda _: self.refresh())
+        btn_box.pack_start(btn_refresh, False, False, 0)
+
+        self.pack_start(btn_box, False, False, 0)
+
+    # ── Config persistence ──
+
+    def _load_config(self):
+        if os.path.isfile(PLUGINS_CONFIG_FILE):
+            try:
+                with open(PLUGINS_CONFIG_FILE, "r") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return {}
+
+    def _save_config(self, config):
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=CONFIG_DIR, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(config, f, indent=2)
+            os.replace(tmp, PLUGINS_CONFIG_FILE)
+        except Exception:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+
+    # ── Data ──
+
+    def refresh(self):
+        self.store.clear()
+        config = self._load_config()
+        if not os.path.isdir(PLUGINS_DIR):
+            return
+        for entry in sorted(os.listdir(PLUGINS_DIR)):
+            path = os.path.join(PLUGINS_DIR, entry)
+            if os.path.isfile(path) and entry.endswith(".py"):
+                mod_name = entry[:-3]
+            elif os.path.isdir(path) and os.path.isfile(os.path.join(path, "__init__.py")):
+                mod_name = entry
+            else:
+                continue
+            enabled = config.get(mod_name, True)
+            name, version, author, status = mod_name, "", "", "Disabled"
+            if enabled:
+                if mod_name in self.app._plugins:
+                    plugin = self.app._plugins[mod_name]
+                    name = plugin.title or plugin.name
+                    version = plugin.version
+                    author = plugin.author
+                    status = "Loaded"
+                else:
+                    status = "Error"
+            self.store.append([enabled, name, version, author, status, mod_name])
+
+    # ── Cell styling ──
+
+    def _style_status_cell(self, column, cell, model, iter_, data=None):
+        status = model.get_value(iter_, 4)
+        if status == "Loaded":
+            cell.set_property("foreground", CATPPUCCIN["green"])
+        elif status == "Disabled":
+            cell.set_property("foreground", CATPPUCCIN["overlay1"])
+        elif status == "Error":
+            cell.set_property("foreground", CATPPUCCIN["red"])
+        else:
+            cell.set_property("foreground", CATPPUCCIN["text"])
+
+    # ── Selection / detail ──
+
+    def _on_selection_changed(self, selection):
+        model, iter_ = selection.get_selected()
+        if iter_ is None:
+            self.detail_label.set_markup(
+                f'<span foreground="{CATPPUCCIN["overlay1"]}">Select a plugin to see details</span>'
+            )
+            return
+        mod_name = model.get_value(iter_, 5)
+        name = model.get_value(iter_, 1)
+        version = model.get_value(iter_, 2)
+        author = model.get_value(iter_, 3)
+        status = model.get_value(iter_, 4)
+        desc = ""
+        if mod_name in self.app._plugins:
+            desc = self.app._plugins[mod_name].description
+        txt = CATPPUCCIN["text"]
+        sub = CATPPUCCIN["subtext0"]
+        lines = [f'<span foreground="{txt}" weight="bold">{GLib.markup_escape_text(name)}</span>']
+        if version:
+            lines.append(f'<span foreground="{sub}">Version: {GLib.markup_escape_text(version)}</span>')
+        if author:
+            lines.append(f'<span foreground="{sub}">Author: {GLib.markup_escape_text(author)}</span>')
+        lines.append(f'<span foreground="{sub}">Status: {GLib.markup_escape_text(status)}</span>')
+        lines.append(f'<span foreground="{sub}">Module: {GLib.markup_escape_text(mod_name)}</span>')
+        if desc:
+            lines.append("")
+            lines.append(f'<span foreground="{sub}">{GLib.markup_escape_text(desc)}</span>')
+        self.detail_label.set_markup("\n".join(lines))
+
+    # ── Enable/disable toggle ──
+
+    def _on_enabled_toggled(self, renderer, path):
+        iter_ = self.store.get_iter(path)
+        enabled = not self.store.get_value(iter_, 0)
+        mod_name = self.store.get_value(iter_, 5)
+        config = self._load_config()
+        config[mod_name] = enabled
+        self._save_config(config)
+        action = "enabled" if enabled else "disabled"
+        dlg = Gtk.MessageDialog(
+            transient_for=self.app, modal=True,
+            message_type=Gtk.MessageType.INFO,
+            buttons=Gtk.ButtonsType.OK,
+            text=f'Plugin "{mod_name}" {action}.\nRestart BTerminal for changes to take effect.',
+        )
+        dlg.run()
+        dlg.destroy()
+        self.refresh()
+
+    # ── Add plugin ──
+
+    def _on_add_file(self):
+        dlg = Gtk.FileChooserDialog(
+            title="Add Plugin File", parent=self.app,
+            action=Gtk.FileChooserAction.OPEN,
+        )
+        dlg.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                        Gtk.STOCK_OPEN, Gtk.ResponseType.OK)
+        filt = Gtk.FileFilter()
+        filt.set_name("Python files (*.py)")
+        filt.add_pattern("*.py")
+        dlg.add_filter(filt)
+        if dlg.run() == Gtk.ResponseType.OK:
+            src = dlg.get_filename()
+            if src:
+                self._copy_plugin(src)
+        dlg.destroy()
+
+    def _on_add_folder(self):
+        dlg = Gtk.FileChooserDialog(
+            title="Add Plugin Folder", parent=self.app,
+            action=Gtk.FileChooserAction.SELECT_FOLDER,
+        )
+        dlg.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                        Gtk.STOCK_OPEN, Gtk.ResponseType.OK)
+        if dlg.run() == Gtk.ResponseType.OK:
+            src = dlg.get_filename()
+            if src:
+                self._copy_plugin(src)
+        dlg.destroy()
+
+    def _copy_plugin(self, src):
+        os.makedirs(PLUGINS_DIR, exist_ok=True)
+        dest = os.path.join(PLUGINS_DIR, os.path.basename(src))
+        try:
+            if os.path.isdir(src):
+                shutil.copytree(src, dest)
+            else:
+                shutil.copy2(src, dest)
+            self.refresh()
+        except Exception as e:
+            dlg = Gtk.MessageDialog(
+                transient_for=self.app, modal=True,
+                message_type=Gtk.MessageType.ERROR,
+                buttons=Gtk.ButtonsType.OK,
+                text=f"Failed to add plugin: {e}",
+            )
+            dlg.run()
+            dlg.destroy()
+
+    # ── Remove plugin ──
+
+    def _on_remove_plugin(self):
+        model, iter_ = self.tree.get_selection().get_selected()
+        if iter_ is None:
+            return
+        mod_name = model.get_value(iter_, 5)
+        dlg = Gtk.MessageDialog(
+            transient_for=self.app, modal=True,
+            message_type=Gtk.MessageType.QUESTION,
+            buttons=Gtk.ButtonsType.YES_NO,
+            text=f'Remove plugin "{mod_name}"?\nThis will delete the plugin files.',
+        )
+        if dlg.run() == Gtk.ResponseType.YES:
+            if mod_name in self.app._plugins:
+                try:
+                    self.app._plugins[mod_name].deactivate()
+                except Exception:
+                    pass
+                del self.app._plugins[mod_name]
+            path_py = os.path.join(PLUGINS_DIR, mod_name + ".py")
+            path_dir = os.path.join(PLUGINS_DIR, mod_name)
+            try:
+                if os.path.isfile(path_py):
+                    os.unlink(path_py)
+                elif os.path.isdir(path_dir):
+                    shutil.rmtree(path_dir)
+            except Exception as e:
+                print(f"[plugins] Failed to remove {mod_name}: {e}")
+            config = self._load_config()
+            config.pop(mod_name, None)
+            self._save_config(config)
+            self.refresh()
+        dlg.destroy()
+
+
 class BTerminalApp(Gtk.Window):
     """Główne okno aplikacji BTerminal."""
 
@@ -6757,11 +7101,15 @@ class BTerminalApp(Gtk.Window):
         self.task_panel = TaskListPanel(self)
         self.sidebar_stack.add_titled(self.task_panel, "tasks", "Tasks")
 
+        self.plugin_panel = PluginManagerPanel(self)
+        self.sidebar_stack.add_titled(self.plugin_panel, "plugins", "Plugins")
+
         # Custom compact tab switcher that scales down gracefully
         switcher = Gtk.Box(spacing=0)
         switcher.get_style_context().add_class("sidebar-switcher")
         for name, title in [("sessions", "Sessions"), ("ctx", "Ctx"),
-                            ("consult", "Consult"), ("tasks", "Tasks")]:
+                            ("consult", "Consult"), ("tasks", "Tasks"),
+                            ("plugins", "Plugins")]:
             btn = Gtk.Button(label=title)
             btn.get_style_context().add_class("sidebar-tab")
             child = btn.get_child()
@@ -6803,7 +7151,7 @@ class BTerminalApp(Gtk.Window):
             if isinstance(widget, Gtk.Container):
                 widget.forall(_make_shrinkable)
         # Process ALL stack children explicitly (forall may skip invisible pages)
-        for panel in [self.sidebar, self.ctx_panel, self.consult_panel, self.task_panel]:
+        for panel in [self.sidebar, self.ctx_panel, self.consult_panel, self.task_panel, self.plugin_panel]:
             _make_shrinkable(panel)
         _make_shrinkable(switcher)
 
@@ -6878,6 +7226,8 @@ class BTerminalApp(Gtk.Window):
                 self.consult_panel.refresh()
             elif child is self.task_panel:
                 self.task_panel.refresh()
+            elif child is self.plugin_panel:
+                self.plugin_panel.refresh()
 
         self.sidebar_stack.connect("notify::visible-child", _on_sidebar_switch)
 
@@ -6890,6 +7240,11 @@ class BTerminalApp(Gtk.Window):
         self.add_local_tab()
 
         self.show_all()
+
+        self._plugins = {}
+        self._plugin_shortcuts = []
+        self._load_plugins()
+        self.plugin_panel.refresh()
 
     def _update_window_title(self):
         """Update window title bar: 'BTerminal — tab_name [n/total]'."""
@@ -7184,13 +7539,107 @@ class BTerminalApp(Gtk.Window):
     def _on_sidebar_tab_changed(self, _stack, _param):
         """Update active tab styling in custom sidebar switcher."""
         active_name = self.sidebar_stack.get_visible_child_name()
-        tab_names = ["sessions", "ctx", "consult", "tasks"]
+        tab_names = ["sessions", "ctx", "consult", "tasks", "plugins"] + [
+            p.name for p in self._plugins.values()
+        ] if hasattr(self, '_plugins') else ["sessions", "ctx", "consult", "tasks", "plugins"]
         for btn, name in zip(self._sidebar_tab_buttons, tab_names):
             ctx = btn.get_style_context()
             if name == active_name:
                 ctx.add_class("sidebar-tab-active")
             else:
                 ctx.remove_class("sidebar-tab-active")
+
+    def _load_plugins(self):
+        """Scan PLUGINS_DIR and load all plugins."""
+        if not os.path.isdir(PLUGINS_DIR):
+            return
+        plugin_config = {}
+        if os.path.isfile(PLUGINS_CONFIG_FILE):
+            try:
+                with open(PLUGINS_CONFIG_FILE, "r") as f:
+                    plugin_config = json.load(f)
+            except Exception:
+                pass
+        for entry in sorted(os.listdir(PLUGINS_DIR)):
+            path = os.path.join(PLUGINS_DIR, entry)
+            # Accept .py files or packages with __init__.py
+            if os.path.isfile(path) and entry.endswith(".py"):
+                mod_name = entry[:-3]
+            elif os.path.isdir(path) and os.path.isfile(os.path.join(path, "__init__.py")):
+                mod_name = entry
+            else:
+                continue
+            # Skip disabled plugins
+            if not plugin_config.get(mod_name, True):
+                continue
+            try:
+                spec = importlib.util.spec_from_file_location(
+                    f"bterminal_plugin_{mod_name}",
+                    path if path.endswith(".py") else os.path.join(path, "__init__.py"),
+                )
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                plugin = module.create_plugin(self)
+                self._register_plugin(plugin)
+            except Exception as e:
+                print(f"[plugins] Failed to load {entry}: {e}")
+
+    def _register_plugin(self, plugin):
+        """Register a plugin: activate, add sidebar panel and switcher button."""
+        panel = plugin.activate(self)
+        self._plugins[plugin.name] = plugin
+
+        if panel is not None:
+            self.sidebar_stack.add_titled(panel, plugin.name, plugin.title)
+
+            # Make shrinkable (reuse the same logic as built-in panels)
+            def _make_shrinkable(widget):
+                if isinstance(widget, Gtk.Label):
+                    widget.set_ellipsize(Pango.EllipsizeMode.END)
+                if isinstance(widget, (Gtk.Entry, Gtk.SpinButton)):
+                    widget.set_width_chars(1)
+                if isinstance(widget, Gtk.ComboBoxText):
+                    widget.set_size_request(0, -1)
+                if isinstance(widget, Gtk.TreeView):
+                    for col in widget.get_columns():
+                        col.set_min_width(0)
+                        col.set_max_width(-1)
+                        col.set_sizing(Gtk.TreeViewColumnSizing.AUTOSIZE)
+                if isinstance(widget, Gtk.ScrolledWindow):
+                    widget.set_propagate_natural_width(False)
+                if isinstance(widget, Gtk.Container):
+                    widget.forall(_make_shrinkable)
+            _make_shrinkable(panel)
+
+            # Add switcher button
+            btn = Gtk.Button(label=plugin.title)
+            btn.get_style_context().add_class("sidebar-tab")
+            child = btn.get_child()
+            if isinstance(child, Gtk.Label):
+                child.set_ellipsize(Pango.EllipsizeMode.END)
+            btn.connect("clicked", lambda _, n=plugin.name: self.sidebar_stack.set_visible_child_name(n))
+            self._sidebar_switcher.pack_start(btn, True, True, 0)
+            # Keep toggle button last
+            self._sidebar_switcher.reorder_child(self._sidebar_toggle_btn, -1)
+            self._sidebar_tab_buttons.append(btn)
+
+            btn.show_all()
+            panel.show_all()
+
+        # Register keyboard shortcuts
+        for shortcut in plugin.get_keyboard_shortcuts():
+            mod, keyval, callback = shortcut
+            self._plugin_shortcuts.append((mod, keyval, callback))
+
+    def _unload_plugins(self):
+        """Deactivate all loaded plugins."""
+        for plugin in self._plugins.values():
+            try:
+                plugin.deactivate()
+            except Exception as e:
+                print(f"[plugins] Failed to deactivate {plugin.name}: {e}")
+        self._plugins.clear()
+        self._plugin_shortcuts.clear()
 
     def _on_key_press(self, widget, event):
         mod = event.state & Gtk.accelerator_get_default_mod_mask()
@@ -7265,9 +7714,16 @@ class BTerminalApp(Gtk.Window):
                 self.notebook.set_current_page(idx + 1)
             return True
 
+        # Plugin keyboard shortcuts
+        for p_mod, p_keyval, p_callback in self._plugin_shortcuts:
+            if mod == p_mod and event.keyval == p_keyval:
+                p_callback()
+                return True
+
         return False
 
     def _on_delete_event(self, widget, event):
+        self._unload_plugins()
         return False
 
 
@@ -7395,10 +7851,6 @@ def main():
     )
 
     def on_activate(app):
-        windows = app.get_windows()
-        if windows:
-            windows[0].present()
-            return
         win = BTerminalApp()
         app.add_window(win)
         _check_for_updates(win)
