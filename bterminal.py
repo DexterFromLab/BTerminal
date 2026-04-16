@@ -2465,9 +2465,11 @@ class TerminalTab(Gtk.Box):
                 f"Sprawdź pełną listę: tasks context {self._task_project} --session {self._task_session_id}\n"
                 f"MUSISZ oznaczyć po wykonaniu: tasks done {self._task_project} {task['task_id']} (w Bash). "
                 f"Pętla auto-trigger kończy się DOPIERO gdy WSZYSTKIE zadania są zamknięte (done). "
-                f"Jeśli nie oznaczysz — ta wiadomość będzie się powtarzać.\r"
+                f"Jeśli nie oznaczysz — ta wiadomość będzie się powtarzać."
             )
-            self.terminal.feed_child(message.encode())
+            terminal = self.terminal
+            terminal.feed_child(message.encode())
+            GLib.timeout_add(100, lambda: terminal.feed_child(b"\r") or False)
 
             # Refresh task panel if visible
             if hasattr(self.app, "task_panel"):
@@ -6026,9 +6028,11 @@ class TaskListPanel(Gtk.Box):
                     f"Sprawdź pełną listę: tasks context {project} --session {tab._task_session_id}\n"
                     f"MUSISZ oznaczyć po wykonaniu: tasks done {project} {task['task_id']} (w Bash). "
                     f"Pętla auto-trigger kończy się DOPIERO gdy WSZYSTKIE zadania są zamknięte (done). "
-                    f"Jeśli nie oznaczysz — ta wiadomość będzie się powtarzać.\r"
+                    f"Jeśli nie oznaczysz — ta wiadomość będzie się powtarzać."
                 )
-                tab.terminal.feed_child(message.encode())
+                _t = tab.terminal
+                _t.feed_child(message.encode())
+                GLib.timeout_add(100, lambda t=_t: t.feed_child(b"\r") or False)
         db.close()
 
     def _on_add_task(self):
