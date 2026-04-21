@@ -24,9 +24,36 @@ echo ""
 
 echo "[1/6] Checking Claude Code..."
 
-if command -v claude &>/dev/null; then
-    CLAUDE_VER="$(claude --version 2>/dev/null || echo 'unknown')"
-    echo "  Claude Code already installed: $CLAUDE_VER"
+# Ensure ~/.local/bin exists early — we'll symlink claude here for a stable path
+mkdir -p "$BIN_DIR"
+
+find_claude_bin() {
+    # Prefer real install locations over our own symlink so we can repoint it.
+    local candidates=(
+        "$HOME/.npm-global/bin/claude"
+        "/usr/local/bin/claude"
+        "/usr/bin/claude"
+        "/opt/homebrew/bin/claude"
+    )
+    for p in "${candidates[@]}"; do
+        [[ -x "$p" ]] && { echo "$p"; return; }
+    done
+    for p in "$HOME"/.nvm/versions/node/*/bin/claude; do
+        [[ -x "$p" ]] && { echo "$p"; return; }
+    done
+    # Last resort: our own symlink (or whatever is on PATH).
+    if [[ -x "$HOME/.local/bin/claude" ]]; then
+        echo "$HOME/.local/bin/claude"
+        return
+    fi
+    command -v claude 2>/dev/null || true
+}
+
+EXISTING_CLAUDE="$(find_claude_bin)"
+
+if [[ -n "$EXISTING_CLAUDE" ]]; then
+    CLAUDE_VER="$("$EXISTING_CLAUDE" --version 2>/dev/null || echo 'unknown')"
+    echo "  Claude Code already installed: $CLAUDE_VER ($EXISTING_CLAUDE)"
 elif [[ "$NO_SUDO" == true ]]; then
     echo "  Claude Code not found (skipped — no-sudo mode)."
 else
@@ -46,8 +73,17 @@ else
     npm config set prefix "$NPM_PREFIX"
     export PATH="$NPM_PREFIX/bin:$PATH"
     npm install -g @anthropic-ai/claude-code
-    CLAUDE_VER="$(claude --version 2>/dev/null || echo 'unknown')"
-    echo "  Claude Code installed: $CLAUDE_VER"
+    EXISTING_CLAUDE="$(find_claude_bin)"
+    CLAUDE_VER="$("$EXISTING_CLAUDE" --version 2>/dev/null || echo 'unknown')"
+    echo "  Claude Code installed: $CLAUDE_VER ($EXISTING_CLAUDE)"
+fi
+
+# Symlink claude to ~/.local/bin for a PATH-independent stable location.
+# Without this, GUI launches (desktop entry) often fail to find claude
+# because ~/.npm-global/bin lives only in ~/.bashrc.
+if [[ -n "$EXISTING_CLAUDE" && "$EXISTING_CLAUDE" != "$BIN_DIR/claude" ]]; then
+    ln -sf "$EXISTING_CLAUDE" "$BIN_DIR/claude"
+    echo "  Linked $BIN_DIR/claude -> $EXISTING_CLAUDE"
 fi
 
 # ─── System dependencies ───────────────────────────────────────────────

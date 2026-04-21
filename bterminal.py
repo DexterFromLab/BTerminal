@@ -37,15 +37,35 @@ _repo_path_file = os.path.join(os.path.expanduser("~/.config/bterminal"), "repo_
 REPO_DIR = open(_repo_path_file).read().strip() if os.path.isfile(_repo_path_file) else None
 
 def _find_claude_path():
-    for p in [
+    """Locate Claude Code binary across common install locations.
+
+    Returns absolute path if found, otherwise None. Handles npm-global
+    (default prefix used by our installer), nvm, system paths, and macOS
+    homebrew. Falls back to PATH lookup with an extended search so that
+    GUI launches (which often miss ~/.npm-global/bin from ~/.bashrc)
+    still resolve the binary.
+    """
+    import glob
+    candidates = [
         os.path.expanduser("~/.local/bin/claude"),
+        os.path.expanduser("~/.npm-global/bin/claude"),
         "/usr/local/bin/claude",
         "/usr/bin/claude",
-    ]:
+        "/opt/homebrew/bin/claude",
+    ]
+    candidates += sorted(
+        glob.glob(os.path.expanduser("~/.nvm/versions/node/*/bin/claude")),
+        reverse=True,
+    )
+    for p in candidates:
         if os.path.isfile(p) and os.access(p, os.X_OK):
             return p
-    import shutil
-    return shutil.which("claude") or "claude"
+    extra = os.pathsep.join([
+        os.path.expanduser("~/.npm-global/bin"),
+        os.path.expanduser("~/.local/bin"),
+    ])
+    env_path = os.environ.get("PATH", "") + os.pathsep + extra
+    return shutil.which("claude", path=env_path)
 
 CLAUDE_PATH = _find_claude_path()
 
@@ -2111,6 +2131,38 @@ class TerminalTab(Gtk.Box):
         Always runs inside bash so that when claude exits, the shell
         stays alive and the tab doesn't auto-close.
         """
+        claude_path = CLAUDE_PATH or _find_claude_path()
+        if not claude_path:
+            work_dir = config.get("project_dir") or os.environ.get("HOME", "/")
+            msg = (
+                'printf "\\n\\033[1;31m━━━ Claude Code nie został znaleziony ━━━\\033[0m\\n\\n"\n'
+                'printf "Sprawdzone lokalizacje:\\n"\n'
+                'printf "  ~/.local/bin/claude\\n"\n'
+                'printf "  ~/.npm-global/bin/claude\\n"\n'
+                'printf "  /usr/local/bin/claude\\n"\n'
+                'printf "  /usr/bin/claude\\n"\n'
+                'printf "  /opt/homebrew/bin/claude\\n"\n'
+                'printf "  ~/.nvm/versions/node/*/bin/claude\\n\\n"\n'
+                'printf "Aby naprawić:\\n"\n'
+                'printf "  1. Uruchom instalator ponownie: ./install.sh\\n"\n'
+                'printf "  2. Lub zainstaluj ręcznie: npm install -g @anthropic-ai/claude-code\\n"\n'
+                'printf "  3. Upewnij się, że ~/.npm-global/bin jest w PATH (~/.bashrc)\\n\\n"\n'
+                'exec bash\n'
+            )
+            self.terminal.spawn_async(
+                Vte.PtyFlags.DEFAULT,
+                work_dir,
+                ["/bin/bash", "-c", msg],
+                None,
+                GLib.SpawnFlags.DEFAULT,
+                None,
+                None,
+                -1,
+                None,
+                None,
+            )
+            return
+
         flags = []
         if config.get("resume"):
             flags.append("--resume")
@@ -2160,11 +2212,11 @@ class TerminalTab(Gtk.Box):
                 '  echo "Błędne hasło. Spróbuj ponownie."\n'
                 'done\n'
                 'trap \'rm -f "$ASKPASS"\' EXIT\n'
-                f'{CLAUDE_PATH} {flags_str}{prompt_arg}\n'
+                f'{claude_path} {flags_str}{prompt_arg}\n'
                 'exec bash\n'
             )
         else:
-            script = f'{CLAUDE_PATH} {flags_str}{prompt_arg}\nexec bash\n'
+            script = f'{claude_path} {flags_str}{prompt_arg}\nexec bash\n'
 
         work_dir = config.get("project_dir") or os.environ.get("HOME", "/")
         self.terminal.spawn_async(
