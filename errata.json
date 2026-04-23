@@ -1,0 +1,13 @@
+[
+  {
+    "date": "2026-04-23",
+    "message": "Scalono branch feat/claude-usage-limits. Pasek statystyk kart Claude Code wyświetla teraz limity planu (5h/7d) pobierane bezpośrednio z Anthropic API przez OAuth. Naprawiono race condition w auto-trigger, sortowanie zadań i ikonkę na starszym Mincie.",
+    "changes": [
+      "feat: limity planu Claude (5h/7d) w pasku statystyk — procent wykorzystania i czas do resetu",
+      "fix: opóźnienie Enter o 100ms po wiadomości auto-trigger (zapobiega race condition)",
+      "fix: sortowanie aktywnych zadań rosnąco (1, 1.a, 1.b, 2...)",
+      "fix: rozmiar fontu zakładek sidebarau 11px → 13px",
+      "fix: ikonka BTerminal na starszym Linux Mint (gtk-update-icon-cache po instalacji)"
+    ]
+  }
+]

@@ -127,6 +127,7 @@ cp "$SCRIPT_DIR/ctx" "$INSTALL_DIR/ctx"
 cp "$SCRIPT_DIR/consult" "$INSTALL_DIR/consult"
 cp "$SCRIPT_DIR/tasks" "$INSTALL_DIR/tasks"
 cp "$SCRIPT_DIR/bterminal.svg" "$ICON_DIR/bterminal.svg"
+gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor/" 2>/dev/null || true
 chmod +x "$INSTALL_DIR/bterminal.py" "$INSTALL_DIR/ctx" "$INSTALL_DIR/consult" "$INSTALL_DIR/tasks"
 
 # Save repo path for auto-update
@@ -178,6 +179,7 @@ Categories=System;TerminalEmulator;
 Terminal=false
 StartupNotify=true
 EOF
+update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
 
 echo ""
 echo "=== Installation complete ==="

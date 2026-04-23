@@ -10,6 +10,7 @@ gi.require_version("Gdk", "3.0")
 import json
 import os
 import random
+import sys
 import re
 import shutil
 import sqlite3
@@ -1340,7 +1341,7 @@ class CtxSetupWizard(Gtk.Dialog):
 
         grid.attach(Gtk.Label(label="Key:", halign=Gtk.Align.END), 0, 0, 1, 1)
         self.w_key = Gtk.Entry(hexpand=True)
-        self.w_key.set_placeholder_text("e.g. repo, stack, architecture")
+        self.w_key.set_text("init")
         grid.attach(self.w_key, 1, 0, 1, 1)
 
         grid.attach(
@@ -1351,6 +1352,11 @@ class CtxSetupWizard(Gtk.Dialog):
         scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         scrolled.set_min_content_height(90)
         self.w_value = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR)
+        self.w_value.get_buffer().set_text(
+            "Kontekst projektu nie został jeszcze zebrany. "
+            "Zbierz kontekst w trakcie pracy i zapisuj ważne odkrycia: "
+            "ctx set <project> <key> <value>"
+        )
         scrolled.add(self.w_value)
         grid.attach(scrolled, 1, 1, 1, 1)
 
@@ -7935,31 +7941,156 @@ def _check_for_updates(window):
                     ["git", "log", "--oneline", f"{local}..{remote}"],
                     cwd=REPO_DIR, capture_output=True, text=True, timeout=5,
                 ).stdout.strip()
-                GLib.idle_add(_prompt_update, window, log)
+                errata_raw = subprocess.run(
+                    ["git", "show", "origin/master:errata.json"],
+                    cwd=REPO_DIR, capture_output=True, text=True, timeout=5,
+                )
+                errata = []
+                if errata_raw.returncode == 0:
+                    try:
+                        errata = json.loads(errata_raw.stdout)
+                    except Exception:
+                        pass
+                GLib.idle_add(_prompt_update, window, log, errata)
         except Exception:
             pass  # silent fail — no network etc.
 
     threading.Thread(target=_fetch, daemon=True).start()
 
 
-def _prompt_update(window, log):
+_RESP_ERRATA = 10
+_RESP_RESTART = 11
+
+
+def _prompt_update(window, log, errata=None):
     """Show update dialog on the main thread."""
-    dialog = Gtk.MessageDialog(
+    dialog = Gtk.Dialog(
+        title="Nowa wersja BTerminal",
         transient_for=window,
         modal=True,
-        message_type=Gtk.MessageType.QUESTION,
-        buttons=Gtk.ButtonsType.YES_NO,
-        text="Dostępna nowa wersja BTerminal",
     )
-    msg = "Czy chcesz pobrać i zainstalować aktualizację?"
+    dialog.set_default_size(520, -1)
+    dialog.set_border_width(0)
+
+    content = dialog.get_content_area()
+    content.set_spacing(0)
+
+    vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+    vbox.set_border_width(20)
+
+    title_lbl = Gtk.Label()
+    title_lbl.set_markup("<b>Dostępna nowa wersja BTerminal</b>")
+    title_lbl.set_halign(Gtk.Align.START)
+    vbox.pack_start(title_lbl, False, False, 0)
+
+    if errata:
+        latest = errata[-1]
+        admin_msg = latest.get("message", "").strip()
+        if admin_msg:
+            sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+            vbox.pack_start(sep, False, False, 4)
+            msg_lbl = Gtk.Label(label=admin_msg)
+            msg_lbl.set_line_wrap(True)
+            msg_lbl.set_xalign(0)
+            msg_lbl.set_halign(Gtk.Align.FILL)
+            vbox.pack_start(msg_lbl, False, False, 0)
+
     if log:
-        msg += f"\n\nNowe zmiany:\n{log}"
-    dialog.format_secondary_text(msg)
-    response = dialog.run()
+        sep2 = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        vbox.pack_start(sep2, False, False, 4)
+        log_lbl = Gtk.Label()
+        log_lbl.set_markup(f"<small>{GLib.markup_escape_text(log)}</small>")
+        log_lbl.set_xalign(0)
+        log_lbl.set_halign(Gtk.Align.START)
+        log_lbl.set_selectable(True)
+        vbox.pack_start(log_lbl, False, False, 0)
+
+    content.pack_start(vbox, True, True, 0)
+    content.show_all()
+
+    dialog.add_button("Pokaż erratę", _RESP_ERRATA)
+    dialog.add_button("Nie teraz", Gtk.ResponseType.CANCEL)
+    btn_update = dialog.add_button("Aktualizuj i uruchom ponownie", Gtk.ResponseType.YES)
+    btn_update.get_style_context().add_class("suggested-action")
+    dialog.set_default_response(Gtk.ResponseType.YES)
+
+    while True:
+        response = dialog.run()
+        if response == _RESP_ERRATA:
+            _show_errata_dialog(window, errata or [])
+            continue
+        break
+
     dialog.destroy()
     if response == Gtk.ResponseType.YES:
         _do_update(window)
     return False
+
+
+def _show_errata_dialog(window, errata):
+    """Show all errata entries in a scrollable dialog."""
+    dialog = Gtk.Dialog(
+        title="Errata BTerminal",
+        transient_for=window,
+        modal=True,
+    )
+    dialog.set_default_size(560, 480)
+    dialog.add_button("Zamknij", Gtk.ResponseType.CLOSE)
+
+    scroll = Gtk.ScrolledWindow()
+    scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+    scroll.set_border_width(0)
+
+    vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+    vbox.set_border_width(20)
+
+    if not errata:
+        empty = Gtk.Label(label="Brak wpisów errata.")
+        empty.set_halign(Gtk.Align.START)
+        vbox.pack_start(empty, False, False, 0)
+    else:
+        for entry in reversed(errata):
+            date = entry.get("date", "")
+            message = entry.get("message", "").strip()
+            changes = entry.get("changes", [])
+
+            entry_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+
+            header = Gtk.Label()
+            header.set_markup(f"<b>{GLib.markup_escape_text(date)}</b>")
+            header.set_halign(Gtk.Align.START)
+            entry_box.pack_start(header, False, False, 0)
+
+            if message:
+                msg_lbl = Gtk.Label(label=message)
+                msg_lbl.set_line_wrap(True)
+                msg_lbl.set_xalign(0)
+                msg_lbl.set_halign(Gtk.Align.FILL)
+                entry_box.pack_start(msg_lbl, False, False, 0)
+
+            for change in changes:
+                row = Gtk.Label(label=f"• {change}")
+                row.set_xalign(0)
+                row.set_halign(Gtk.Align.START)
+                row.set_line_wrap(True)
+                entry_box.pack_start(row, False, False, 0)
+
+            vbox.pack_start(entry_box, False, False, 0)
+            vbox.pack_start(
+                Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL),
+                False, False, 0,
+            )
+
+    scroll.add(vbox)
+    dialog.get_content_area().pack_start(scroll, True, True, 0)
+    dialog.show_all()
+    dialog.run()
+    dialog.destroy()
+
+
+def _restart_bterminal():
+    """Restart the BTerminal process in-place."""
+    os.execv(sys.executable, [sys.executable] + sys.argv)
 
 
 def _do_update(window):
@@ -8009,17 +8140,7 @@ def _update_done(window, spinner_dialog, error):
     if error:
         show_error_dialog(window, f"Update error:\n{error}")
     else:
-        dialog = Gtk.MessageDialog(
-            transient_for=window,
-            modal=True,
-            message_type=Gtk.MessageType.INFO,
-            buttons=Gtk.ButtonsType.OK,
-            text="Aktualizacja zakończona",
-        )
-        dialog.format_secondary_text(
-            "Uruchom ponownie BTerminal, aby zastosować zmiany.")
-        dialog.run()
-        dialog.destroy()
+        _restart_bterminal()
     return False
 
 
