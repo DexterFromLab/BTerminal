@@ -1,6 +1,8 @@
 # BTerminal
 
-A GTK 3 terminal emulator built for developers who work with SSH servers and Claude Code. Combines session management, macro automation, a persistent context database, multi-model AI consultation, task orchestration, and git awareness in a single window. Ships with Catppuccin Mocha (dark) and Latte (light) themes.
+A GTK 3 terminal emulator built for developers who work with SSH servers and Claude Code. Combines session management, macro automation, a persistent context database, multi-model AI consultation, task orchestration, git awareness, a skills library and a global rules system in a single window. Ships with Catppuccin Mocha (dark) and Latte (light) themes.
+
+**Current release: v1.0.0**
 
 ![BTerminal](screenshot.png)
 
@@ -20,8 +22,10 @@ A GTK 3 terminal emulator built for developers who work with SSH servers and Cla
 - Saved Claude Code session configs: project directory, initial prompt, sudo askpass, resume flag, permission skip
 - Sudo elevation via a temporary `SUDO_ASKPASS` helper — password entered once, retried on failure, cleaned up on exit
 - Session metrics bar showing live duration, prompts, responses, tokens, cache hit rate, cost and throughput (parsed from Claude Code JSONL output)
+- **Usage limits bar**: session (5 h) and weekly (7 d) utilization percentages fetched from the Anthropic OAuth API, refreshed every 60 s
 - Emoji-tagged tabs for quick visual identification across multiple sessions
 - "Open with" context menu — open a project directory in File Manager, VS Code, Zed or a custom command
+- **BTerminal environment header** injected into every session's intro prompt so the agent knows it is working inside BTerminal and where to find the README
 
 ### Git Panel
 
@@ -56,6 +60,52 @@ ctx --help
 The sidebar **Ctx** tab provides a tree view of all projects and entries, a detail/image preview pane, add/edit/delete operations, and selective import/export via JSON with a checkbox UI. A Setup Wizard walks through project registration and can auto-generate `CLAUDE.md`.
 
 Images can be dragged into the ctx tree — they are stored in `~/.claude-context/images/` and indexed in the database.
+
+### Memory & Rules
+
+The sidebar **Memory** tab manages context rules injected periodically into Claude Code sessions. Rules fire every N prompts (default: 100) and can reference the ctx database, tool instructions and project-specific notes.
+
+- **Global default rules** are shipped in `defaults/global_rules.txt` inside the repo and injected at the top of every session. Lines beginning with `#` are disabled. They update automatically with `git pull` — no reinstall needed.
+- **Project rules** are stored per-project in the ctx database.
+- `/reflect` — bundled skill: stops the agent, runs the `memory_wizard --dry-run` analysis, presents proposed rule changes, and asks for approval before applying.
+
+```bash
+memory_wizard                          # interactive wizard
+memory_wizard --dry-run                # show proposals, no changes applied
+memory_wizard --auto                   # auto-accept ADD-only proposals
+```
+
+### Skills
+
+The sidebar **Skills** tab lists all installed Claude Code skills (markdown files in `~/.claude/commands/`). Bundled skills are marked with 📦.
+
+**Bundled skills** (installed to `~/.claude/commands/` on first install):
+
+| Skill | Description |
+|-------|-------------|
+| `/reflect` | Stop → analyze behavior → propose rule changes → apply with approval |
+| `/check-deps` | Check all BTerminal dependencies against `dependencies.json`, report available updates |
+
+Skills are never overwritten on update — user edits are preserved. New bundled skills are added on reinstall only if the file does not already exist.
+
+### Extensions
+
+Extensions are full tools or skill suites installed into `~/.local/share/bterminal/extensions/`. They are tracked in `defaults/dependencies.json`.
+
+**Bundled extensions** (installed separately):
+
+| Extension | Description |
+|-----------|-------------|
+| `latex-document-skill` | 27 LaTeX templates, compilation, PDF operations, format conversion — `/latex` skill |
+
+To install the LaTeX extension:
+
+```bash
+git clone https://github.com/ndpvt-web/latex-document-skill \
+    ~/.local/share/bterminal/extensions/latex-document-skill
+ln -s ~/.local/share/bterminal/extensions/latex-document-skill/SKILL.md \
+    ~/.claude/commands/latex.md
+```
 
 ### Consult (AI Models)
 
@@ -113,13 +163,13 @@ Extend BTerminal with Python plugins loaded from `~/.config/bterminal/plugins/`.
 
 Full plugin API and a minimal example: [docs/plugin-spec.md](docs/plugin-spec.md).
 
+### Errata & Auto-Update
+
+On startup BTerminal checks `origin/master` for new commits. If an update is available it shows a prompt with the new commit list and admin message from `errata.json`. One click pulls + reinstalls and restarts automatically.
+
 ### Theme
 
 Toggle between Catppuccin Mocha (dark) and Latte (light) with the sun/moon button. The switch re-colors the terminal palette, sidebar, tabs, dialogs and scrollbars live without restarting.
-
-### Auto-Update
-
-On startup BTerminal checks `origin/master` for new commits. If an update is available it shows a prompt with the new commit list and can pull + reinstall in one click.
 
 ### Multi-Window
 
@@ -127,8 +177,9 @@ Launching `bterminal` while another instance is already running opens a new inde
 
 ## Requirements
 
-- **Python 3** with PyGObject, GTK 3 and VTE 2.91 bindings
-- **Claude Code** CLI — requires an active Claude subscription (Max or Pro); the installer will set it up if missing
+- **Python 3.10+** with PyGObject, GTK 3 and VTE 2.91 bindings
+- **Node.js 22+** and **npm 10+**
+- **Claude Code** CLI — requires an active Claude subscription (Max or Pro); the installer sets it up automatically
 - **OpenRouter account** *(optional)* — needed only for the Consult feature; requires API credits at [openrouter.ai](https://openrouter.ai)
 
 ## Installation
@@ -139,13 +190,19 @@ cd BTerminal
 ./install.sh
 ```
 
-The installer will:
-1. Install system dependencies (`python3-gi`, GTK 3, VTE 2.91, `git`, `git-lfs`)
-2. Install Claude Code CLI via npm (installs Node.js first if needed)
-3. Copy `bterminal.py`, `ctx`, `consult` and `tasks` to `~/.local/share/bterminal/`
-4. Create symlinks in `~/.local/bin/` (`bterminal`, `ctx`, `consult`, `tasks`)
-5. Initialize the context database at `~/.claude-context/context.db`
-6. Add a desktop entry and icon to the application menu
+The installer reads `defaults/dependencies.json` and enforces version requirements. It will:
+
+1. Verify Python 3.10+, Node.js 22+, npm 10+ — upgrade Node via NodeSource if needed
+2. Install or update Claude Code CLI via npm; create a stable symlink at `~/.local/bin/claude`
+3. Install system tools: `git`, `ssh`, optionally `git-lfs` and `xdg-open`
+4. Install GTK bindings: `python3-gi`, `gir1.2-gtk-3.0`, `gir1.2-vte-2.91`
+5. Copy `bterminal.py`, `ctx`, `consult`, `tasks`, `claude_log`, `memory_wizard` to `~/.local/share/bterminal/`
+6. Create live symlinks for `defaults/`, `README.md`, `VERSION` — `git pull` takes effect immediately, no reinstall needed
+7. Install new bundled skills to `~/.claude/commands/` (never overwrites existing files)
+8. Create symlinks in `~/.local/bin/`
+9. Initialize the context database, write a desktop entry and update the icon cache
+
+On critical errors the installer exits with code 1 and writes a summary to `~/.config/bterminal/install_errors.json` (shown as a dialog on next BTerminal startup).
 
 Use `./install.sh --no-sudo` for a non-root install (sets npm prefix to `~/.npm-global`).
 
@@ -161,7 +218,7 @@ sudo apt install python3-gi gir1.2-gtk-3.0 gir1.2-vte-2.91
 bterminal
 ```
 
-The sidebar has five built-in tabs: **Sessions**, **Ctx**, **Consult**, **Tasks** and **Plugins**. Claude Code tabs also get a **Git panel** on the right. Installed plugins can add their own sidebar tabs.
+The sidebar has seven built-in tabs: **Sessions**, **Ctx**, **Consult**, **Tasks**, **Memory**, **Skills** and **Plugins**. Claude Code tabs also get a **Git panel** on the right. Installed plugins can add their own sidebar tabs.
 
 ## Keyboard Shortcuts
 
@@ -186,8 +243,14 @@ Files in `~/.config/bterminal/`:
 | `sessions.json` | SSH sessions and macros |
 | `claude_sessions.json` | Claude Code session configs |
 | `consult.json` | OpenRouter API key, models and tribunal presets |
+| `install_errors.json` | Last installer run: errors and warnings |
+| `plugins.json` | Plugin enable/disable state |
 
 Context database: `~/.claude-context/context.db`
+
+Global rules: `~/.local/share/bterminal/defaults/global_rules.txt` (symlink → repo)
+
+Extensions: `~/.local/share/bterminal/extensions/`
 
 ## License
 

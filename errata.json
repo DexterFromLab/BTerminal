@@ -1,5 +1,23 @@
 [
   {
+    "date": "2026-04-24",
+    "message": "BTerminal v1.0.0 — pierwsze oficjalne wydanie. Dodano system globalnych reguł, panel Skills, rozszerzenia (latex-document-skill), nowy instalator z weryfikacją zależności, wersjonowanie oraz skill /check-deps. Zalecane: uruchom install.sh aby zaktualizować instalację i pobrać nowe skille.",
+    "changes": [
+      "feat: wersjonowanie v1.0.0 — plik VERSION, tytuł okna pokazuje wersję",
+      "feat: globalny plik reguł defaults/global_rules.txt — wstrzykiwany do każdej sesji, aktualizuje się z git pull",
+      "feat: panel Skills w sidebarze — lista zainstalowanych skillów Claude Code, oznaczenie 📦 dla bundled",
+      "feat: bundled skille (reflect.md, check-deps.md) — instalowane do ~/.claude/commands/ przy instalacji",
+      "feat: /check-deps — skill sprawdzający wersje zależności BTerminal z defaults/dependencies.json",
+      "feat: /reflect — skill zatrzymujący agenta i uruchamiający analizę reguł przez memory_wizard --dry-run",
+      "feat: system rozszerzeń — extensions w dependencies.json, latex-document-skill jako pierwsza oficjalna extension",
+      "feat: install.sh v2 — manifest-driven, sprawdza i aktualizuje wszystkie zależności, zapisuje install_errors.json",
+      "feat: defaults/dependencies.json — pełny manifest zależności (runtime, GTK, system tools, claude_code, APIs, extensions)",
+      "feat: nagłówek środowiska BTerminal w intro prompt i periodic inject (ze ścieżką do README.md)",
+      "feat: symlinki live — defaults/, README.md, VERSION linkowane z repo (git pull = natychmiastowy efekt)",
+      "fix: mkdir BIN_DIR i INSTALL_DIR przed krokiem [2/7] w install.sh (naprawione via test Docker)"
+    ]
+  },
+  {
     "date": "2026-04-23",
     "message": "Scalono branch feat/claude-usage-limits. Pasek statystyk kart Claude Code wyświetla teraz limity planu (5h/7d) pobierane bezpośrednio z Anthropic API przez OAuth. Naprawiono race condition w auto-trigger, sortowanie zadań i ikonkę na starszym Mincie.",
     "changes": [
