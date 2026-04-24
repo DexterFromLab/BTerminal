@@ -1179,10 +1179,10 @@ def print_help():
     print()
     print("Debate options:")
     print("  -f, --file FILE      Include file(s) as context (repeatable)")
-    print("  --analyst MODEL      Model for problem analysis")
+    print("  --analyst            Fixed: claude-code/opus (project file access)")
     print("  --advocate MODEL     Model for solution generation")
     print("  --critic MODEL       Model for adversarial critique")
-    print("  --arbiter MODEL      Model for final synthesis")
+    print("  --arbiter            Fixed: claude-code/opus (final synthesis)")
     print("  --rounds N           Max debate rounds (default: 3)")
     print("  --single-pass        One round only")
     print("  --output DIR         Output directory (default: .tribunal)")
@@ -1210,10 +1210,8 @@ def main():
         parser.add_argument("_debate", nargs=1)  # consume "debate"
         parser.add_argument("problem", nargs="*")
         parser.add_argument("-f", "--file", action="append", dest="files")
-        parser.add_argument("--analyst", default=tribunal_cfg.get("analyst_model") or default_model)
         parser.add_argument("--advocate", default=tribunal_cfg.get("advocate_model") or default_model)
-        parser.add_argument("--critic", default=tribunal_cfg.get("critic_model") or default_model)
-        parser.add_argument("--arbiter", default=tribunal_cfg.get("arbiter_model") or default_model)
+        parser.add_argument("--critic",   default=tribunal_cfg.get("critic_model")   or default_model)
         parser.add_argument("--rounds", type=int, default=tribunal_cfg.get("max_rounds", 3))
         parser.add_argument("--single-pass", action="store_true")
         parser.add_argument("--output", default=".tribunal")
@@ -1247,10 +1245,10 @@ def main():
         try:
             debate(
                 problem,
-                analyst_model=args.analyst,
+                analyst_model="claude-code/opus",
                 advocate_model=args.advocate,
                 critic_model=args.critic,
-                arbiter_model=args.arbiter,
+                arbiter_model="claude-code/opus",
                 max_rounds=args.rounds,
                 single_pass=args.single_pass,
                 output_dir=args.output,

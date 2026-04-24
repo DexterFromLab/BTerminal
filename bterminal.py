@@ -5378,16 +5378,24 @@ class ConsultPanel(Gtk.Box):
         roles_grid.set_row_spacing(2)
         roles_grid.set_border_width(6)
 
+        FIXED_OPUS = "claude-code/opus"
         for i, role in enumerate(("analyst", "advocate", "critic", "arbiter")):
             lbl = Gtk.Label(label=f"{role.title()}:")
             lbl.set_xalign(1)
             lbl.set_margin_end(4)
             roles_grid.attach(lbl, 0, i, 1, 1)
 
-            combo = Gtk.ComboBoxText()
-            combo.set_hexpand(True)
-            roles_grid.attach(combo, 1, i, 1, 1)
-            self.tribunal_combos[role] = combo
+            if role in ("analyst", "arbiter"):
+                fixed_lbl = Gtk.Label(label="[CC] Claude Opus  (fixed)")
+                fixed_lbl.set_xalign(0)
+                fixed_lbl.get_style_context().add_class("dim-label")
+                roles_grid.attach(fixed_lbl, 1, i, 1, 1)
+                self.tribunal_combos[role] = None  # sentinel — not user-selectable
+            else:
+                combo = Gtk.ComboBoxText()
+                combo.set_hexpand(True)
+                roles_grid.attach(combo, 1, i, 1, 1)
+                self.tribunal_combos[role] = combo
 
         self.pack_start(roles_grid, False, False, 0)
 
@@ -5528,6 +5536,8 @@ class ConsultPanel(Gtk.Box):
         tribunal_cfg = self.manager.config.get("tribunal", {})
 
         for role, combo in self.tribunal_combos.items():
+            if combo is None:
+                continue  # fixed to claude-code/opus
             combo.remove_all()
             saved = tribunal_cfg.get(f"{role}_model", "")
             active_idx = 0
@@ -5722,10 +5732,12 @@ class ConsultPanel(Gtk.Box):
             dlg.destroy()
             return
 
-        # Gather selected models
-        models = {}
-        for role, combo in self.tribunal_combos.items():
-            mid = combo.get_active_id()
+        # Gather selected models — analyst/arbiter always fixed to Claude Opus
+        FIXED_OPUS = "claude-code/opus"
+        models = {"analyst": FIXED_OPUS, "arbiter": FIXED_OPUS}
+        for role in ("advocate", "critic"):
+            combo = self.tribunal_combos[role]
+            mid = combo.get_active_id() if combo else None
             if mid:
                 models[role] = mid
 
@@ -5734,7 +5746,7 @@ class ConsultPanel(Gtk.Box):
                 transient_for=self.app,
                 message_type=Gtk.MessageType.WARNING,
                 buttons=Gtk.ButtonsType.OK,
-                text="Select a model for each role.",
+                text="Select a model for Advocate and Critic.",
             )
             dlg.run()
             dlg.destroy()
