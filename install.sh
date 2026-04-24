@@ -60,7 +60,7 @@ print(val)
 " 2>/dev/null || true
 }
 
-mkdir -p "$CONFIG_DIR"
+mkdir -p "$CONFIG_DIR" "$BIN_DIR" "$INSTALL_DIR"
 
 # ─── [1/7] Runtime: Python, Node, npm ─────────────────────────────────────
 
