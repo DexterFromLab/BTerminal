@@ -8296,6 +8296,12 @@ class FilesPanel(Gtk.Box):
             menu.append(it2)
 
         _item("Open in Meld",          lambda: self._open_with_meld(fpath))
+
+        # "Open With ▸" submenu
+        open_with_item = Gtk.MenuItem(label="Open With ▸")
+        open_with_item.set_submenu(self._build_open_with_submenu(fpath))
+        menu.append(open_with_item)
+
         menu.append(Gtk.SeparatorMenuItem())
         _item("Copy Path",             lambda: self._copy_to_clipboard(fpath))
         _item("Copy Relative Path",    lambda: self._copy_to_clipboard(rel))
@@ -8307,6 +8313,65 @@ class FilesPanel(Gtk.Box):
         menu.show_all()
         menu.popup_at_pointer(event)
         return True
+
+    def _build_open_with_submenu(self, path: str) -> Gtk.Menu:
+        submenu = Gtk.Menu()
+
+        item_default = Gtk.MenuItem(label="Default App")
+        item_default.connect("activate", lambda _, p=path: self._launch(["xdg-open", p]))
+        submenu.append(item_default)
+
+        submenu.append(Gtk.SeparatorMenuItem())
+
+        for label, cmd in [("VS Code", "code"), ("Zed", "zed"),
+                            ("gedit", "gedit"), ("kate", "kate"),
+                            ("File Manager", "xdg-open")]:
+            if cmd == "xdg-open" or shutil.which(cmd):
+                it2 = Gtk.MenuItem(label=label)
+                it2.connect("activate", lambda _, c=cmd, p=path: self._launch([c, p]))
+                submenu.append(it2)
+
+        submenu.append(Gtk.SeparatorMenuItem())
+
+        item_custom = Gtk.MenuItem(label="Custom…")
+        item_custom.connect("activate", lambda _, p=path: self._open_with_custom(p))
+        submenu.append(item_custom)
+
+        return submenu
+
+    def _launch(self, argv: list):
+        try:
+            subprocess.Popen(argv, start_new_session=True,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except FileNotFoundError:
+            show_error_dialog(self.app, f"Command not found: {argv[0]}")
+
+    def _open_with_custom(self, path: str):
+        win = self.get_toplevel()
+        dlg = Gtk.Dialog(title="Open With", transient_for=win, modal=True)
+        dlg.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                        Gtk.STOCK_OK,     Gtk.ResponseType.OK)
+        box = dlg.get_content_area()
+        box.set_spacing(8)
+        box.set_margin_start(12); box.set_margin_end(12)
+        box.set_margin_top(12);   box.set_margin_bottom(12)
+
+        lbl = Gtk.Label(label=f"Command to open:\n{os.path.basename(path)}")
+        lbl.set_xalign(0)
+        box.pack_start(lbl, False, False, 0)
+
+        entry = Gtk.Entry()
+        entry.set_placeholder_text("e.g. code, gedit, idea, vim")
+        entry.set_activates_default(True)
+        box.pack_start(entry, False, False, 0)
+
+        dlg.set_default_response(Gtk.ResponseType.OK)
+        dlg.show_all()
+        if dlg.run() == Gtk.ResponseType.OK:
+            cmd = entry.get_text().strip()
+            if cmd:
+                self._launch([cmd, path])
+        dlg.destroy()
 
     def _paste_to_terminal(self, path: str):
         nb = self.app.notebook
