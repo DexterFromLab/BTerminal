@@ -1,6 +1,14 @@
 [
   {
     "date": "2026-04-24",
+    "message": "BTerminal v1.1.5 — bezpieczny instalator z rollbackiem. Jeśli instalacja się nie powiedzie, poprzednia wersja zostaje automatycznie przywrócona. BTerminal powinien nadal działać po nieudanej aktualizacji.",
+    "changes": [
+      "feat: rollback instalatora — backup przed [5/7], przywrócenie przy błędzie (trap ERR)",
+      "feat: komunikat o przywróceniu poprzedniej wersji zamiast cichego crashu"
+    ]
+  },
+  {
+    "date": "2026-04-24",
     "message": "BTerminal v1.1.4 — naprawa instalatora. Plik claude_log był pominięty w repozytorium — fresh install przerywał się z błędem. Narzędzia meld, pandoc i LaTeX są teraz instalowane automatycznie.",
     "changes": [
       "fix: claude_log dodany do repozytorium — brak powodował crash przy fresh install",

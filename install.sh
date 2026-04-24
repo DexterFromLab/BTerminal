@@ -33,6 +33,30 @@ warn() { printf "  \033[33m⚠\033[0m %s\n" "$*"; WARNINGS+=("$*"); }
 fail() { printf "  \033[31m✗\033[0m %s\n" "$*"; ERRORS+=("$*"); }
 info() { printf "    %s\n" "$*"; }
 
+# ─── Rollback ──────────────────────────────────────────────────────────────
+
+BACKUP_DIR=""
+BTERMINAL_FILES=(bterminal.py ctx consult tasks claude_log memory_wizard)
+
+_on_error() {
+    local code=$?
+    echo ""
+    if [[ -n "$BACKUP_DIR" && -d "$BACKUP_DIR" ]]; then
+        printf "  \033[33m⚠\033[0m Installation failed — restoring previous version...\n"
+        for f in "${BTERMINAL_FILES[@]}"; do
+            [[ -f "$BACKUP_DIR/$f" ]] && cp -f "$BACKUP_DIR/$f" "$INSTALL_DIR/$f" 2>/dev/null || true
+        done
+        rm -rf "$BACKUP_DIR"
+        printf "  \033[32m✓\033[0m Previous version restored. Run bterminal — it should still work.\n"
+    else
+        printf "  \033[31m✗\033[0m Installation failed (fresh install, nothing to restore).\n"
+        printf "    Fix the error above and run ./install.sh again.\n"
+    fi
+    exit "$code"
+}
+
+trap '_on_error' ERR
+
 # Returns 0 if version $1 >= $2 (dot-separated)
 ver_ge() {
     python3 -c "
@@ -239,6 +263,15 @@ check_gtk "VTE 2.91"     "gir1.2-vte-2.91"  "import gi; gi.require_version('Vte'
 
 echo "[5/7] Installing BTerminal files..."
 
+# Backup current installation so ERR trap can restore it on failure
+if [[ -f "$INSTALL_DIR/bterminal.py" ]]; then
+    BACKUP_DIR="$(mktemp -d /tmp/bterminal-backup-XXXXXX)"
+    for f in "${BTERMINAL_FILES[@]}"; do
+        [[ -f "$INSTALL_DIR/$f" ]] && cp -f "$INSTALL_DIR/$f" "$BACKUP_DIR/$f" 2>/dev/null || true
+    done
+    info "Backup: $BACKUP_DIR"
+fi
+
 mkdir -p "$INSTALL_DIR" "$BIN_DIR" "$CONFIG_DIR" "$CTX_DIR" "$ICON_DIR"
 
 for f in bterminal.py ctx consult tasks claude_log memory_wizard; do
@@ -394,6 +427,9 @@ if [[ ${#ERRORS[@]} -gt 0 ]]; then
     } >&2
     exit 1
 fi
+
+# Clean up backup — install succeeded
+[[ -n "$BACKUP_DIR" && -d "$BACKUP_DIR" ]] && rm -rf "$BACKUP_DIR"
 
 echo "=== BTerminal v${BTERMINAL_VERSION} installed successfully ==="
 echo ""
