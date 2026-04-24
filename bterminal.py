@@ -17,6 +17,7 @@ import sqlite3
 import subprocess
 import tempfile
 import threading
+from pathlib import Path
 import urllib.error
 import urllib.request
 import uuid
@@ -33,7 +34,30 @@ CLAUDE_SESSIONS_FILE = os.path.join(CONFIG_DIR, "claude_sessions.json")
 CONSULT_CONFIG_FILE = os.path.join(CONFIG_DIR, "consult.json")
 PLUGINS_DIR = os.path.join(CONFIG_DIR, "plugins")
 PLUGINS_CONFIG_FILE = os.path.join(CONFIG_DIR, "plugins.json")
+OPTIONS_FILE = os.path.join(CONFIG_DIR, "options.json")
 SSH_PATH = "/usr/bin/ssh"
+
+_OPTIONS_DEFAULTS = {
+    "theme": "dark",
+    "font": "Monospace 11",
+    "shell": "",
+    "check_updates_on_start": True,
+}
+
+def _load_options():
+    try:
+        with open(OPTIONS_FILE, encoding="utf-8") as fh:
+            data = json.load(fh)
+        return {**_OPTIONS_DEFAULTS, **data}
+    except Exception:
+        return dict(_OPTIONS_DEFAULTS)
+
+def _save_options(opts):
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    with open(OPTIONS_FILE, "w", encoding="utf-8") as fh:
+        json.dump(opts, fh, indent=2)
+
+_OPTIONS = _load_options()
 _repo_path_file = os.path.join(os.path.expanduser("~/.config/bterminal"), "repo_path")
 REPO_DIR = open(_repo_path_file).read().strip() if os.path.isfile(_repo_path_file) else None
 
@@ -70,7 +94,7 @@ def _find_claude_path():
 
 CLAUDE_PATH = _find_claude_path()
 
-FONT = "Monospace 11"
+FONT = _OPTIONS["font"]
 SCROLLBACK_LINES = 10000
 
 # Catppuccin Mocha
@@ -133,7 +157,7 @@ CATPPUCCIN_LATTE = {
 }
 
 # Active theme — mutable, switched at runtime
-CATPPUCCIN = dict(CATPPUCCIN_MOCHA)
+CATPPUCCIN = dict(CATPPUCCIN_LATTE if _OPTIONS.get("theme") == "light" else CATPPUCCIN_MOCHA)
 
 TERMINAL_PALETTE_MOCHA = [
     "#45475a", "#f38ba8", "#a6e3a1", "#f9e2af",
@@ -149,7 +173,7 @@ TERMINAL_PALETTE_LATTE = [
     "#1e66f5", "#ea76cb", "#179299", "#6c6f85",
 ]
 
-TERMINAL_PALETTE = list(TERMINAL_PALETTE_MOCHA)
+TERMINAL_PALETTE = list(TERMINAL_PALETTE_LATTE if _OPTIONS.get("theme") == "light" else TERMINAL_PALETTE_MOCHA)
 
 # Fixed session type colors per theme (SSH, Claude Code)
 _THEME_COLORS = {
@@ -157,7 +181,7 @@ _THEME_COLORS = {
     "light": {"ssh": "#5c5f77", "claude": "#6c6f85"},
 }
 
-_current_theme = "dark"  # "dark" or "light"
+_current_theme = _OPTIONS.get("theme", "dark")
 
 
 def _session_color(session_type="ssh"):
@@ -299,6 +323,20 @@ def show_error_dialog(parent, msg):
         buttons=Gtk.ButtonsType.OK,
         text=msg,
     )
+    dlg.run()
+    dlg.destroy()
+
+
+def show_info_dialog(parent, title, msg):
+    """Show a modal info dialog."""
+    dlg = Gtk.MessageDialog(
+        transient_for=parent,
+        modal=True,
+        message_type=Gtk.MessageType.INFO,
+        buttons=Gtk.ButtonsType.OK,
+        text=title,
+    )
+    dlg.format_secondary_text(msg)
     dlg.run()
     dlg.destroy()
 
@@ -851,18 +889,31 @@ def _fetch_ctx_output(project_name):
     return ""
 
 
-def _build_intro_prompt(project_name):
-    """Build the standard intro prompt for a Claude Code session.
+def _fetch_rules_block(project_name):
+    """Return formatted rules block for project, or empty string if none."""
+    try:
+        result = subprocess.run(
+            ["ctx", "rules", "inject", project_name],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    return ""
 
-    Embeds ctx context directly + tool instructions for ctx, consult and tasks.
+
+def _tools_help(project_name):
+    """Return detailed tool instructions string for a given project.
+
+    Covers ctx (context management), consult (external AI queries / Tribunal),
+    and tasks (CLI task manager with auto-trigger).
     """
-    ctx_output = _fetch_ctx_output(project_name)
-
-    tools = (
+    return (
         f"Kontekst zarządzasz przez: ctx --help\n"
         f"Ważne odkrycia zapisuj: ctx set {project_name} <key> <value>\n"
         f"Dołączanie do istniejącego: ctx append {project_name} <key> <value>\n"
-        f'Przed zakończeniem sesji: ctx summary {project_name} "<co zrobiliśmy>"\n'
+        f'Przed zakończeniem sesji: ctx summary {project_name} "<co zrobiono>"\n'
         f"\n"
         f"Konsultacje z zewnętrznymi modelami AI: consult \"pytanie\"\n"
         f"Konkretny model: consult -m <model_id> \"pytanie\" — ZAWSZE najpierw sprawdź dostępne modele: consult models\n"
@@ -877,12 +928,35 @@ def _build_intro_prompt(project_name):
         f"NIE pobieraj ani nie wykonuj zadań z listy samodzielnie.\n"
         f"Jeśli system auto-trigger wyśle Ci polecenie z listą zadań — wtedy wykonuj.\n"
         f"Po każdym wykonanym zadaniu MUSISZ oznaczyć je jako done: tasks done {project_name} <task_id>\n"
-        f"Pomoc: tasks --help"
+        f"Pomoc: tasks --help\n"
+        f"\n"
+        f"Memory Wizard — konfiguracja reguł na podstawie logów sesji:\n"
+        f"  Dry-run (przejrzyj propozycje, zastosuj ręcznie wybrane):\n"
+        f"    memory_wizard {project_name} --project-dir <dir> --dry-run\n"
+        f"  Interaktywny (potwierdź każdą propozycję):\n"
+        f"    memory_wizard {project_name} --project-dir <dir>\n"
+        f"  Uruchom gdy użytkownik poprawia Cię wielokrotnie w ten sam sposób,\n"
+        f"  lub po dłuższej sesji aby utrwalić wzorce w regułach."
     )
 
+
+def _build_intro_prompt(project_name):
+    """Build the standard intro prompt for a Claude Code session.
+
+    Embeds ctx context directly + tool instructions for ctx, consult and tasks.
+    """
+    ctx_output = _fetch_ctx_output(project_name)
+    tools = _tools_help(project_name)
+    rules_block = _fetch_rules_block(project_name)
+
     if ctx_output:
-        return f"Kontekst projektu ({project_name}):\n{ctx_output}\n\n--- Narzędzia ---\n\n{tools}"
-    return f"Nazwa projektu w ctx/tasks: {project_name}\n\n--- Narzędzia ---\n\n{tools}"
+        base = f"Kontekst projektu ({project_name}):\n{ctx_output}\n\n--- Narzędzia ---\n\n{tools}"
+    else:
+        base = f"Nazwa projektu w ctx/tasks: {project_name}\n\n--- Narzędzia ---\n\n{tools}"
+
+    if rules_block:
+        base += f"\n\n{rules_block}"
+    return base
 
 
 class ClaudeCodeDialog(Gtk.Dialog):
@@ -1171,26 +1245,69 @@ def _detect_project_description(project_dir):
     return os.path.basename(project_dir.rstrip("/"))
 
 
+_GENERIC_SUBDIRS = frozenset({
+    "docs", "doc", "src", "source", "lib", "libs", "app", "apps",
+    "frontend", "backend", "web", "api", "test", "tests", "spec",
+    "scripts", "script", "code", "project", "workspace", "core",
+})
+
+
+def _smart_project_name(project_dir):
+    """Return a meaningful project name for a directory.
+
+    If the directory's basename looks like a generic subfolder (docs, src, …),
+    walk up to the nearest git root and use that name instead.
+    Falls back to the directory's own basename.
+    """
+    if not project_dir:
+        return ""
+    normalized = project_dir.rstrip("/")
+    basename = os.path.basename(normalized)
+    if basename.lower() not in _GENERIC_SUBDIRS:
+        return basename
+    # Walk up looking for .git to find the project root
+    path = normalized
+    while True:
+        parent = os.path.dirname(path)
+        if parent == path:
+            break
+        if os.path.isdir(os.path.join(path, ".git")):
+            return os.path.basename(path)
+        path = parent
+    # No git root found — use the immediate parent name if available
+    parent_name = os.path.basename(os.path.dirname(normalized))
+    return parent_name if parent_name else basename
+
+
 def _resolve_ctx_project_name(project_dir):
     """Resolve ctx project name from a project directory path.
 
-    Looks up the sessions table by work_dir. Falls back to basename.
+    First looks up the sessions table by work_dir (exact match, then parent
+    directories). Falls back to _smart_project_name.
     """
     if not project_dir or not os.path.exists(CTX_DB):
-        return os.path.basename(project_dir.rstrip("/")) if project_dir else None
+        return _smart_project_name(project_dir) if project_dir else None
     normalized = project_dir.rstrip("/")
     try:
         db = sqlite3.connect(CTX_DB)
-        row = db.execute(
-            "SELECT name FROM sessions WHERE RTRIM(work_dir, '/') = ?",
-            (normalized,),
-        ).fetchone()
+        # Walk up from project_dir: first exact match, then parent dirs
+        path = normalized
+        while True:
+            row = db.execute(
+                "SELECT name FROM sessions WHERE RTRIM(work_dir, '/') = ?",
+                (path,),
+            ).fetchone()
+            if row:
+                db.close()
+                return row[0]
+            parent = os.path.dirname(path)
+            if parent == path:
+                break
+            path = parent
         db.close()
-        if row:
-            return row[0]
     except sqlite3.Error:
         pass
-    return os.path.basename(normalized)
+    return _smart_project_name(normalized)
 
 
 def _is_ctx_project_registered(project_name):
@@ -1208,6 +1325,27 @@ def _is_ctx_project_registered(project_name):
         return False
 
 
+def _collect_claude_log(tab):
+    """Collect the Claude Code session JSONL into project's claude_log/ directory on tab close."""
+    claude_config = getattr(tab, "claude_config", None)
+    if not claude_config:
+        return
+    project_dir = claude_config.get("project_dir", "")
+    if not project_dir or not os.path.isdir(project_dir):
+        return
+    stats_bar = getattr(tab, "_stats_bar", None)
+    jsonl_path = None
+    if stats_bar and getattr(stats_bar, "_reader", None):
+        jsonl_path = stats_bar._reader._cached
+    cmd = ["claude_log", "collect", project_dir]
+    if jsonl_path:
+        cmd.append(jsonl_path)
+    try:
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except FileNotFoundError:
+        pass
+
+
 def _is_ctx_available():
     """Check if ctx command is available."""
     try:
@@ -1222,7 +1360,7 @@ def _run_ctx_wizard_if_needed(parent, data):
     project_dir = data.get("project_dir", "")
     if not project_dir or not _is_ctx_available():
         return data
-    project_name = os.path.basename(project_dir.rstrip("/"))
+    project_name = _smart_project_name(project_dir)
     if _is_ctx_project_registered(project_name):
         return data
     wizard = CtxSetupWizard(parent, project_dir)
@@ -1247,7 +1385,7 @@ class CtxSetupWizard(Gtk.Dialog):
         self.set_default_size(540, -1)
         self.set_resizable(False)
         self.project_dir = project_dir
-        self.project_name = os.path.basename(project_dir.rstrip("/"))
+        self.project_name = _smart_project_name(project_dir)
         self.success = False
         self.result_prompt = ""
         self._current_page = 0
@@ -2200,6 +2338,7 @@ class TerminalTab(Gtk.Box):
         self._task_idle_timer = None
         self._task_project = None
         self._task_session_id = str(uuid.uuid4())
+        self._inject_pending = None  # (project, count, refresh_every) when rules inject is due
         self._stats_bar = None
         if claude_config:
             project_dir = claude_config.get("project_dir", "")
@@ -2224,7 +2363,7 @@ class TerminalTab(Gtk.Box):
             self.spawn_local_shell()
 
     def spawn_local_shell(self):
-        shell = os.environ.get("SHELL", "/bin/bash")
+        shell = _OPTIONS.get("shell") or os.environ.get("SHELL", "/bin/bash")
         self.terminal.spawn_async(
             Vte.PtyFlags.DEFAULT,
             os.environ.get("HOME", "/"),
@@ -2439,8 +2578,83 @@ class TerminalTab(Gtk.Box):
         # Track Enter key for prompt counter (Claude Code sessions)
         if self._stats_bar and event.keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
             self._stats_bar.increment_prompt()
+            self._maybe_inject_rules()
 
         return False
+
+    def _maybe_inject_rules(self):
+        """After each prompt, check if it's time to inject rules or refresh CTX.
+
+        Sets a pending flag — actual injection happens after Claude goes idle,
+        so the message arrives at the next free prompt (not mid-processing).
+        """
+        if not self._stats_bar or not self.claude_config:
+            return
+        project_dir = self.claude_config.get("project_dir", "")
+        if not project_dir:
+            return
+        project = self._task_project or os.path.basename(project_dir.rstrip("/"))
+        count = self._stats_bar._prompt_count
+
+        inject_every = 100
+        refresh_every = 200
+        try:
+            if os.path.exists(CTX_DB):
+                db = sqlite3.connect(CTX_DB)
+                row = db.execute(
+                    "SELECT inject_every, refresh_every FROM rules_config WHERE project = ?",
+                    (project,),
+                ).fetchone()
+                db.close()
+                if row:
+                    inject_every = row[0]
+                    refresh_every = row[1]
+        except Exception:
+            pass
+
+        if count > 0 and (count == inject_every or count % inject_every == 0):
+            self._inject_pending = (project, count, refresh_every)
+            import datetime
+            with open("/tmp/bterminal_inject.log", "a") as f:
+                f.write(f"{datetime.datetime.now()}: pending set project={project} count={count}\n")
+
+    def _do_inject_rules(self, project, count, refresh_every):
+        """Send rules block (and optionally CTX refresh) into the terminal.
+
+        Called when Claude is idle, so the message arrives at the free prompt.
+        """
+        self._inject_pending = None
+        try:
+            result = subprocess.run(
+                ["ctx", "rules", "inject", project],
+                capture_output=True, text=True, timeout=5,
+            )
+            block = result.stdout.strip()
+        except Exception:
+            block = ""
+
+        if not block:
+            return
+
+        block += "\n\n--- Narzędzia ---\n\n" + _tools_help(project)
+
+        if count % refresh_every == 0:
+            try:
+                ctx_result = subprocess.run(
+                    ["ctx", "get", project, "--shared"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                ctx_block = ctx_result.stdout.strip()
+                if ctx_block:
+                    block = ctx_block + "\n\n" + block
+            except Exception:
+                pass
+
+        import datetime
+        with open("/tmp/bterminal_inject.log", "a") as f:
+            f.write(f"{datetime.datetime.now()}: injecting {len(block)} chars for {project}\n")
+        self.terminal.feed_child(block.encode())
+        GLib.timeout_add(100, lambda: self.terminal.feed_child(b"\r") or False)
 
     def _on_button_press(self, terminal, event):
         if event.button == 3:  # right click
@@ -2506,8 +2720,15 @@ class TerminalTab(Gtk.Box):
         )
 
     def _on_task_idle_timeout(self):
-        """Called when Claude has been idle for 10 seconds — check for pending tasks."""
+        """Called when Claude has been idle for 10 seconds — check for pending tasks and rule injections."""
         self._task_idle_timer = None
+
+        # Inject rules if due (only when no task is about to fire)
+        if self._inject_pending:
+            project, count, refresh_every = self._inject_pending
+            self._do_inject_rules(project, count, refresh_every)
+            return False
+
         if not self._task_project:
             return False
         try:
@@ -3537,7 +3758,7 @@ class SessionSidebar(Gtk.Box):
         project_dir = config.get("project_dir", "")
         if not project_dir:
             return
-        ctx_project = os.path.basename(project_dir.rstrip("/"))
+        ctx_project = _resolve_ctx_project_name(project_dir)
         dlg = CtxEditDialog(self.app, ctx_project, project_dir)
         dlg.run()
         dlg.destroy()
@@ -3580,7 +3801,7 @@ class SessionSidebar(Gtk.Box):
             # Ask about ctx cleanup
             project_dir = config.get("project_dir", "")
             if project_dir:
-                ctx_name = os.path.basename(project_dir.rstrip("/"))
+                ctx_name = _resolve_ctx_project_name(project_dir)
                 if _is_ctx_available() and _is_ctx_project_registered(ctx_name):
                     ctx_dlg = Gtk.MessageDialog(
                         transient_for=self.app,
@@ -6934,6 +7155,560 @@ class BTerminalPlugin:
         return None
 
 
+class MemoryPanel(Gtk.Box):
+    """Panel for managing Claude Code memory: rules, injection config, and session logs."""
+
+    def __init__(self, app):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.app = app
+        self._current_project = None
+        self._rules_store = None
+
+        header = Gtk.Label(label="Memory")
+        header.get_style_context().add_class("sidebar-header")
+        header.set_halign(Gtk.Align.START)
+        header.set_hexpand(True)
+        self.pack_start(header, False, False, 0)
+
+        # Project selector
+        proj_box = Gtk.Box(spacing=4)
+        proj_box.set_margin_start(6)
+        proj_box.set_margin_end(6)
+        proj_box.set_margin_top(6)
+        proj_lbl = Gtk.Label(label="Project:")
+        proj_lbl.set_halign(Gtk.Align.START)
+        self._proj_combo = Gtk.ComboBoxText()
+        self._proj_combo.set_hexpand(True)
+        self._proj_combo.connect("changed", self._on_project_changed)
+        proj_box.pack_start(proj_lbl, False, False, 0)
+        proj_box.pack_start(self._proj_combo, True, True, 0)
+        btn_refresh_proj = Gtk.Button(label="⟳")
+        btn_refresh_proj.set_tooltip_text("Refresh project list")
+        btn_refresh_proj.get_style_context().add_class("sidebar-btn")
+        btn_refresh_proj.connect("clicked", lambda _: self._load_projects())
+        proj_box.pack_start(btn_refresh_proj, False, False, 0)
+        self.pack_start(proj_box, False, False, 0)
+
+        # Accordion sections in a scrolled window
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_hexpand(True)
+        scroll.set_vexpand(True)
+        inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        scroll.add(inner)
+        self.pack_start(scroll, True, True, 0)
+
+        # ── Injection config ─────────────────────────────────────────────
+        cfg_frame = self._make_section("⚙ Injection Config")
+        cfg_body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        cfg_body.set_margin_start(8)
+        cfg_body.set_margin_end(8)
+        cfg_body.set_margin_bottom(6)
+
+        inj_row = Gtk.Box(spacing=6)
+        Gtk.Label(label="Inject rules every N prompts:").set_halign(Gtk.Align.START)
+        inj_lbl = Gtk.Label(label="Inject rules every:")
+        inj_lbl.set_halign(Gtk.Align.START)
+        self._spin_inject = Gtk.SpinButton.new_with_range(1, 500, 1)
+        self._spin_inject.set_value(100)
+        self._spin_inject.set_width_chars(4)
+        inj_row.pack_start(inj_lbl, True, True, 0)
+        inj_row.pack_start(self._spin_inject, False, False, 0)
+        inj_row.pack_start(Gtk.Label(label="prompts"), False, False, 0)
+        cfg_body.pack_start(inj_row, False, False, 0)
+
+        ref_row = Gtk.Box(spacing=6)
+        ref_lbl = Gtk.Label(label="Refresh CTX every:")
+        ref_lbl.set_halign(Gtk.Align.START)
+        self._spin_refresh = Gtk.SpinButton.new_with_range(1, 1000, 1)
+        self._spin_refresh.set_value(200)
+        self._spin_refresh.set_width_chars(4)
+        ref_row.pack_start(ref_lbl, True, True, 0)
+        ref_row.pack_start(self._spin_refresh, False, False, 0)
+        ref_row.pack_start(Gtk.Label(label="prompts"), False, False, 0)
+        cfg_body.pack_start(ref_row, False, False, 0)
+
+        apply_row = Gtk.Box(spacing=8)
+        btn_save_cfg = Gtk.Button(label="Apply")
+        btn_save_cfg.get_style_context().add_class("sidebar-btn")
+        btn_save_cfg.connect("clicked", self._on_save_config)
+        apply_row.pack_start(btn_save_cfg, False, False, 0)
+        self._cfg_status_lbl = Gtk.Label(label="")
+        self._cfg_status_lbl.get_style_context().add_class("dim-label")
+        apply_row.pack_start(self._cfg_status_lbl, False, False, 0)
+        cfg_body.pack_start(apply_row, False, False, 0)
+
+        cfg_frame.add(cfg_body)
+        inner.pack_start(cfg_frame, False, False, 0)
+
+        # ── Rules list ───────────────────────────────────────────────────
+        rules_frame = self._make_section("📋 Rules")
+        rules_body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        rules_body.set_margin_start(8)
+        rules_body.set_margin_end(8)
+        rules_body.set_margin_bottom(6)
+
+        # TreeView: [✓/✗] [#id] [rule text]
+        self._rules_store = Gtk.ListStore(bool, int, str)
+        tv = Gtk.TreeView(model=self._rules_store)
+        tv.set_headers_visible(False)
+        tv.set_size_request(-1, 140)
+
+        ren_toggle = Gtk.CellRendererToggle()
+        ren_toggle.connect("toggled", self._on_rule_toggled)
+        col_toggle = Gtk.TreeViewColumn("", ren_toggle, active=0)
+        col_toggle.set_fixed_width(28)
+        tv.append_column(col_toggle)
+
+        ren_id = Gtk.CellRendererText()
+        col_id = Gtk.TreeViewColumn("#", ren_id, text=1)
+        col_id.set_fixed_width(32)
+        tv.append_column(col_id)
+
+        ren_text = Gtk.CellRendererText()
+        ren_text.set_property("ellipsize", Pango.EllipsizeMode.END)
+        col_text = Gtk.TreeViewColumn("Rule", ren_text, text=2)
+        col_text.set_expand(True)
+        tv.append_column(col_text)
+
+        self._rules_tv = tv
+        tv_scroll = Gtk.ScrolledWindow()
+        tv_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        tv_scroll.set_min_content_height(100)
+        tv_scroll.add(tv)
+        rules_body.pack_start(tv_scroll, True, True, 0)
+
+        # Add rule entry
+        add_box = Gtk.Box(spacing=4)
+        self._rule_entry = Gtk.Entry()
+        self._rule_entry.set_placeholder_text("New rule…")
+        self._rule_entry.set_hexpand(True)
+        self._rule_entry.connect("activate", self._on_add_rule)
+        btn_add = Gtk.Button(label="+")
+        btn_add.get_style_context().add_class("sidebar-btn")
+        btn_add.connect("clicked", self._on_add_rule)
+        btn_del = Gtk.Button(label="✕")
+        btn_del.get_style_context().add_class("sidebar-btn")
+        btn_del.connect("clicked", self._on_remove_rule)
+        add_box.pack_start(self._rule_entry, True, True, 0)
+        add_box.pack_start(btn_add, False, False, 0)
+        add_box.pack_start(btn_del, False, False, 0)
+        rules_body.pack_start(add_box, False, False, 0)
+
+        rules_frame.add(rules_body)
+        inner.pack_start(rules_frame, False, False, 0)
+
+        # ── Session logs ─────────────────────────────────────────────────
+        logs_frame = self._make_section("📜 Session Logs")
+        logs_body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        logs_body.set_margin_start(8)
+        logs_body.set_margin_end(8)
+        logs_body.set_margin_bottom(6)
+
+        self._logs_store = Gtk.ListStore(str, str)  # (display, filename)
+        logs_tv = Gtk.TreeView(model=self._logs_store)
+        logs_tv.set_headers_visible(False)
+        logs_tv.set_size_request(-1, 100)
+        ren_log = Gtk.CellRendererText()
+        ren_log.set_property("ellipsize", Pango.EllipsizeMode.START)
+        logs_tv.append_column(Gtk.TreeViewColumn("", ren_log, text=0))
+        self._logs_tv = logs_tv
+        logs_tv.connect("row-activated", self._on_log_activated)
+
+        logs_scroll = Gtk.ScrolledWindow()
+        logs_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        logs_scroll.set_min_content_height(80)
+        logs_scroll.add(logs_tv)
+        logs_body.pack_start(logs_scroll, True, True, 0)
+
+        collect_row = Gtk.Box(spacing=8)
+        btn_collect = Gtk.Button(label="Collect & View")
+        btn_collect.get_style_context().add_class("sidebar-btn")
+        btn_collect.connect("clicked", self._on_collect_log)
+        collect_row.pack_start(btn_collect, False, False, 0)
+        self._collect_status_lbl = Gtk.Label(label="↑ double-click to view")
+        self._collect_status_lbl.get_style_context().add_class("dim-label")
+        collect_row.pack_start(self._collect_status_lbl, False, False, 0)
+        logs_body.pack_start(collect_row, False, False, 0)
+
+        logs_frame.add(logs_body)
+        inner.pack_start(logs_frame, False, False, 0)
+
+        # ── Change history ───────────────────────────────────────────────────
+        hist_frame = self._make_section("📖 Change History")
+        hist_body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        hist_body.set_margin_start(8)
+        hist_body.set_margin_end(8)
+        hist_body.set_margin_bottom(6)
+
+        hist_tabs = Gtk.Box(spacing=2)
+        btn_hist_ctx = Gtk.Button(label="CTX")
+        btn_hist_ctx.get_style_context().add_class("sidebar-btn")
+        btn_hist_rules = Gtk.Button(label="Rules")
+        btn_hist_rules.get_style_context().add_class("sidebar-btn")
+        hist_tabs.pack_start(btn_hist_ctx, True, True, 0)
+        hist_tabs.pack_start(btn_hist_rules, True, True, 0)
+        hist_body.pack_start(hist_tabs, False, False, 0)
+
+        self._hist_view = Gtk.TextView()
+        self._hist_view.set_editable(False)
+        self._hist_view.set_monospace(True)
+        self._hist_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        self._hist_view.set_left_margin(4)
+        self._hist_view.set_cursor_visible(False)
+        hist_scroll = Gtk.ScrolledWindow()
+        hist_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        hist_scroll.set_min_content_height(100)
+        hist_scroll.add(self._hist_view)
+        hist_body.pack_start(hist_scroll, True, True, 0)
+
+        btn_hist_ctx.connect("clicked", lambda _: self._refresh_history("ctx"))
+        btn_hist_rules.connect("clicked", lambda _: self._refresh_history("rules"))
+
+        hist_frame.add(hist_body)
+        inner.pack_start(hist_frame, False, False, 0)
+
+        # ── Wizard ───────────────────────────────────────────────────────────
+        wizard_frame = self._make_section("🧙 Auto-configure Wizard")
+        wizard_body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        wizard_body.set_margin_start(8)
+        wizard_body.set_margin_end(8)
+        wizard_body.set_margin_top(4)
+        wizard_body.set_margin_bottom(6)
+
+        wizard_lbl = Gtk.Label(
+            label="Analyzes project context and proposes rules automatically."
+        )
+        wizard_lbl.set_line_wrap(True)
+        wizard_lbl.set_xalign(0)
+        wizard_body.pack_start(wizard_lbl, False, False, 0)
+
+        btn_wizard = Gtk.Button(label="▶ Run Memory Wizard")
+        btn_wizard.get_style_context().add_class("sidebar-btn")
+        btn_wizard.connect("clicked", self._on_run_wizard)
+        wizard_body.pack_start(btn_wizard, False, False, 0)
+
+        wizard_frame.add(wizard_body)
+        inner.pack_start(wizard_frame, False, False, 0)
+
+        self.show_all()
+        GLib.idle_add(self._load_projects)
+
+    # ── Helpers ──────────────────────────────────────────────────────────────
+
+    def _make_section(self, title):
+        frame = Gtk.Frame(label=title)
+        frame.set_margin_start(6)
+        frame.set_margin_end(6)
+        frame.set_margin_top(6)
+        frame.set_shadow_type(Gtk.ShadowType.ETCHED_IN)
+        return frame
+
+    def _load_projects(self, *_):
+        self._proj_combo.remove_all()
+        try:
+            db = sqlite3.connect(CTX_DB)
+            rows = db.execute("SELECT name FROM sessions ORDER BY name").fetchall()
+            db.close()
+            for row in rows:
+                self._proj_combo.append_text(row[0])
+            if rows:
+                self._proj_combo.set_active(0)
+        except Exception:
+            pass
+
+    def _get_project(self):
+        return self._proj_combo.get_active_text() or ""
+
+    def _on_project_changed(self, combo):
+        project = combo.get_active_text()
+        if project:
+            self._current_project = project
+            self._refresh_rules()
+            self._refresh_config()
+            self._refresh_logs()
+
+    def _refresh_rules(self):
+        project = self._get_project()
+        if not project or not self._rules_store:
+            return
+        self._rules_store.clear()
+        try:
+            db = sqlite3.connect(CTX_DB)
+            rows = db.execute(
+                "SELECT id, rule, enabled FROM rules WHERE project = ? ORDER BY id",
+                (project,),
+            ).fetchall()
+            db.close()
+            for row in rows:
+                self._rules_store.append([bool(row[2]), row[0], row[1]])
+        except Exception:
+            pass
+
+    def _refresh_config(self):
+        project = self._get_project()
+        if not project:
+            return
+        try:
+            db = sqlite3.connect(CTX_DB)
+            row = db.execute(
+                "SELECT inject_every, refresh_every FROM rules_config WHERE project = ?",
+                (project,),
+            ).fetchone()
+            db.close()
+            if row:
+                self._spin_inject.set_value(row[0])
+                self._spin_refresh.set_value(row[1])
+            else:
+                self._spin_inject.set_value(100)
+                self._spin_refresh.set_value(200)
+        except Exception:
+            pass
+
+    def _refresh_logs(self):
+        project = self._get_project()
+        self._logs_store.clear()
+        if not project:
+            return
+        try:
+            db = sqlite3.connect(CTX_DB)
+            row = db.execute("SELECT work_dir FROM sessions WHERE name = ?", (project,)).fetchone()
+            db.close()
+            if not row or not row[0]:
+                return
+            log_dir = Path(row[0]) / "claude_log"
+            if not log_dir.exists():
+                return
+            files = sorted(log_dir.glob("*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True)
+            for f in files[:30]:
+                mtime = datetime.fromtimestamp(f.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+                size_kb = f.stat().st_size // 1024
+                self._logs_store.append([f"{mtime}  {f.name}  ({size_kb} KB)", str(f)])
+        except Exception:
+            pass
+
+    # ── Event handlers ───────────────────────────────────────────────────────
+
+    def _on_save_config(self, _):
+        project = self._get_project()
+        if not project:
+            return
+        inject_every = int(self._spin_inject.get_value())
+        refresh_every = int(self._spin_refresh.get_value())
+        try:
+            subprocess.run(
+                ["ctx", "rules", "config", project,
+                 "--inject-every", str(inject_every),
+                 "--refresh-every", str(refresh_every)],
+                check=True, capture_output=True, timeout=5,
+            )
+            self._cfg_status_lbl.set_text("✓ Saved")
+        except Exception as e:
+            self._cfg_status_lbl.set_text(f"✗ {e}")
+        GLib.timeout_add_seconds(3, lambda: self._cfg_status_lbl.set_text("") or False)
+
+    def _on_add_rule(self, _):
+        project = self._get_project()
+        rule = self._rule_entry.get_text().strip()
+        if not project or not rule:
+            return
+        try:
+            subprocess.run(
+                ["ctx", "rules", "add", project, rule],
+                check=True, capture_output=True, timeout=5,
+            )
+            self._rule_entry.set_text("")
+            self._refresh_rules()
+        except Exception:
+            pass
+
+    def _on_remove_rule(self, _):
+        project = self._get_project()
+        sel = self._rules_tv.get_selection()
+        model, it = sel.get_selected()
+        if not it:
+            return
+        rule_id = model[it][1]
+        try:
+            subprocess.run(
+                ["ctx", "rules", "remove", project, str(rule_id)],
+                check=True, capture_output=True, timeout=5,
+            )
+            self._refresh_rules()
+        except Exception:
+            pass
+
+    def _on_rule_toggled(self, renderer, path):
+        project = self._get_project()
+        it = self._rules_store.get_iter(path)
+        rule_id = self._rules_store[it][1]
+        currently_enabled = self._rules_store[it][0]
+        subcmd = "disable" if currently_enabled else "enable"
+        try:
+            subprocess.run(
+                ["ctx", "rules", subcmd, project, str(rule_id)],
+                check=True, capture_output=True, timeout=5,
+            )
+            self._rules_store[it][0] = not currently_enabled
+        except Exception:
+            pass
+
+    def _on_log_activated(self, tv, path, column):
+        model = tv.get_model()
+        jsonl_path = model[path][1]
+        if not jsonl_path or not os.path.exists(jsonl_path):
+            return
+        self._show_log_dialog(jsonl_path)
+
+    def _show_log_dialog(self, jsonl_path):
+        dlg = Gtk.Dialog(
+            title=f"Session log: {os.path.basename(jsonl_path)}",
+            transient_for=self.app,
+            flags=Gtk.DialogFlags.DESTROY_WITH_PARENT,
+        )
+        dlg.set_default_size(700, 500)
+        dlg.add_button("Close", Gtk.ResponseType.CLOSE)
+        dlg.connect("response", lambda d, _: d.destroy())
+
+        buf = Gtk.TextBuffer()
+        tv = Gtk.TextView(buffer=buf)
+        tv.set_editable(False)
+        tv.set_monospace(True)
+        tv.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        tv.set_left_margin(8)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        scroll.add(tv)
+        dlg.get_content_area().pack_start(scroll, True, True, 0)
+
+        try:
+            result = subprocess.run(
+                ["claude_log", "parse", jsonl_path, "--limit", "100"],
+                capture_output=True, text=True, timeout=10,
+            )
+            buf.set_text(result.stdout or "(empty)")
+        except Exception as e:
+            buf.set_text(f"Error: {e}")
+
+        dlg.show_all()
+
+    def _on_collect_log(self, _):
+        """Collect the current active Claude Code session's JSONL, then show newest log."""
+        nb = getattr(self.app, "notebook", None)
+        if nb is None:
+            return
+        current = nb.get_nth_page(nb.get_current_page())
+        if not current or not getattr(current, "claude_config", None):
+            show_info_dialog(self.app, "Collect log",
+                             "Switch to an active Claude Code tab first.")
+            return
+        project_dir = current.claude_config.get("project_dir", "")
+        if not project_dir:
+            return
+
+        self._collect_status_lbl.set_text("Collecting…")
+        stats_bar = getattr(current, "_stats_bar", None)
+        jsonl_path = None
+        if stats_bar and getattr(stats_bar, "_reader", None):
+            jsonl_path = stats_bar._reader._cached
+        cmd = ["claude_log", "collect", project_dir]
+        if jsonl_path:
+            cmd.append(jsonl_path)
+
+        import threading, datetime as _dt
+        _log = open("/tmp/bterminal_collect.log", "a")
+        _log.write(f"\n=== {_dt.datetime.now()} collect start, cmd={cmd}\n")
+        _log.flush()
+
+        def _run():
+            error = None
+            try:
+                r = subprocess.run(cmd, capture_output=True, timeout=15)
+                _log.write(f"collect done rc={r.returncode} stderr={r.stderr[:100]}\n"); _log.flush()
+            except Exception as e:
+                error = str(e)
+                _log.write(f"collect exception: {e}\n"); _log.flush()
+            GLib.idle_add(_done, error)
+
+        def _done(error):
+            try:
+                _log.write(f"_done called error={error}\n"); _log.flush()
+                if error:
+                    self._collect_status_lbl.set_text(f"✗ {error}")
+                    GLib.timeout_add_seconds(4, lambda: self._collect_status_lbl.set_text("↑ double-click to view") or False)
+                    return False
+                _log.write("calling _refresh_logs\n"); _log.flush()
+                self._refresh_logs()
+                _log.write("_refresh_logs done\n"); _log.flush()
+                log_dir = Path(project_dir) / "claude_log"
+                files = sorted(log_dir.glob("*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True) if log_dir.exists() else []
+                _log.write(f"files found: {len(files)}, log_dir={log_dir}\n"); _log.flush()
+                if files:
+                    self._collect_status_lbl.set_text(f"✓ {len(files)} logs")
+                    GLib.timeout_add_seconds(3, lambda: self._collect_status_lbl.set_text("↑ double-click to view") or False)
+                    _log.write(f"calling _show_log_dialog({files[0]})\n"); _log.flush()
+                    self._show_log_dialog(str(files[0]))
+                    _log.write("_show_log_dialog returned OK\n"); _log.flush()
+                else:
+                    self._collect_status_lbl.set_text("✗ no logs found")
+                    GLib.timeout_add_seconds(3, lambda: self._collect_status_lbl.set_text("↑ double-click to view") or False)
+            except Exception as ex:
+                import traceback
+                _log.write(f"EXCEPTION in _done: {traceback.format_exc()}\n"); _log.flush()
+                self._collect_status_lbl.set_text(f"✗ {ex}")
+            return False
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _refresh_history(self, kind: str):
+        project = self._get_project()
+        if not project:
+            return
+        try:
+            if kind == "ctx":
+                result = subprocess.run(
+                    ["ctx", "log", project, "--limit", "40"],
+                    capture_output=True, text=True, timeout=5,
+                )
+            else:
+                result = subprocess.run(
+                    ["ctx", "log-rules", project, "--limit", "40"],
+                    capture_output=True, text=True, timeout=5,
+                )
+            text = result.stdout.strip() or "(no history yet)"
+        except Exception as e:
+            text = f"Error: {e}"
+        self._hist_view.get_buffer().set_text(text)
+
+    def _on_run_wizard(self, _):
+        project = self._get_project()
+        if not project:
+            show_error_dialog(self.app, "Select a project first.")
+            return
+        project_dir = ""
+        try:
+            db = sqlite3.connect(CTX_DB)
+            row = db.execute("SELECT work_dir FROM sessions WHERE name = ?", (project,)).fetchone()
+            db.close()
+            if row and row[0]:
+                project_dir = row[0]
+        except Exception:
+            pass
+
+        cmd = ["memory_wizard", project]
+        if project_dir:
+            cmd += ["--project-dir", project_dir]
+
+        self.app.open_wizard_tab(project, cmd, on_done=self.refresh)
+
+    def refresh(self):
+        project = self._get_project()
+        if project:
+            self._refresh_rules()
+            self._refresh_logs()
+
+
 class PluginManagerPanel(Gtk.Box):
     """Panel for managing BTerminal plugins."""
 
@@ -7238,6 +8013,117 @@ class PluginManagerPanel(Gtk.Box):
         dlg.destroy()
 
 
+class OptionsDialog(Gtk.Dialog):
+    """File → Options dialog."""
+
+    def __init__(self, parent):
+        super().__init__(title="Opcje BTerminal", transient_for=parent, modal=True)
+        self.set_default_size(420, -1)
+        self.set_border_width(0)
+        self._app = parent
+
+        content = self.get_content_area()
+        grid = Gtk.Grid(column_spacing=16, row_spacing=14)
+        grid.set_border_width(20)
+
+        row = 0
+
+        # ── Wygląd ────────────────────────────────────────────────────────────
+        section = Gtk.Label()
+        section.set_markup("<b>Wygląd</b>")
+        section.set_halign(Gtk.Align.START)
+        grid.attach(section, 0, row, 2, 1)
+        row += 1
+
+        grid.attach(Gtk.Label(label="Motyw:", halign=Gtk.Align.END), 0, row, 1, 1)
+        self._theme_combo = Gtk.ComboBoxText()
+        self._theme_combo.append("dark", "Ciemny (Mocha)")
+        self._theme_combo.append("light", "Jasny (Latte)")
+        self._theme_combo.set_active_id(_OPTIONS.get("theme", "dark"))
+        grid.attach(self._theme_combo, 1, row, 1, 1)
+        row += 1
+
+        grid.attach(Gtk.Label(label="Font terminala:", halign=Gtk.Align.END), 0, row, 1, 1)
+        self._font_btn = Gtk.FontButton(font=_OPTIONS.get("font", "Monospace 11"))
+        self._font_btn.set_use_font(True)
+        self._font_btn.set_hexpand(True)
+        grid.attach(self._font_btn, 1, row, 1, 1)
+        row += 1
+
+        grid.attach(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL), 0, row, 2, 1)
+        row += 1
+
+        # ── Terminal ──────────────────────────────────────────────────────────
+        section2 = Gtk.Label()
+        section2.set_markup("<b>Terminal</b>")
+        section2.set_halign(Gtk.Align.START)
+        grid.attach(section2, 0, row, 2, 1)
+        row += 1
+
+        grid.attach(Gtk.Label(label="Domyślny shell:", halign=Gtk.Align.END), 0, row, 1, 1)
+        self._shell_entry = Gtk.Entry(hexpand=True)
+        self._shell_entry.set_placeholder_text(f"domyślny ({os.environ.get('SHELL', '/bin/bash')})")
+        self._shell_entry.set_text(_OPTIONS.get("shell", ""))
+        grid.attach(self._shell_entry, 1, row, 1, 1)
+        row += 1
+
+        grid.attach(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL), 0, row, 2, 1)
+        row += 1
+
+        # ── Ogólne ────────────────────────────────────────────────────────────
+        section3 = Gtk.Label()
+        section3.set_markup("<b>Ogólne</b>")
+        section3.set_halign(Gtk.Align.START)
+        grid.attach(section3, 0, row, 2, 1)
+        row += 1
+
+        grid.attach(
+            Gtk.Label(label="Sprawdzaj aktualizacje przy starcie:", halign=Gtk.Align.END),
+            0, row, 1, 1,
+        )
+        self._updates_switch = Gtk.Switch()
+        self._updates_switch.set_active(_OPTIONS.get("check_updates_on_start", True))
+        self._updates_switch.set_halign(Gtk.Align.START)
+        grid.attach(self._updates_switch, 1, row, 1, 1)
+        row += 1
+
+        content.pack_start(grid, True, True, 0)
+        content.show_all()
+
+        self.add_button("Anuluj", Gtk.ResponseType.CANCEL)
+        btn_ok = self.add_button("Zapisz", Gtk.ResponseType.OK)
+        btn_ok.get_style_context().add_class("suggested-action")
+        self.set_default_response(Gtk.ResponseType.OK)
+
+    def run_and_apply(self):
+        if self.run() != Gtk.ResponseType.OK:
+            self.destroy()
+            return
+
+        new_theme = self._theme_combo.get_active_id()
+        new_font = self._font_btn.get_font()
+        new_shell = self._shell_entry.get_text().strip()
+        new_updates = self._updates_switch.get_active()
+
+        _OPTIONS["theme"] = new_theme
+        _OPTIONS["font"] = new_font
+        _OPTIONS["shell"] = new_shell
+        _OPTIONS["check_updates_on_start"] = new_updates
+        _save_options(_OPTIONS)
+
+        global FONT
+        FONT = new_font
+
+        # Apply theme if changed
+        if new_theme != _current_theme:
+            self._app._toggle_theme()
+
+        # Apply font to all open terminals
+        self._app._apply_font(new_font)
+
+        self.destroy()
+
+
 class BTerminalApp(Gtk.Window):
     """Główne okno aplikacji BTerminal."""
 
@@ -7255,17 +8141,24 @@ class BTerminalApp(Gtk.Window):
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
         )
 
-        # Dark theme
+        # Theme from options
         self._gtk_settings = Gtk.Settings.get_default()
-        self._gtk_settings.set_property("gtk-application-prefer-dark-theme", True)
+        self._gtk_settings.set_property(
+            "gtk-application-prefer-dark-theme", _current_theme == "dark"
+        )
 
         # Session managers
         self.session_manager = SessionManager()
         self.claude_manager = ClaudeSessionManager()
 
-        # Layout: HPaned
+        # Layout: VBox → menubar + HPaned
+        root_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.add(root_box)
+
+        root_box.pack_start(self._build_menubar(), False, False, 0)
+
         paned = Gtk.HPaned()
-        self.add(paned)
+        root_box.pack_start(paned, True, True, 0)
 
         # Sidebar container with stack switcher
         sidebar_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -7289,33 +8182,65 @@ class BTerminalApp(Gtk.Window):
         self.task_panel = TaskListPanel(self)
         self.sidebar_stack.add_titled(self.task_panel, "tasks", "Tasks")
 
+        self.memory_panel = MemoryPanel(self)
+        self.sidebar_stack.add_titled(self.memory_panel, "memory", "Memory")
+
         self.plugin_panel = PluginManagerPanel(self)
         self.sidebar_stack.add_titled(self.plugin_panel, "plugins", "Plugins")
 
-        # Custom compact tab switcher that scales down gracefully
-        switcher = Gtk.Box(spacing=0)
+        # Two-row compact tab switcher: row1 = main tabs, row2 = extra + toggle
+        switcher = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         switcher.get_style_context().add_class("sidebar-switcher")
-        for name, title in [("sessions", "Sessions"), ("ctx", "Ctx"),
-                            ("consult", "Consult"), ("tasks", "Tasks"),
-                            ("plugins", "Plugins")]:
+
+        row1 = Gtk.Box(spacing=0)
+        row2 = Gtk.Box(spacing=0)
+
+        _tab_defs_row1 = [("sessions", "Sessions"), ("ctx", "Ctx"),
+                          ("consult", "Consult"), ("tasks", "Tasks")]
+        _tab_defs_row2 = [("memory", "Memory"), ("plugins", "Plugins")]
+
+        self._sidebar_tab_buttons = []
+        for name, title in _tab_defs_row1:
             btn = Gtk.Button(label=title)
             btn.get_style_context().add_class("sidebar-tab")
             child = btn.get_child()
             if isinstance(child, Gtk.Label):
                 child.set_ellipsize(Pango.EllipsizeMode.END)
             btn.connect("clicked", lambda _, n=name: self.sidebar_stack.set_visible_child_name(n))
-            switcher.pack_start(btn, True, True, 0)
-        self._sidebar_switcher = switcher
-        self._sidebar_tab_buttons = list(switcher.get_children())
-        self.sidebar_stack.connect("notify::visible-child-name", self._on_sidebar_tab_changed)
-        self._on_sidebar_tab_changed(None, None)
+            row1.pack_start(btn, True, True, 0)
+            self._sidebar_tab_buttons.append(btn)
 
-        # Toggle button to hide sidebar (shown inside switcher bar)
+        for name, title in _tab_defs_row2:
+            btn = Gtk.Button(label=title)
+            btn.get_style_context().add_class("sidebar-tab")
+            child = btn.get_child()
+            if isinstance(child, Gtk.Label):
+                child.set_ellipsize(Pango.EllipsizeMode.END)
+            btn.connect("clicked", lambda _, n=name: self.sidebar_stack.set_visible_child_name(n))
+            row2.pack_start(btn, True, True, 0)
+            self._sidebar_tab_buttons.append(btn)
+
+        # Toggle button at end of row2
         self._sidebar_toggle_btn = Gtk.Button(label="◀")
         self._sidebar_toggle_btn.get_style_context().add_class("sidebar-tab")
         self._sidebar_toggle_btn.set_tooltip_text("Hide sidebar (Ctrl+B)")
         self._sidebar_toggle_btn.connect("clicked", lambda _: self.toggle_sidebar())
-        switcher.pack_end(self._sidebar_toggle_btn, False, False, 0)
+        row2.pack_end(self._sidebar_toggle_btn, False, False, 0)
+
+        switcher.pack_start(row1, False, False, 0)
+        switcher.pack_start(row2, False, False, 0)
+        self._sidebar_switcher = switcher
+        self._sidebar_tab_names = (
+            [n for n, _ in _tab_defs_row1] + [n for n, _ in _tab_defs_row2]
+        )
+
+        self.sidebar_stack.connect("notify::visible-child-name", self._on_sidebar_tab_changed)
+        # Delay so this fires after all panel show_all() and idle callbacks.
+        def _set_default_sidebar_tab():
+            self.sidebar_stack.set_visible_child_name("sessions")
+            self._on_sidebar_tab_changed(None, None)
+            return False
+        GLib.idle_add(_set_default_sidebar_tab, priority=GLib.PRIORITY_LOW)
 
         sidebar_box.pack_start(switcher, False, False, 0)
         sidebar_box.pack_start(self.sidebar_stack, True, True, 0)
@@ -7383,7 +8308,7 @@ class BTerminalApp(Gtk.Window):
         # Right action area: theme toggle + git button
         end_box = Gtk.Box(spacing=4)
 
-        self._theme_btn = Gtk.Button(label="☀")
+        self._theme_btn = Gtk.Button(label="☀" if _current_theme == "dark" else "☾")
         self._theme_btn.get_style_context().add_class("theme-toggle")
         self._theme_btn.set_tooltip_text("Toggle light/dark theme")
         self._theme_btn.connect("clicked", lambda _: self._toggle_theme())
@@ -7433,6 +8358,73 @@ class BTerminalApp(Gtk.Window):
         self._plugin_shortcuts = []
         self._load_plugins()
         self.plugin_panel.refresh()
+
+    def _build_menubar(self):
+        menubar = Gtk.MenuBar()
+
+        def _item(label, callback, shortcut=None):
+            it = Gtk.MenuItem(label=label)
+            if shortcut:
+                it.set_accel_path(shortcut)
+            it.connect("activate", lambda _: callback())
+            return it
+
+        def _sep():
+            return Gtk.SeparatorMenuItem()
+
+        # ── File ──────────────────────────────────────────────────────────────
+        file_menu = Gtk.Menu()
+        file_menu.append(_item("Nowa karta lokalna", self.add_local_tab))
+        file_menu.append(_item("Nowa sesja SSH…", lambda: self.sidebar._on_add(None)))
+        file_menu.append(_item("Nowa sesja Claude Code…", lambda: self.sidebar._on_add_claude()))
+        file_menu.append(_sep())
+        file_menu.append(_item("Opcje…", lambda: OptionsDialog(self).run_and_apply()))
+        file_menu.append(_sep())
+        file_menu.append(_item("Zamknij aplikację", self.destroy))
+        file_root = Gtk.MenuItem(label="File")
+        file_root.set_submenu(file_menu)
+        menubar.append(file_root)
+
+        # ── View ──────────────────────────────────────────────────────────────
+        view_menu = Gtk.Menu()
+        view_menu.append(_item("Przełącz sidebar (Ctrl+B)", self.toggle_sidebar))
+        view_menu.append(_item("Przełącz panel Git (Ctrl+G)", self.toggle_git_panel))
+        view_menu.append(_item("Przełącz motyw ☀/🌙", self._toggle_theme))
+        view_menu.append(_sep())
+        for panel_name, panel_title in [
+            ("sessions", "Sessions"),
+            ("ctx",      "Ctx"),
+            ("consult",  "Consult"),
+            ("tasks",    "Tasks"),
+            ("plugins",  "Plugins"),
+        ]:
+            it = Gtk.MenuItem(label=panel_title)
+            it.connect("activate", lambda _, n=panel_name: (
+                self.sidebar_stack.set_visible_child_name(n),
+                self._sidebar_visible or self.toggle_sidebar(),
+            ))
+            view_menu.append(it)
+        view_root = Gtk.MenuItem(label="View")
+        view_root.set_submenu(view_menu)
+        menubar.append(view_root)
+
+        # ── Tools ─────────────────────────────────────────────────────────────
+        tools_menu = Gtk.Menu()
+        tools_menu.append(_item("Sprawdź aktualizacje", lambda: _check_for_updates(self, manual=True)))
+        tools_menu.append(_item("Errata…", lambda: _show_errata_dialog(self, _load_local_errata())))
+        tools_root = Gtk.MenuItem(label="Tools")
+        tools_root.set_submenu(tools_menu)
+        menubar.append(tools_root)
+
+        menubar.show_all()
+        return menubar
+
+    def _apply_font(self, font_str):
+        desc = Pango.FontDescription(font_str)
+        for i in range(self.notebook.get_n_pages()):
+            tab = self.notebook.get_nth_page(i)
+            if isinstance(tab, TerminalTab):
+                tab.terminal.set_font(desc)
 
     def _update_window_title(self):
         """Update window title bar: 'BTerminal — tab_name [n/total]'."""
@@ -7509,6 +8501,42 @@ class BTerminalApp(Gtk.Window):
         tab.terminal.grab_focus()
         self._update_window_title()
 
+    def open_wizard_tab(self, project: str, cmd: list, on_done=None):
+        """Open a terminal tab running memory_wizard; calls on_done when it exits."""
+        # Resolve wizard binary — check install dir first (GUI may have empty PATH)
+        wizard_bin = (
+            shutil.which("memory_wizard")
+            or str(Path.home() / ".local" / "share" / "bterminal" / "memory_wizard")
+            or str(Path.home() / ".local" / "bin" / "memory_wizard")
+        )
+        if not os.path.isfile(wizard_bin):
+            show_error_dialog(self, "memory_wizard not found. Run install.sh first.")
+            return
+
+        tab = TerminalTab(self)
+        label = self._build_tab_label(f"🧙 {project}", tab)
+        idx = self.notebook.append_page(tab, label)
+        self.notebook.set_current_page(idx)
+        self.notebook.set_tab_reorderable(tab, True)
+        tab.terminal.grab_focus()
+        self._update_window_title()
+
+        argv = [wizard_bin] + cmd[1:]  # cmd[0] is "memory_wizard"
+        tab.terminal.spawn_async(
+            Vte.PtyFlags.DEFAULT,
+            os.environ.get("HOME", "/"),
+            argv,
+            None,
+            GLib.SpawnFlags.DEFAULT,
+            None, None, -1, None, None,
+        )
+
+        if on_done:
+            def _on_exit(terminal, status):
+                if on_done:
+                    GLib.idle_add(on_done)
+            tab.terminal.connect("child-exited", _on_exit)
+
     def open_ssh_tab(self, session):
         tab = TerminalTab(self, session=session)
         name = session.get("name", "SSH")
@@ -7577,6 +8605,8 @@ class BTerminalApp(Gtk.Window):
                 db.close()
             except Exception:
                 pass
+        # Collect Claude Code session log on tab close
+        _collect_claude_log(tab)
         idx = self.notebook.page_num(tab)
         if idx >= 0:
             self.notebook.remove_page(idx)
@@ -7655,6 +8685,8 @@ class BTerminalApp(Gtk.Window):
             TERMINAL_PALETTE[:] = TERMINAL_PALETTE_MOCHA
             self._gtk_settings.set_property("gtk-application-prefer-dark-theme", True)
             self._theme_btn.set_label("☀")
+        _OPTIONS["theme"] = _current_theme
+        _save_options(_OPTIONS)
         # Reload CSS
         CSS = _build_css(CATPPUCCIN)
         self._css_provider.load_from_data(CSS.encode())
@@ -7727,9 +8759,9 @@ class BTerminalApp(Gtk.Window):
     def _on_sidebar_tab_changed(self, _stack, _param):
         """Update active tab styling in custom sidebar switcher."""
         active_name = self.sidebar_stack.get_visible_child_name()
-        tab_names = ["sessions", "ctx", "consult", "tasks", "plugins"] + [
+        tab_names = getattr(self, "_sidebar_tab_names", []) + [
             p.name for p in self._plugins.values()
-        ] if hasattr(self, '_plugins') else ["sessions", "ctx", "consult", "tasks", "plugins"]
+        ] if hasattr(self, '_plugins') else getattr(self, "_sidebar_tab_names", [])
         for btn, name in zip(self._sidebar_tab_buttons, tab_names):
             ctx = btn.get_style_context()
             if name == active_name:
@@ -7917,16 +8949,141 @@ class BTerminalApp(Gtk.Window):
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
-def _check_for_updates(window):
-    """Check for updates on master in a background thread, prompt user if available."""
+def _load_local_errata():
+    """Load errata.json from the local repo directory."""
+    if not REPO_DIR:
+        return []
+    path = os.path.join(REPO_DIR, "errata.json")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except Exception:
+        return []
+
+
+_UPDATE_TIMEOUT = 15
+
+
+def _check_for_updates(window, manual=False):
+    """Check for updates. Manual mode shows a live progress dialog with countdown."""
     if not REPO_DIR or not os.path.isdir(os.path.join(REPO_DIR, ".git")):
+        if manual:
+            dlg = Gtk.MessageDialog(
+                transient_for=window, modal=True,
+                message_type=Gtk.MessageType.WARNING,
+                buttons=Gtk.ButtonsType.OK,
+                text="Brak repozytorium",
+            )
+            dlg.format_secondary_text(
+                "Nie można sprawdzić aktualizacji — katalog repozytorium nie został znaleziony."
+            )
+            dlg.run()
+            dlg.destroy()
         return
+
+    if manual:
+        _manual_update_check(window)
+    else:
+        def _bg():
+            try:
+                subprocess.run(
+                    ["git", "fetch", "origin", "master"],
+                    cwd=REPO_DIR, capture_output=True, timeout=_UPDATE_TIMEOUT,
+                )
+                local = subprocess.run(
+                    ["git", "rev-parse", "master"],
+                    cwd=REPO_DIR, capture_output=True, text=True, timeout=5,
+                ).stdout.strip()
+                remote = subprocess.run(
+                    ["git", "rev-parse", "origin/master"],
+                    cwd=REPO_DIR, capture_output=True, text=True, timeout=5,
+                ).stdout.strip()
+                if local and remote and local != remote:
+                    log = subprocess.run(
+                        ["git", "log", "--oneline", f"{local}..{remote}"],
+                        cwd=REPO_DIR, capture_output=True, text=True, timeout=5,
+                    ).stdout.strip()
+                    errata_raw = subprocess.run(
+                        ["git", "show", "origin/master:errata.json"],
+                        cwd=REPO_DIR, capture_output=True, text=True, timeout=5,
+                    )
+                    errata = []
+                    if errata_raw.returncode == 0:
+                        try:
+                            errata = json.loads(errata_raw.stdout)
+                        except Exception:
+                            pass
+                    GLib.idle_add(_prompt_update, window, log, errata)
+            except Exception:
+                pass
+        threading.Thread(target=_bg, daemon=True).start()
+
+
+def _manual_update_check(window):
+    """Show a live progress dialog with countdown, then display result inline."""
+    dialog = Gtk.Dialog(
+        title="Sprawdzanie aktualizacji",
+        transient_for=window,
+        modal=True,
+    )
+    dialog.set_default_size(400, -1)
+
+    content = dialog.get_content_area()
+    vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+    vbox.set_border_width(20)
+
+    spinner = Gtk.Spinner()
+    spinner.start()
+    row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+    row.pack_start(spinner, False, False, 0)
+    status_lbl = Gtk.Label(label=f"Łączenie z serwerem... ({_UPDATE_TIMEOUT}s)")
+    status_lbl.set_xalign(0)
+    row.pack_start(status_lbl, True, True, 0)
+    vbox.pack_start(row, False, False, 0)
+
+    content.pack_start(vbox, True, True, 0)
+    content.show_all()
+
+    btn_close = dialog.add_button("Anuluj", Gtk.ResponseType.CANCEL)
+
+    state = {"done": False, "remaining": _UPDATE_TIMEOUT, "result": None}
+
+    def _countdown():
+        if state["done"]:
+            return False
+        state["remaining"] -= 1
+        if state["remaining"] <= 0:
+            state["done"] = True
+            spinner.stop()
+            status_lbl.set_text("Nie można sprawdzić — przekroczono limit czasu.")
+            btn_close.set_label("Zamknij")
+            return False
+        status_lbl.set_text(f"Łączenie z serwerem... ({state['remaining']}s)")
+        return True
+
+    GLib.timeout_add(1000, _countdown)
+
+    def _finish():
+        if state["done"]:
+            return False
+        state["done"] = True
+        spinner.stop()
+        res = state["result"]
+        if res == "none":
+            status_lbl.set_text("BTerminal jest aktualny. Brak nowych aktualizacji.")
+            btn_close.set_label("Zamknij")
+        elif isinstance(res, tuple) and res[0] == "updates":
+            dialog.response(Gtk.ResponseType.OK)
+        else:
+            status_lbl.set_text("Nie można sprawdzić aktualizacji.")
+            btn_close.set_label("Zamknij")
+        return False
 
     def _fetch():
         try:
             subprocess.run(
                 ["git", "fetch", "origin", "master"],
-                cwd=REPO_DIR, capture_output=True, timeout=15,
+                cwd=REPO_DIR, capture_output=True, timeout=_UPDATE_TIMEOUT,
             )
             local = subprocess.run(
                 ["git", "rev-parse", "master"],
@@ -7951,11 +9108,21 @@ def _check_for_updates(window):
                         errata = json.loads(errata_raw.stdout)
                     except Exception:
                         pass
-                GLib.idle_add(_prompt_update, window, log, errata)
+                state["result"] = ("updates", log, errata)
+            else:
+                state["result"] = "none"
         except Exception:
-            pass  # silent fail — no network etc.
+            state["result"] = "error"
+        GLib.idle_add(_finish)
 
     threading.Thread(target=_fetch, daemon=True).start()
+
+    dialog.run()
+    dialog.destroy()
+
+    res = state["result"]
+    if isinstance(res, tuple) and res[0] == "updates":
+        _prompt_update(window, res[1], res[2])
 
 
 _RESP_ERRATA = 10
@@ -8156,7 +9323,8 @@ def main():
     def on_activate(app):
         win = BTerminalApp()
         app.add_window(win)
-        _check_for_updates(win)
+        if _OPTIONS.get("check_updates_on_start", True):
+            GLib.timeout_add(3000, lambda: _check_for_updates(win) or False)
 
     application.connect("activate", on_activate)
     application.run(None)

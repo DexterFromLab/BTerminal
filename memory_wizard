@@ -1,0 +1,1100 @@
+#!/usr/bin/env python3
+"""
+memory_wizard — Auto-configure Memory Rules for a project.
+
+SAFETY: This wizard is READ-ONLY with respect to your CTX context entries
+(set via 'ctx set'). It only manages the 'rules' table: add, remove, modify.
+
+If something breaks after running the wizard, you can:
+  • See rules history:      ctx log-rules <project>
+  • Remove a rule:          ctx rules list <project>  →  ctx rules remove <project> <id>
+  • See ctx history:        ctx log <project>
+  • Restore ctx entry:      ctx restore <project> <key>
+                            ctx restore <project> <key> --step 1
+
+Flow:
+  0. Pre-flight: show existing CTX snapshot + rules, ask user to confirm
+  1. Collect: CLAUDE.md files + ctx (read-only) + existing rules
+  2. Analyze: Claude reviews all existing rules and proposes ADD / REMOVE / MODIFY
+  3. Confirm: user reviews each proposal interactively
+  4. Execute: run accepted actions via ctx
+  5. Configure: set inject_every / refresh_every
+  6. Summary: what changed, rollback instructions
+
+Usage: memory_wizard <project> [--project-dir <dir>]
+"""
+
+import os
+import re
+import sqlite3
+import subprocess
+import sys
+from pathlib import Path
+
+CTX_DB = Path.home() / ".claude-context" / "context.db"
+CLAUDE_GLOBAL = Path.home() / ".claude" / "CLAUDE.md"
+
+
+def _run(cmd, **kw):
+    return subprocess.run(cmd, text=True, capture_output=True, timeout=10, **kw)
+
+
+def _ctx(*args):
+    return _run(["ctx"] + list(args))
+
+
+def _claude_ask(prompt: str) -> str:
+    try:
+        result = subprocess.run(
+            ["claude", "--print", "--output-format", "text"],
+            input=prompt,
+            text=True, capture_output=True, timeout=120,
+        )
+        out = result.stdout.strip()
+        if not out and result.stderr.strip():
+            return f"[Error: {result.stderr.strip()[:300]}]"
+        return out
+    except FileNotFoundError:
+        return "[Error: claude not found]"
+    except subprocess.TimeoutExpired:
+        return "[Error: Claude timed out]"
+
+
+# ─── Context collection (read-only) ──────────────────────────────────────────
+
+def _read_ctx_entries(project: str) -> list[tuple[str, str]]:
+    entries = []
+    try:
+        if not CTX_DB.exists():
+            return entries
+        db = sqlite3.connect(str(CTX_DB))
+        rows = db.execute(
+            "SELECT key, value FROM contexts WHERE project = ? ORDER BY key", (project,)
+        ).fetchall()
+        db.close()
+        entries = [(r[0], r[1]) for r in rows]
+    except Exception:
+        pass
+    return entries
+
+
+def _read_shared_entries() -> list[tuple[str, str]]:
+    entries = []
+    try:
+        if not CTX_DB.exists():
+            return entries
+        db = sqlite3.connect(str(CTX_DB))
+        rows = db.execute("SELECT key, value FROM shared ORDER BY key").fetchall()
+        db.close()
+        entries = [(r[0], r[1]) for r in rows]
+    except Exception:
+        pass
+    return entries
+
+
+def _read_existing_rules(project: str) -> list[tuple[int, str, bool]]:
+    rules = []
+    try:
+        if not CTX_DB.exists():
+            return rules
+        db = sqlite3.connect(str(CTX_DB))
+        rows = db.execute(
+            "SELECT id, rule, enabled FROM rules WHERE project = ? ORDER BY id", (project,)
+        ).fetchall()
+        db.close()
+        rules = [(r[0], r[1], bool(r[2])) for r in rows]
+    except Exception:
+        pass
+    return rules
+
+
+def _collect_claude_md(project_dir: str | None) -> list[tuple[str, str]]:
+    files = []
+    if CLAUDE_GLOBAL.exists():
+        files.append(("~/.claude/CLAUDE.md", CLAUDE_GLOBAL.read_text()[:3000]))
+    if project_dir:
+        for fname in ["CLAUDE.md", ".claude/CLAUDE.md", "docs/CLAUDE.md"]:
+            p = Path(project_dir) / fname
+            if p.exists():
+                files.append((fname, p.read_text()[:3000]))
+    return files
+
+
+def _auto_collect_logs(project_dir: str) -> bool:
+    """Run 'claude_log collect <project_dir>' to pull latest JSONL. Returns True on success."""
+    try:
+        r = subprocess.run(
+            ["claude_log", "collect", project_dir],
+            text=True, capture_output=True, timeout=15,
+        )
+        return r.returncode == 0
+    except FileNotFoundError:
+        return False
+    except subprocess.TimeoutExpired:
+        return False
+
+
+def _collect_session_logs(project_dir: str | None) -> tuple[str, list[str]]:
+    """
+    Read recent session logs from <project_dir>/claude_log/*.jsonl.
+    Returns (condensed_text, list_of_filenames_read).
+    """
+    if not project_dir:
+        return "", []
+    log_dir = Path(project_dir) / "claude_log"
+    if not log_dir.exists():
+        return "", []
+
+    files = sorted(log_dir.glob("*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True)
+    if not files:
+        return "", []
+
+    import json
+    lines_out = []
+    chars = 0
+    limit = 3000
+    files_read = []
+
+    for f in files[:3]:
+        files_read.append(f.name)
+        try:
+            for raw in f.read_text(errors="replace").splitlines():
+                if chars >= limit:
+                    break
+                try:
+                    entry = json.loads(raw)
+                except Exception:
+                    continue
+                t = entry.get("type", "")
+                msg = entry.get("message", {})
+                role = msg.get("role", "")
+                if t == "user" and role == "user":
+                    content = msg.get("content", "")
+                    if isinstance(content, list):
+                        content = " ".join(
+                            c.get("text", "") for c in content if c.get("type") == "text"
+                        )
+                    text = str(content).strip()[:200]
+                    if text:
+                        line = f"user: {text}"
+                        lines_out.append(line)
+                        chars += len(line)
+                elif t == "assistant" and role == "assistant":
+                    for block in (msg.get("content") or []):
+                        if block.get("type") == "text":
+                            text = block["text"].strip()[:200]
+                            if text:
+                                line = f"assistant: {text}"
+                                lines_out.append(line)
+                                chars += len(line)
+                            break
+        except Exception:
+            continue
+
+    return "\n".join(lines_out[:60]), files_read
+
+
+# ─── Pre-flight ───────────────────────────────────────────────────────────────
+
+def _preflight(project: str, project_dir: str | None) -> bool:
+    ctx_entries = _read_ctx_entries(project)
+    shared_entries = _read_shared_entries()
+    existing_rules = _read_existing_rules(project)
+
+    print("┌─ EXISTING STATE ────────────────────────────────────────────────────────────")
+    print("│")
+    if ctx_entries:
+        print(f"│  ctx entries for '{project}':")
+        for key, val in ctx_entries:
+            preview = val.replace("\n", " ")[:80]
+            print(f"│    [{key}] {preview}{'…' if len(val) > 80 else ''}")
+    else:
+        print(f"│  ctx entries for '{project}': (none)")
+
+    if shared_entries:
+        print("│")
+        print("│  Shared ctx entries:")
+        for key, val in shared_entries:
+            preview = val.replace("\n", " ")[:80]
+            print(f"│    [shared:{key}] {preview}{'…' if len(val) > 80 else ''}")
+
+    if existing_rules:
+        print("│")
+        print("│  Rules (will be reviewed by wizard):")
+        for rid, rule, enabled in existing_rules:
+            status = "✓" if enabled else "✗"
+            print(f"│    [{status}] #{rid}: {rule}")
+    else:
+        print("│")
+        print("│  Rules: (none)")
+
+    print("│")
+    print("└─────────────────────────────────────────────────────────────────────────────")
+    print()
+    print("The wizard manages ONLY the rules table (add / remove / modify).")
+    print("CTX context entries are NEVER touched.")
+    print()
+
+    if ctx_entries:
+        print("⚠  Before continuing: make sure your CTX context is complete and up-to-date.")
+        print("   If important info is missing, press q and run 'ctx set' first.")
+        print()
+
+    try:
+        answer = input("Continue? [y/q] ").strip().lower()
+    except EOFError:
+        return True
+
+    return answer not in ("q", "quit", "n", "no")
+
+
+# ─── Analysis ─────────────────────────────────────────────────────────────────
+
+def _build_analysis_prompt(
+    project: str,
+    ctx_entries: list[tuple[str, str]],
+    shared_entries: list[tuple[str, str]],
+    existing_rules: list[tuple[int, str, bool]],
+    claude_md_files: list[tuple[str, str]],
+    session_log: str = "",
+) -> str:
+    sections = []
+
+    if claude_md_files:
+        for label, content in claude_md_files:
+            sections.append(f"=== {label} ===\n{content[:1500]}")
+
+    if shared_entries:
+        block = "\n".join(f"[{k}]: {v[:200]}" for k, v in shared_entries)
+        sections.append(f"=== Shared CTX (read-only) ===\n{block}")
+
+    if ctx_entries:
+        block = "\n".join(f"[{k}]: {v[:200]}" for k, v in ctx_entries)
+        sections.append(f"=== Project CTX '{project}' (read-only) ===\n{block}")
+
+    if existing_rules:
+        block = "\n".join(
+            f"#{rid} {'[on]' if en else '[off]'}: {rule}"
+            for rid, rule, en in existing_rules
+        )
+        sections.append(f"=== Current rules for '{project}' ===\n{block}")
+    else:
+        sections.append(f"=== Current rules for '{project}' ===\n(none)")
+
+    if session_log:
+        sections.append(
+            f"=== Recent session log excerpts (last 3 sessions) ===\n{session_log}"
+        )
+
+    context_block = "\n\n".join(sections) if sections else "(no context)"
+
+    no_rules_note = (
+        "\nIMPORTANT: There are currently ZERO rules for this project. "
+        "You MUST propose at least 2-3 ADD rules. "
+        "Rules exist even when CLAUDE.md is thorough — they are PERIODIC REMINDERS "
+        "injected to prevent drift during long sessions. "
+        "Something appearing in CLAUDE.md is NOT a reason to skip it as a rule.\n"
+        if not existing_rules else ""
+    )
+
+    return f"""You are a project memory assistant for Claude Code.
+
+Review the project '{project}' and propose changes to its behavioral rules.
+{no_rules_note}
+KEY CONCEPT: Rules are SHORT one-line reminders injected periodically into Claude Code
+sessions (every N prompts) to prevent behavioral drift. They are NOT documentation —
+they are safety nets for things Claude tends to forget mid-session even when instructed.
+Something already in CLAUDE.md or CTX is a GOOD candidate for a rule if it is the kind
+of thing Claude might ignore after many turns.
+
+CONSTRAINTS:
+1. CTX context entries are READ-ONLY — never suggest modifying them.
+2. Each rule must be a single actionable line (not a paragraph).
+3. Avoid duplicating existing rules shown above.
+4. If session logs are provided, mine them for corrections the user had to repeat,
+   things Claude did wrong, or behaviors that needed reminding.
+
+Your task — propose:
+  • ADD: new rules (behaviors worth reminding periodically)
+  • REMOVE: #<id> — existing rules that are truly redundant or wrong
+  • MODIFY: #<id> → existing rules that need rewording
+
+Output format — ONLY these lines, nothing else:
+  ADD: <rule text> | WHY: <one-line evidence or reason from session/context>
+  REMOVE: #<id> — <short reason>
+  MODIFY: #<id> → <new text>
+
+The WHY field for ADD is mandatory — cite a specific pattern, repeated correction,
+or context clue that justifies the rule (e.g. "user corrected 3x in logs", "CLAUDE.md
+mentions this but Claude ignored it in session").
+
+Only output NO_CHANGES if there are existing rules AND none of them need changing
+AND the project has genuinely no behavioral patterns worth reminding.
+
+Good rule examples:
+  ADD: Nie rób git push bez pytania użytkownika | WHY: user explicitly reminded twice in logs
+  ADD: Po każdej zmianie bterminal.py uruchom ./install.sh | WHY: changes went untested without reinstall
+  ADD: Używaj tasks CLI w Bash — nie wbudowanego TaskCreate/TaskList | WHY: CLAUDE.md instructs this, high drift risk
+
+Project context:
+{context_block[:5000]}
+
+Proposals (ADD/REMOVE/MODIFY lines, or NO_CHANGES if truly nothing to do):"""
+
+
+def _analyze(
+    project: str,
+    ctx_entries, shared_entries, existing_rules, claude_md_files,
+    session_log: str = "",
+) -> dict:
+    """
+    Returns dict with keys 'add', 'remove', 'modify'.
+    - add:    list of str (new rule texts)
+    - remove: list of (id, rule_text, reason)
+    - modify: list of (id, old_text, new_text)
+    """
+    prompt = _build_analysis_prompt(
+        project, ctx_entries, shared_entries, existing_rules, claude_md_files,
+        session_log=session_log,
+    )
+    answer = _claude_ask(prompt)
+
+    # add items are dicts: {"rule": str, "why": str}
+    result = {"add": [], "remove": [], "modify": []}
+
+    if not answer or answer.startswith("[Error"):
+        print(f"  Warning: Claude returned an error: {answer[:120]}", file=sys.stderr)
+        return result
+
+    if "NO_CHANGES" in answer:
+        if not existing_rules:
+            print(f"  (Claude raw response: {answer[:300]})", file=sys.stderr)
+        return result
+
+    rules_by_id = {rid: rule for rid, rule, _ in existing_rules}
+
+    for raw_line in answer.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        # ADD: <text> | WHY: <reason>
+        m = re.match(r"^ADD:\s+(.+)$", line, re.IGNORECASE)
+        if m:
+            full = m.group(1).strip()
+            if " | WHY:" in full:
+                text, why = full.split(" | WHY:", 1)
+            elif " | why:" in full.lower():
+                idx = full.lower().index(" | why:")
+                text, why = full[:idx], full[idx + 7:]
+            else:
+                text, why = full, ""
+            text = re.sub(r"^[-•*]\s+", "", text.strip())
+            why = why.strip()
+            if len(text) >= 10:
+                result["add"].append({"rule": text, "why": why})
+            continue
+
+        # REMOVE: #<id> — <reason>  (or just #<id>)
+        m = re.match(r"^REMOVE:\s+#?(\d+)(?:\s*[—–-]+\s*(.+))?$", line, re.IGNORECASE)
+        if m:
+            rid = int(m.group(1))
+            reason = (m.group(2) or "").strip() or "no reason given"
+            if rid in rules_by_id:
+                result["remove"].append((rid, rules_by_id[rid], reason))
+            continue
+
+        # MODIFY: #<id> → <new text>
+        m = re.match(r"^MODIFY:\s+#?(\d+)\s*[→>]+\s*(.+)$", line, re.IGNORECASE)
+        if m:
+            rid = int(m.group(1))
+            new_text = m.group(2).strip()
+            if rid in rules_by_id and len(new_text) >= 10:
+                result["modify"].append((rid, rules_by_id[rid], new_text))
+            continue
+
+    # Deduplicate ADD proposals against existing rules
+    existing_texts = [r.lower() for _, r, _ in existing_rules]
+    result["add"] = [
+        item for item in result["add"][:12]
+        if not any(
+            item["rule"].lower() in ex or ex in item["rule"].lower()
+            for ex in existing_texts
+        )
+    ]
+
+    return result
+
+
+# ─── Confirmation ─────────────────────────────────────────────────────────────
+
+def _ask(prompt: str) -> str:
+    try:
+        return input(prompt).strip().lower()
+    except EOFError:
+        return "y"
+
+
+def _edit_rule_with_ai(rule: str, why: str, session_log: str) -> str | None:
+    """
+    AI-assisted rule editing loop.
+    User describes what they dislike → Claude proposes a revision → repeat until accepted or discarded.
+    Returns the final rule text, or None if user discards.
+    """
+    log_section = f"\nSession log context:\n{session_log[:1000]}" if session_log else ""
+    current = rule
+    history = []
+
+    print()
+    while True:
+        try:
+            feedback = input("  Your feedback (what to change): ").strip()
+        except EOFError:
+            return None
+        if not feedback:
+            print("  — no feedback, keeping original")
+            return rule
+
+        history.append(f"User: {feedback}")
+        history_block = "\n".join(history)
+
+        prompt = f"""You are revising a single-line behavioral rule for Claude Code.
+
+Original rule: "{rule}"
+Why it was proposed: {why}
+{log_section}
+
+Revision history:
+{history_block}
+
+Propose ONE improved version of the rule that addresses the user's feedback.
+Output ONLY the revised rule text — a single line, no quotes, no preamble."""
+
+        print("  Asking Claude to revise…")
+        revised = _claude_ask(prompt)
+        revised = revised.strip().strip('"').strip("'")
+
+        if not revised or revised.startswith("[Error"):
+            print("  (Could not get revision.)")
+            continue
+
+        print()
+        print("  ┌─ Revised rule ─────────────────────────────────────────────────")
+        print(f"  │  {revised}")
+        print("  └───────────────────────────────────────────────────────────────")
+        print()
+
+        history.append(f"Claude proposed: {revised}")
+        current = revised
+
+        try:
+            ans = input("  → y=accept  e=more feedback  n=discard: ").strip().lower()
+        except EOFError:
+            ans = "y"
+
+        if ans in ("y", "yes", ""):
+            return current
+        elif ans in ("n", "no"):
+            return None
+        # else: loop with more feedback
+
+
+def _discuss_rule(rule: str, session_log: str) -> str | None:
+    """
+    Interactive discussion about a rule.
+    - First shows Claude's analysis (examples/justification).
+    - User can then type questions OR opinions/suggestions.
+    - If user gives an opinion, Claude proposes a revised rule.
+    - Returns revised rule text if user accepts a revision, or None to keep original.
+    """
+    log_section = f"\nSession log excerpts:\n{session_log[:2000]}" if session_log else ""
+
+    def _show_box(title: str, text: str):
+        print()
+        print(f"  ┌─ {title} {'─' * max(0, 63 - len(title))}")
+        for line in text.splitlines():
+            print(f"  │  {line}")
+        print("  └───────────────────────────────────────────────────────────────────")
+        print()
+
+    # Initial analysis
+    initial_prompt = f"""You are reviewing a proposed behavioral rule for Claude Code.
+
+Rule: "{rule}"
+{log_section}
+
+Find 2-3 concrete examples from the session log (or from general Claude drift patterns
+if no logs) that justify why this rule is needed. Be concise — max 150 words."""
+
+    print("  Asking Claude…")
+    analysis = _claude_ask(initial_prompt)
+    if analysis and not analysis.startswith("[Error"):
+        _show_box("Claude", analysis)
+    else:
+        print("  (Could not retrieve examples.)")
+        analysis = ""
+
+    context = (
+        f'Rule: "{rule}"\n\n'
+        f'Initial analysis:\n{analysis}'
+    )
+
+    # Discussion loop
+    while True:
+        print("  You can:")
+        print("    • ask a question about this rule")
+        print("    • share your opinion / suggest a change")
+        print("    • press Enter to go back to the rule decision")
+        try:
+            user_input = input("  > ").strip()
+        except EOFError:
+            return None
+        if not user_input:
+            return None
+
+        followup_prompt = f"""{context}
+
+User says: "{user_input}"
+
+Do two things:
+1. Address the user's comment briefly (1-3 sentences).
+2. If the user is suggesting a change or expressing an opinion about the rule,
+   propose a revised rule on the LAST line, formatted exactly as:
+   REVISED: <new rule text>
+   If no revision is needed (user asked a pure question), do NOT include a REVISED line.
+
+Max 120 words total."""
+
+        print("  Asking Claude…")
+        response = _claude_ask(followup_prompt)
+        if not response or response.startswith("[Error"):
+            print("  (No response.)")
+            continue
+
+        # Extract optional REVISED line
+        revised_rule = None
+        response_lines = []
+        for line in response.splitlines():
+            if line.strip().upper().startswith("REVISED:"):
+                revised_rule = line.split(":", 1)[1].strip().strip('"').strip("'")
+            else:
+                response_lines.append(line)
+        clean_response = "\n".join(response_lines).strip()
+
+        _show_box("Claude", clean_response)
+        context += f"\n\nUser: {user_input}\nClaude: {clean_response}"
+
+        if revised_rule and len(revised_rule) >= 10:
+            print(f"  ┌─ Proposed revision {'─' * 47}")
+            print(f"  │  {revised_rule}")
+            print(f"  └───────────────────────────────────────────────────────────────────")
+            print()
+            try:
+                ans = input("  → y=accept revised  e=more feedback  n=keep original  q=skip rule: ").strip().lower()
+            except EOFError:
+                ans = "n"
+            if ans in ("y", "yes", ""):
+                return revised_rule
+            elif ans in ("q", "skip"):
+                return "SKIP"
+            elif ans in ("n", "no"):
+                return None
+            # e = loop for more feedback, continue
+            context += f"\nRevision proposed: {revised_rule}\nUser declined, wants more changes."
+    return None
+
+
+def _confirm_all(proposals: dict, session_log: str = "") -> dict:
+    """
+    Interactive review. Returns accepted proposals.
+    q = skip this item (not quit wizard). Use Ctrl+C to abort.
+    """
+    accepted = {"add": [], "remove": [], "modify": []}
+
+    total = len(proposals["remove"]) + len(proposals["modify"]) + len(proposals["add"])
+    if total == 0:
+        print("No changes proposed — your rules look good.")
+        return accepted
+
+    print("  For each proposal, type one letter and press Enter:")
+    print("    y = accept   n/q = skip   e = edit   d = ask Claude for examples")
+    done = 0
+
+    # ── Removals ──────────────────────────────────────────────────────────────
+    if proposals["remove"]:
+        print(f"\n── REMOVE ({len(proposals['remove'])} proposal(s)) ──────────────────────")
+        for rid, rule, reason in proposals["remove"]:
+            done += 1
+
+            def _show_remove():
+                print(f"\n[{done}/{total}] REMOVE rule #{rid}:")
+                print(f"  \"{rule}\"")
+                print(f"  Reason: {reason}")
+
+            _show_remove()
+            while True:
+                ans = _ask("  → y=remove  n/q=keep  d=discuss: ")
+                if ans in ("y", "yes", ""):
+                    accepted["remove"].append((rid, rule, reason))
+                    print("  ✓ will remove")
+                    break
+                elif ans in ("n", "no", "q", "skip"):
+                    print("  — keep")
+                    break
+                elif ans in ("d", "discuss"):
+                    result = _discuss_rule(rule, session_log)
+                    if result == "SKIP":
+                        print("  — skip")
+                        break
+                    _show_remove()
+                else:
+                    print("  Please enter y, n, d, or q")
+
+    # ── Modifications ─────────────────────────────────────────────────────────
+    if proposals["modify"]:
+        print(f"\n── MODIFY ({len(proposals['modify'])} proposal(s)) ──────────────────────")
+        for rid, old_text, new_text in proposals["modify"]:
+            done += 1
+
+            def _show_modify():
+                print(f"\n[{done}/{total}] MODIFY rule #{rid}:")
+                print(f"  Old: \"{old_text}\"")
+                print(f"  New: \"{new_text}\"")
+
+            _show_modify()
+            while True:
+                ans = _ask("  → y=apply  n/q=skip  e=edit new text  d=discuss: ")
+                if ans in ("y", "yes", ""):
+                    accepted["modify"].append((rid, old_text, new_text))
+                    print("  ✓ will modify")
+                    break
+                elif ans in ("n", "no", "q", "skip"):
+                    print("  — skip")
+                    break
+                elif ans in ("e", "edit"):
+                    revised = _edit_rule_with_ai(new_text, "", session_log)
+                    if revised:
+                        accepted["modify"].append((rid, old_text, revised))
+                        print(f"  ✓ will modify: {revised}")
+                        break
+                    else:
+                        print("  — discarded")
+                        break
+                elif ans in ("d", "discuss"):
+                    result = _discuss_rule(new_text, session_log)
+                    if result and result != "SKIP":
+                        accepted["modify"].append((rid, old_text, result))
+                        print(f"  ✓ will modify (from discussion): {result}")
+                        break
+                    elif result == "SKIP":
+                        print("  — skip")
+                        break
+                    _show_modify()
+                else:
+                    print("  Please enter y, n, e, d, or q")
+
+    # ── Additions ─────────────────────────────────────────────────────────────
+    if proposals["add"]:
+        print(f"\n── ADD ({len(proposals['add'])} proposal(s)) ─────────────────────────────")
+        for item in proposals["add"]:
+            rule = item["rule"]
+            why = item["why"]
+            done += 1
+
+            def _show_add_rule():
+                print(f"\n[{done}/{total}] ADD rule:")
+                print(f"  \"{rule}\"")
+                if why:
+                    print(f"  Why: {why}")
+
+            _show_add_rule()
+            while True:
+                ans = _ask("  → y=accept  n/q=skip  e=edit  d=discuss: ")
+                if ans in ("y", "yes", ""):
+                    accepted["add"].append(rule)
+                    print("  ✓ will add")
+                    break
+                elif ans in ("n", "no", "q", "skip"):
+                    print("  — skip")
+                    break
+                elif ans in ("e", "edit"):
+                    revised = _edit_rule_with_ai(rule, why, session_log)
+                    if revised:
+                        accepted["add"].append(revised)
+                        print(f"  ✓ will add: {revised}")
+                        break
+                    else:
+                        print("  — discarded")
+                        break
+                elif ans in ("d", "discuss"):
+                    result = _discuss_rule(rule, session_log)
+                    if result and result != "SKIP":
+                        accepted["add"].append(result)
+                        print(f"  ✓ will add (revised in discussion): {result}")
+                        break
+                    elif result == "SKIP":
+                        print("  — skip")
+                        break
+                    _show_add_rule()
+                else:
+                    print("  Please enter y, n, e, d, or q")
+
+    return accepted
+
+
+# ─── Interval configuration ───────────────────────────────────────────────────
+
+def _configure_intervals(project: str) -> tuple[int, int]:
+    cur_inj, cur_ref = 20, 50
+    try:
+        if CTX_DB.exists():
+            db = sqlite3.connect(str(CTX_DB))
+            row = db.execute(
+                "SELECT inject_every, refresh_every FROM rules_config WHERE project = ?",
+                (project,),
+            ).fetchone()
+            db.close()
+            if row:
+                cur_inj, cur_ref = row[0], row[1]
+    except Exception:
+        pass
+
+    print(f"\nCurrent: inject every {cur_inj} prompts, CTX refresh every {cur_ref} prompts.")
+    try:
+        change = input("  Change intervals? [y/N] ").strip().lower()
+    except EOFError:
+        return cur_inj, cur_ref
+
+    if change not in ("y", "yes"):
+        return cur_inj, cur_ref
+
+    inject_every = cur_inj
+    while True:
+        try:
+            raw = input(f"  Inject rules every N prompts [{cur_inj}]: ").strip()
+        except EOFError:
+            break
+        if not raw:
+            break
+        try:
+            inject_every = int(raw)
+            break
+        except ValueError:
+            print("  Please enter a number.")
+
+    refresh_every = cur_ref
+    while True:
+        try:
+            raw = input(f"  Refresh CTX every M prompts [{cur_ref}]: ").strip()
+        except EOFError:
+            break
+        if not raw:
+            break
+        try:
+            refresh_every = int(raw)
+            break
+        except ValueError:
+            print("  Please enter a number.")
+
+    return inject_every, refresh_every
+
+
+# ─── Execute ──────────────────────────────────────────────────────────────────
+
+def _execute(project: str, accepted: dict) -> dict:
+    """Run all accepted actions. Returns counts."""
+    counts = {"removed": 0, "modified": 0, "added": 0, "failed": []}
+
+    for rid, _rule, _reason in accepted["remove"]:
+        r = _ctx("rules", "remove", project, str(rid))
+        if r.returncode == 0:
+            counts["removed"] += 1
+        else:
+            counts["failed"].append(f"remove #{rid}: {r.stderr.strip()}")
+
+    for rid, _old, new_text in accepted["modify"]:
+        # Remove old, add new
+        r1 = _ctx("rules", "remove", project, str(rid))
+        r2 = _ctx("rules", "add", project, new_text)
+        if r1.returncode == 0 and r2.returncode == 0:
+            counts["modified"] += 1
+        else:
+            err = r1.stderr.strip() or r2.stderr.strip()
+            counts["failed"].append(f"modify #{rid}: {err}")
+
+    for rule in accepted["add"]:
+        r = _ctx("rules", "add", project, rule)
+        if r.returncode == 0:
+            counts["added"] += 1
+        else:
+            counts["failed"].append(f"add '{rule[:40]}': {r.stderr.strip()}")
+
+    return counts
+
+
+def _save_config(project: str, inject_every: int, refresh_every: int):
+    r = _ctx("rules", "config", project,
+             "--inject-every", str(inject_every),
+             "--refresh-every", str(refresh_every))
+    if r.returncode != 0:
+        print(f"  Warning: failed to save config: {r.stderr.strip()}")
+
+
+# ─── Summary ──────────────────────────────────────────────────────────────────
+
+def _print_summary(project: str, accepted: dict, counts: dict,
+                   inject_every: int, refresh_every: int):
+    print()
+    print("╔═ Wizard Summary ═══════════════════════════════════════════════════════════")
+    print("║")
+
+    changed = counts["removed"] + counts["modified"] + counts["added"]
+    if changed == 0 and not counts["failed"]:
+        print("║  No changes made.")
+    else:
+        if counts["removed"]:
+            print(f"║  ✓ Removed  ({counts['removed']}):")
+            for rid, rule, _ in accepted["remove"]:
+                print(f"║      - #{rid}: {rule}")
+        if counts["modified"]:
+            print(f"║  ✓ Modified ({counts['modified']}):")
+            for rid, old, new in accepted["modify"]:
+                print(f"║      ~ #{rid}: {old}")
+                print(f"║        → {new}")
+        if counts["added"]:
+            print(f"║  ✓ Added    ({counts['added']}):")
+            for rule in accepted["add"]:
+                print(f"║      + {rule}")
+        if counts["failed"]:
+            print(f"║  ✗ Failed ({len(counts['failed'])}):")
+            for msg in counts["failed"]:
+                print(f"║      ! {msg}")
+
+    print("║")
+    print(f"║  Config: inject every {inject_every} prompts, CTX refresh every {refresh_every}")
+    print("║")
+    if changed:
+        print("║  If something works worse — how to revert:")
+        print(f"║    See history:   ctx log-rules {project}")
+        print(f"║    List rules:    ctx rules list {project}")
+        print(f"║    Remove rule:   ctx rules remove {project} <id>")
+    print("╚════════════════════════════════════════════════════════════════════════════")
+
+
+def _print_close_hint():
+    print()
+    print("  You can close this tab now (Ctrl+W or the × button).")
+    print()
+
+
+# ─── Dependencies ─────────────────────────────────────────────────────────────
+
+def _check_dependencies():
+    errors = []
+    try:
+        subprocess.run(["claude", "--version"], capture_output=True, timeout=5)
+    except FileNotFoundError:
+        errors.append("claude (Claude Code CLI) not found — install via: npm install -g @anthropic-ai/claude-code")
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        subprocess.run(["ctx", "--help"], capture_output=True, timeout=5)
+    except FileNotFoundError:
+        errors.append("ctx not found — run BTerminal installer first")
+    if errors:
+        for e in errors:
+            print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+# ─── Main ─────────────────────────────────────────────────────────────────────
+
+def _print_dry_run(project: str, proposals: dict):
+    """Print proposals with ready-to-run ctx commands. No changes applied."""
+    add = proposals["add"]
+    remove = proposals["remove"]
+    modify = proposals["modify"]
+    total = len(add) + len(remove) + len(modify)
+
+    print("\n" + "═" * 72)
+    print(f"  DRY RUN — {total} proposal(s) for project: {project}")
+    print("  Nothing has been changed. Apply what you want manually.")
+    print("═" * 72)
+
+    if add:
+        print(f"\n── ADD ({len(add)}) ──────────────────────────────────────────────────")
+        for i, item in enumerate(add, 1):
+            rule = item["rule"] if isinstance(item, dict) else item
+            why  = item.get("why", "") if isinstance(item, dict) else ""
+            print(f"\n  [{i}] {rule}")
+            if why:
+                print(f"       Why: {why}")
+            print(f"       → ctx rules add {project} \"{rule}\"")
+
+    if modify:
+        print(f"\n── MODIFY ({len(modify)}) ──────────────────────────────────────────")
+        for i, (rid, old, new) in enumerate(modify, 1):
+            print(f"\n  [{i}] #{rid}: {old}")
+            print(f"       → {new}")
+            print(f"       → ctx rules remove {project} {rid}")
+            print(f"         ctx rules add {project} \"{new}\"")
+
+    if remove:
+        print(f"\n── REMOVE ({len(remove)}) ──────────────────────────────────────────")
+        for i, (rid, rule, reason) in enumerate(remove, 1):
+            print(f"\n  [{i}] #{rid}: {rule}")
+            print(f"       Why: {reason}")
+            print(f"       → ctx rules remove {project} {rid}")
+
+    if total == 0:
+        print("\n  No proposals — rules look good.")
+
+    print("\n" + "═" * 72)
+    print("  Current rules:")
+    r = subprocess.run(["ctx", "rules", "list", project],
+                       capture_output=True, text=True, timeout=5)
+    for line in (r.stdout.strip() or "(none)").splitlines():
+        print(f"    {line}")
+    print("═" * 72)
+
+
+def _auto_accept(proposals: dict) -> dict:
+    """In --auto mode: accept all ADD proposals only. Skip REMOVE/MODIFY (unsafe without review)."""
+    return {
+        "add": [item["rule"] if isinstance(item, dict) else item for item in proposals["add"]],
+        "remove": [],
+        "modify": [],
+    }
+
+
+def _read_inject_config(project: str) -> tuple[int, int]:
+    """Read current inject_every / refresh_every from DB, return defaults if missing."""
+    try:
+        if not CTX_DB.exists():
+            return 100, 200
+        db = sqlite3.connect(str(CTX_DB))
+        row = db.execute(
+            "SELECT inject_every, refresh_every FROM rules_config WHERE project = ?",
+            (project,),
+        ).fetchone()
+        db.close()
+        if row:
+            return row[0], row[1]
+    except Exception:
+        pass
+    return 100, 200
+
+
+def main():
+    if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
+        print(__doc__)
+        sys.exit(0)
+
+    _check_dependencies()
+
+    project = sys.argv[1]
+    project_dir = None
+    auto_mode = False
+    dry_run = False
+    i = 2
+    while i < len(sys.argv):
+        if sys.argv[i] == "--project-dir" and i + 1 < len(sys.argv):
+            project_dir = sys.argv[i + 1]
+            i += 2
+        elif sys.argv[i] == "--auto":
+            auto_mode = True
+            i += 1
+        elif sys.argv[i] == "--dry-run":
+            dry_run = True
+            i += 1
+        else:
+            i += 1
+
+    mode_tag = " [DRY-RUN]" if dry_run else (" [AUTO]" if auto_mode else "")
+    print(f"=== Memory Wizard: {project}{mode_tag} ===\n")
+
+    if not auto_mode and not dry_run:
+        if not _preflight(project, project_dir):
+            print("Aborted.")
+            _print_close_hint()
+            sys.exit(1)
+
+    print("\n[1/5] Collecting context…")
+    ctx_entries = _read_ctx_entries(project)
+    shared_entries = _read_shared_entries()
+    existing_rules = _read_existing_rules(project)
+    claude_md_files = _collect_claude_md(project_dir)
+
+    if project_dir:
+        collected = _auto_collect_logs(project_dir)
+        if collected:
+            print("  Session log: collected latest JSONL.")
+        else:
+            print("  Session log: auto-collect skipped (claude_log not found or no new session).")
+
+    session_log, log_files = _collect_session_logs(project_dir)
+    total_chars = sum(len(v) for _, v in ctx_entries + shared_entries + claude_md_files)
+    print(f"  {len(ctx_entries)} ctx, {len(shared_entries)} shared, "
+          f"{len(claude_md_files)} CLAUDE.md, {len(existing_rules)} rules — "
+          f"{total_chars} chars")
+    if log_files:
+        print(f"  Session logs read ({len(log_files)}):")
+        for name in log_files:
+            print(f"    • {name}")
+    else:
+        print("  Session logs: none found in project_dir/claude_log/")
+
+    print("[2/5] Asking Claude to review rules…  (up to 2 min)")
+    proposals = _analyze(
+        project, ctx_entries, shared_entries, existing_rules, claude_md_files,
+        session_log=session_log,
+    )
+    total = len(proposals["add"]) + len(proposals["remove"]) + len(proposals["modify"])
+    if total == 0:
+        print("  Claude found nothing to change.")
+    else:
+        print(f"  {len(proposals['remove'])} to remove, "
+              f"{len(proposals['modify'])} to modify, "
+              f"{len(proposals['add'])} to add.")
+
+    if dry_run:
+        _print_dry_run(project, proposals)
+        sys.exit(0)
+
+    if auto_mode:
+        print("\n[3/5] Auto-accepting ADD proposals (REMOVE/MODIFY skipped for safety)…")
+        accepted = _auto_accept(proposals)
+        if proposals["remove"] or proposals["modify"]:
+            print(f"  Skipped: {len(proposals['remove'])} remove, "
+                  f"{len(proposals['modify'])} modify — run wizard interactively to review.")
+        inject_every, refresh_every = _read_inject_config(project)
+    else:
+        print("\n[3/5] Review proposals…")
+        accepted = _confirm_all(proposals, session_log=session_log)
+
+        any_accepted = accepted["add"] or accepted["remove"] or accepted["modify"]
+        if not any_accepted:
+            print("\nNothing accepted. No changes made.")
+            print("\n[4/5] Injection intervals…")
+            inject_every, refresh_every = _configure_intervals(project)
+            _save_config(project, inject_every, refresh_every)
+            print("\nDone — rules unchanged.")
+            _print_close_hint()
+            sys.exit(0)
+
+        print("\n[4/5] Injection intervals…")
+        inject_every, refresh_every = _configure_intervals(project)
+
+    print("\n[5/5] Applying changes…")
+    counts = _execute(project, accepted)
+    if not auto_mode:
+        _save_config(project, inject_every, refresh_every)
+
+    _print_summary(project, accepted, counts, inject_every, refresh_every)
+    if not auto_mode:
+        _print_close_hint()
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()

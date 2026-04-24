@@ -55,6 +55,41 @@ def init_db():
             created_at TEXT DEFAULT (datetime('now'))
         );
 
+        CREATE TABLE IF NOT EXISTS rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project TEXT NOT NULL,
+            rule TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS rules_config (
+            project TEXT PRIMARY KEY,
+            inject_every INTEGER NOT NULL DEFAULT 20,
+            refresh_every INTEGER NOT NULL DEFAULT 50,
+            updated_at TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS rules_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project TEXT NOT NULL,
+            action TEXT NOT NULL,
+            rule TEXT NOT NULL,
+            actor TEXT NOT NULL DEFAULT 'user',
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS ctx_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project TEXT NOT NULL,
+            action TEXT NOT NULL,
+            key TEXT NOT NULL,
+            old_value TEXT,
+            new_value TEXT,
+            actor TEXT NOT NULL DEFAULT 'user',
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+
         CREATE VIRTUAL TABLE IF NOT EXISTS contexts_fts USING fts5(
             project, key, value, content=contexts, content_rowid=id
         );
@@ -171,19 +206,42 @@ def cmd_get(args):
     db.close()
 
 
+def _record_ctx_history(db, project, action, key, old_value=None, new_value=None, actor="user"):
+    db.execute(
+        """INSERT INTO ctx_history (project, action, key, old_value, new_value, actor)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (project, action, key, old_value, new_value, actor),
+    )
+
+
+def _record_rules_history(db, project, action, rule, actor="user"):
+    db.execute(
+        """INSERT INTO rules_history (project, action, rule, actor)
+           VALUES (?, ?, ?, ?)""",
+        (project, action, rule, actor),
+    )
+
+
 def cmd_set(args):
     """Set a project context entry. Usage: ctx set <project> <key> <value>"""
     if len(args) < 3:
         print("Usage: ctx set <project> <key> <value>")
         sys.exit(1)
     project, key, value = args[0], args[1], " ".join(args[2:])
+    actor = "wizard" if "--actor=wizard" in args else "user"
     db = get_db()
+    old = db.execute(
+        "SELECT value FROM contexts WHERE project = ? AND key = ?", (project, key)
+    ).fetchone()
+    old_value = old["value"] if old else None
+    action = "update" if old else "create"
     db.execute(
         """INSERT INTO contexts (project, key, value, updated_at)
            VALUES (?, ?, ?, datetime('now'))
            ON CONFLICT(project, key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at""",
         (project, key, value),
     )
+    _record_ctx_history(db, project, action, key, old_value, value, actor)
     db.commit()
     db.close()
     print(f"[{project}] {key} = saved.")
@@ -195,20 +253,20 @@ def cmd_append(args):
         print("Usage: ctx append <project> <key> <value>")
         sys.exit(1)
     project, key, new_value = args[0], args[1], " ".join(args[2:])
+    actor = "wizard" if "--actor=wizard" in args else "user"
     db = get_db()
     existing = db.execute(
         "SELECT value FROM contexts WHERE project = ? AND key = ?", (project, key)
     ).fetchone()
-    if existing:
-        value = existing["value"] + "\n" + new_value
-    else:
-        value = new_value
+    old_value = existing["value"] if existing else None
+    value = (old_value + "\n" + new_value) if old_value else new_value
     db.execute(
         """INSERT INTO contexts (project, key, value, updated_at)
            VALUES (?, ?, ?, datetime('now'))
            ON CONFLICT(project, key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at""",
         (project, key, value),
     )
+    _record_ctx_history(db, project, "append", key, old_value, value, actor)
     db.commit()
     db.close()
     print(f"[{project}] {key} += appended.")
@@ -258,6 +316,216 @@ def cmd_shared(args):
         print(f"[shared] {args[1]} deleted.")
     else:
         print("Usage: ctx shared get | ctx shared set <key> <value> | ctx shared delete <key>")
+
+
+def cmd_rules(args):
+    """Manage per-project injection rules. Usage: ctx rules <subcommand> [args]"""
+    if len(args) < 1:
+        _rules_help()
+        sys.exit(1)
+
+    sub = args[0]
+
+    if sub == "list":
+        if len(args) < 2:
+            print("Usage: ctx rules list <project>")
+            sys.exit(1)
+        _rules_list(args[1])
+
+    elif sub == "add":
+        if len(args) < 3:
+            print("Usage: ctx rules add <project> <rule text>")
+            sys.exit(1)
+        project = args[1]
+        actor = "wizard" if "--actor=wizard" in args else "user"
+        rule_args = [a for a in args[2:] if not a.startswith("--actor=")]
+        rule = " ".join(rule_args)
+        db = get_db()
+        db.execute(
+            "INSERT INTO rules (project, rule) VALUES (?, ?)", (project, rule)
+        )
+        _record_rules_history(db, project, "add", rule, actor)
+        db.commit()
+        row = db.execute(
+            "SELECT id FROM rules WHERE project = ? ORDER BY id DESC LIMIT 1", (project,)
+        ).fetchone()
+        db.close()
+        print(f"[{project}] Rule #{row['id']} added: {rule}")
+
+    elif sub == "remove":
+        if len(args) < 3:
+            print("Usage: ctx rules remove <project> <id>")
+            sys.exit(1)
+        project, rule_id = args[1], int(args[2])
+        db = get_db()
+        old = db.execute(
+            "SELECT rule FROM rules WHERE project = ? AND id = ?", (project, rule_id)
+        ).fetchone()
+        db.execute("DELETE FROM rules WHERE project = ? AND id = ?", (project, rule_id))
+        if old:
+            _record_rules_history(db, project, "remove", old["rule"])
+        db.commit()
+        db.close()
+        print(f"[{project}] Rule #{rule_id} removed.")
+
+    elif sub == "enable":
+        if len(args) < 3:
+            print("Usage: ctx rules enable <project> <id>")
+            sys.exit(1)
+        project, rule_id = args[1], int(args[2])
+        db = get_db()
+        old = db.execute(
+            "SELECT rule FROM rules WHERE project = ? AND id = ?", (project, rule_id)
+        ).fetchone()
+        db.execute(
+            "UPDATE rules SET enabled = 1 WHERE project = ? AND id = ?", (project, rule_id)
+        )
+        if old:
+            _record_rules_history(db, project, "enable", old["rule"])
+        db.commit()
+        db.close()
+        print(f"[{project}] Rule #{rule_id} enabled.")
+
+    elif sub == "disable":
+        if len(args) < 3:
+            print("Usage: ctx rules disable <project> <id>")
+            sys.exit(1)
+        project, rule_id = args[1], int(args[2])
+        db = get_db()
+        old = db.execute(
+            "SELECT rule FROM rules WHERE project = ? AND id = ?", (project, rule_id)
+        ).fetchone()
+        db.execute(
+            "UPDATE rules SET enabled = 0 WHERE project = ? AND id = ?", (project, rule_id)
+        )
+        if old:
+            _record_rules_history(db, project, "disable", old["rule"])
+        db.commit()
+        db.close()
+        print(f"[{project}] Rule #{rule_id} disabled.")
+
+    elif sub == "config":
+        if len(args) < 2:
+            print("Usage: ctx rules config <project> [--inject-every N] [--refresh-every M]")
+            sys.exit(1)
+        project = args[1]
+        rest = args[2:]
+        inject_every = None
+        refresh_every = None
+        i = 0
+        while i < len(rest):
+            if rest[i] == "--inject-every" and i + 1 < len(rest):
+                inject_every = int(rest[i + 1])
+                i += 2
+            elif rest[i] == "--refresh-every" and i + 1 < len(rest):
+                refresh_every = int(rest[i + 1])
+                i += 2
+            else:
+                i += 1
+
+        db = get_db()
+        if inject_every is not None or refresh_every is not None:
+            existing = db.execute(
+                "SELECT inject_every, refresh_every FROM rules_config WHERE project = ?", (project,)
+            ).fetchone()
+            cur_inj = existing["inject_every"] if existing else 20
+            cur_ref = existing["refresh_every"] if existing else 50
+            new_inj = inject_every if inject_every is not None else cur_inj
+            new_ref = refresh_every if refresh_every is not None else cur_ref
+            db.execute(
+                """INSERT INTO rules_config (project, inject_every, refresh_every, updated_at)
+                   VALUES (?, ?, ?, datetime('now'))
+                   ON CONFLICT(project) DO UPDATE SET
+                       inject_every = excluded.inject_every,
+                       refresh_every = excluded.refresh_every,
+                       updated_at = excluded.updated_at""",
+                (project, new_inj, new_ref),
+            )
+            db.commit()
+            print(f"[{project}] rules config: inject_every={new_inj}, refresh_every={new_ref}")
+        else:
+            row = db.execute(
+                "SELECT inject_every, refresh_every FROM rules_config WHERE project = ?", (project,)
+            ).fetchone()
+            if row:
+                print(f"[{project}] inject_every={row['inject_every']}, refresh_every={row['refresh_every']}")
+            else:
+                print(f"[{project}] inject_every=20 (default), refresh_every=50 (default)")
+        db.close()
+
+    elif sub == "inject":
+        if len(args) < 2:
+            print("Usage: ctx rules inject <project>")
+            sys.exit(1)
+        _rules_inject(args[1])
+
+    else:
+        print(f"Unknown rules subcommand: {sub}")
+        _rules_help()
+        sys.exit(1)
+
+
+def _rules_list(project):
+    db = get_db()
+    rows = db.execute(
+        "SELECT id, rule, enabled, created_at FROM rules WHERE project = ? ORDER BY id",
+        (project,),
+    ).fetchall()
+    cfg = db.execute(
+        "SELECT inject_every, refresh_every FROM rules_config WHERE project = ?", (project,)
+    ).fetchone()
+    db.close()
+
+    inj = cfg["inject_every"] if cfg else 20
+    ref = cfg["refresh_every"] if cfg else 50
+    total = len(rows)
+    active = sum(1 for r in rows if r["enabled"])
+
+    print(f"Rules for '{project}': {active}/{total} active  |  inject every {inj} prompts, ctx refresh every {ref}")
+    if not rows:
+        print("  (no rules yet — use: ctx rules add <project> <rule>)")
+        return
+    print()
+    for row in rows:
+        status = "✓" if row["enabled"] else "✗"
+        print(f"  [{status}] #{row['id']:3d}  {row['rule']}")
+
+
+def _rules_inject(project):
+    db = get_db()
+    rows = db.execute(
+        "SELECT rule FROM rules WHERE project = ? AND enabled = 1 ORDER BY id", (project,)
+    ).fetchall()
+    cfg = db.execute(
+        "SELECT inject_every FROM rules_config WHERE project = ?", (project,)
+    ).fetchone()
+    db.close()
+
+    if not rows:
+        return
+
+    inj = cfg["inject_every"] if cfg else 20
+    line = "═" * 52
+    print(line)
+    print(f"PRZYPOMNIENIE REGUŁ [{project}] (co {inj} promptów)")
+    print(line)
+    for row in rows:
+        print(f"• {row['rule']}")
+    print(line)
+
+
+def _rules_help():
+    print("Usage: ctx rules <subcommand> [args]")
+    print()
+    print("Subcommands:")
+    print("  list <project>                      List all rules with status")
+    print("  add <project> <rule text>            Add a new rule")
+    print("  remove <project> <id>               Remove a rule by ID")
+    print("  enable <project> <id>               Enable a disabled rule")
+    print("  disable <project> <id>              Disable a rule (keep but skip)")
+    print("  config <project> [--inject-every N] [--refresh-every M]")
+    print("                                       View or set injection intervals")
+    print("  inject <project>                    Print formatted rules block for injection")
 
 
 def cmd_summary(args):
@@ -385,18 +653,212 @@ def cmd_delete(args):
     db = get_db()
     if len(args) >= 2:
         key = args[1]
+        old = db.execute(
+            "SELECT value FROM contexts WHERE project = ? AND key = ?", (project, key)
+        ).fetchone()
         db.execute(
             "DELETE FROM contexts WHERE project = ? AND key = ?", (project, key)
         )
+        if old:
+            _record_ctx_history(db, project, "delete", key, old["value"], None)
         db.commit()
         print(f"[{project}] {key} deleted.")
     else:
+        # Record all deletions before wiping
+        rows = db.execute(
+            "SELECT key, value FROM contexts WHERE project = ?", (project,)
+        ).fetchall()
+        for row in rows:
+            _record_ctx_history(db, project, "delete", row["key"], row["value"], None)
         db.execute("DELETE FROM contexts WHERE project = ?", (project,))
         db.execute("DELETE FROM summaries WHERE project = ?", (project,))
         db.execute("DELETE FROM sessions WHERE name = ?", (project,))
         db.commit()
         print(f"Project '{project}' and all its data deleted.")
     db.close()
+
+
+def cmd_log(args):
+    """Show ctx context change history. Usage: ctx log <project> [--key <key>] [--limit N]"""
+    if len(args) < 1:
+        print("Usage: ctx log <project> [--key <key>] [--limit N]")
+        sys.exit(1)
+    project = args[0]
+    key_filter = None
+    limit = 30
+    i = 1
+    while i < len(args):
+        if args[i] == "--key" and i + 1 < len(args):
+            key_filter = args[i + 1]
+            i += 2
+        elif args[i] == "--limit" and i + 1 < len(args):
+            limit = int(args[i + 1])
+            i += 2
+        else:
+            i += 1
+
+    db = get_db()
+    if key_filter:
+        rows = db.execute(
+            """SELECT action, key, old_value, new_value, actor, created_at
+               FROM ctx_history WHERE project = ? AND key = ?
+               ORDER BY created_at DESC LIMIT ?""",
+            (project, key_filter, limit),
+        ).fetchall()
+    else:
+        rows = db.execute(
+            """SELECT action, key, old_value, new_value, actor, created_at
+               FROM ctx_history WHERE project = ?
+               ORDER BY created_at DESC LIMIT ?""",
+            (project, limit),
+        ).fetchall()
+    db.close()
+
+    if not rows:
+        print(f"No ctx history for '{project}'" + (f" key={key_filter}" if key_filter else "") + ".")
+        return
+
+    print(f"CTX history for '{project}'" + (f" [{key_filter}]" if key_filter else "") + f" (last {len(rows)}):\n")
+    for row in reversed(rows):
+        ts = row["created_at"][:16]
+        action = row["action"].upper()
+        actor = f" [{row['actor']}]" if row["actor"] != "user" else ""
+        print(f"  {ts}  {action:8s}  [{row['key']}]{actor}")
+        if row["action"] in ("update", "append") and row["old_value"]:
+            old_preview = row["old_value"].replace("\n", "↵")[:80]
+            new_preview = (row["new_value"] or "").replace("\n", "↵")[:80]
+            print(f"           old: {old_preview}{'…' if len(row['old_value']) > 80 else ''}")
+            print(f"           new: {new_preview}{'…' if len((row['new_value'] or '')) > 80 else ''}")
+        elif row["action"] == "create" and row["new_value"]:
+            new_preview = row["new_value"].replace("\n", "↵")[:80]
+            print(f"           val: {new_preview}{'…' if len(row['new_value']) > 80 else ''}")
+        elif row["action"] == "delete" and row["old_value"]:
+            old_preview = row["old_value"].replace("\n", "↵")[:80]
+            print(f"           was: {old_preview}{'…' if len(row['old_value']) > 80 else ''}")
+
+
+def cmd_log_rules(args):
+    """Show rules change history. Usage: ctx log-rules <project> [--limit N]"""
+    if len(args) < 1:
+        print("Usage: ctx log-rules <project> [--limit N]")
+        sys.exit(1)
+    project = args[0]
+    limit = 50
+    if "--limit" in args:
+        idx = args.index("--limit")
+        if idx + 1 < len(args):
+            limit = int(args[idx + 1])
+
+    db = get_db()
+    rows = db.execute(
+        """SELECT action, rule, actor, created_at
+           FROM rules_history WHERE project = ?
+           ORDER BY created_at DESC LIMIT ?""",
+        (project, limit),
+    ).fetchall()
+    db.close()
+
+    if not rows:
+        print(f"No rules history for '{project}'.")
+        return
+
+    print(f"Rules history for '{project}' (last {len(rows)}):\n")
+    for row in reversed(rows):
+        ts = row["created_at"][:16]
+        action = row["action"].upper()
+        actor = f" [{row['actor']}]" if row["actor"] != "user" else ""
+        print(f"  {ts}  {action:8s}{actor}  {row['rule']}")
+
+
+def cmd_restore(args):
+    """Restore a ctx entry to a previous value from history.
+    Usage: ctx restore <project> <key> [--step N]
+      --step N  how many versions back to restore (default: 1 = last change)
+    Lists available versions if no --step given.
+    """
+    if len(args) < 2:
+        print("Usage: ctx restore <project> <key> [--step N]")
+        sys.exit(1)
+    project, key = args[0], args[1]
+    step = None
+    if "--step" in args:
+        idx = args.index("--step")
+        if idx + 1 < len(args):
+            step = int(args[idx + 1])
+
+    db = get_db()
+    rows = db.execute(
+        """SELECT id, action, old_value, new_value, created_at
+           FROM ctx_history WHERE project = ? AND key = ?
+           ORDER BY created_at DESC""",
+        (project, key),
+    ).fetchall()
+
+    if not rows:
+        print(f"No history for [{project}:{key}].")
+        db.close()
+        return
+
+    # Collect non-null old_values as restore candidates (each represents a prior state)
+    versions = []
+    for row in rows:
+        if row["old_value"] is not None:
+            versions.append((row["created_at"][:16], row["old_value"], row["action"]))
+
+    if not versions:
+        print(f"No restorable versions for [{project}:{key}] (only one version ever set).")
+        db.close()
+        return
+
+    if step is None:
+        # List available versions
+        current = db.execute(
+            "SELECT value FROM contexts WHERE project = ? AND key = ?", (project, key)
+        ).fetchone()
+        print(f"Restorable versions for [{project}:{key}]:\n")
+        if current:
+            print(f"  [current]  {current['value'].replace(chr(10), '↵')[:80]}")
+        for i, (ts, val, action) in enumerate(versions, 1):
+            preview = val.replace("\n", "↵")[:80]
+            print(f"  [--step {i}]  {ts}  ({action})  {preview}{'…' if len(val) > 80 else ''}")
+        print(f"\nTo restore: ctx restore {project} {key} --step <N>")
+        db.close()
+        return
+
+    if step < 1 or step > len(versions):
+        print(f"Invalid step {step}. Available: 1..{len(versions)}")
+        db.close()
+        sys.exit(1)
+
+    ts, restore_value, action = versions[step - 1]
+    # Confirm
+    preview = restore_value.replace("\n", "↵")[:120]
+    print(f"Restore [{project}:{key}] to version from {ts}:")
+    print(f"  {preview}{'…' if len(restore_value) > 120 else ''}")
+    try:
+        answer = input("Confirm? [y/N] ").strip().lower()
+    except EOFError:
+        answer = "n"
+    if answer not in ("y", "yes"):
+        print("Cancelled.")
+        db.close()
+        return
+
+    current = db.execute(
+        "SELECT value FROM contexts WHERE project = ? AND key = ?", (project, key)
+    ).fetchone()
+    old_value = current["value"] if current else None
+
+    db.execute(
+        """INSERT INTO contexts (project, key, value, updated_at)
+           VALUES (?, ?, ?, datetime('now'))
+           ON CONFLICT(project, key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at""",
+        (project, key, restore_value),
+    )
+    _record_ctx_history(db, project, "restore", key, old_value, restore_value)
+    db.commit()
+    db.close()
+    print(f"[{project}] {key} restored to version from {ts}.")
 
 
 def cmd_export(args):
@@ -429,8 +891,12 @@ COMMANDS = {
     "set": cmd_set,
     "append": cmd_append,
     "shared": cmd_shared,
+    "rules": cmd_rules,
     "summary": cmd_summary,
     "history": cmd_history,
+    "log": cmd_log,
+    "log-rules": cmd_log_rules,
+    "restore": cmd_restore,
     "search": cmd_search,
     "list": cmd_list,
     "delete": cmd_delete,
@@ -441,17 +907,22 @@ COMMANDS = {
 def print_help():
     print("ctx — Cross-session context manager for Claude Code\n")
     print("Commands:")
-    print("  init <project> <desc> [dir]   Register a new project")
-    print("  get <project> [--shared]      Load project context (optionally with shared)")
-    print("  set <project> <key> <value>   Set project context entry")
-    print("  append <project> <key> <val>  Append to existing entry")
-    print("  shared get|set|delete         Manage shared context")
-    print("  summary <project> <text>      Save session work summary")
-    print("  history <project> [limit]     Show session history")
-    print("  search <query>                Full-text search across everything")
-    print("  list                          List all projects")
-    print("  delete <project> [key]        Delete project or entry")
-    print("  export                        Export all data as JSON")
+    print("  init <project> <desc> [dir]      Register a new project")
+    print("  get <project> [--shared]         Load project context (optionally with shared)")
+    print("  set <project> <key> <value>      Set project context entry")
+    print("  append <project> <key> <val>     Append to existing entry")
+    print("  shared get|set|delete            Manage shared context")
+    print("  rules list|add|remove|enable|disable|config|inject")
+    print("                                   Manage per-project injection rules")
+    print("  summary <project> <text>         Save session work summary")
+    print("  history <project> [limit]        Show session summaries history")
+    print("  log <project> [--key k] [--limit N]  Show ctx change history")
+    print("  log-rules <project> [--limit N]  Show rules change history")
+    print("  restore <project> <key> [--step N]   Restore ctx entry to prior version")
+    print("  search <query>                   Full-text search across everything")
+    print("  list                             List all projects")
+    print("  delete <project> [key]           Delete project or entry")
+    print("  export                           Export all data as JSON")
 
 
 if __name__ == "__main__":
