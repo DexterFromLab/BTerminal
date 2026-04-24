@@ -116,14 +116,17 @@
   "extensions": {
     "latex-document-skill": {
       "repo":          "https://github.com/ndpvt-web/latex-document-skill",
-      "version":       "latest",
+      "version":       "3cd9f27",
       "bterminal_min": "1.0.0",
       "install_dir":   "~/.local/share/bterminal/extensions/latex-document-skill",
       "skill_entry":   "SKILL.md",
+      "skill_link":    "~/.claude/commands/latex.md",
       "type":          "skill-suite",
       "optional":      true,
+      "installed":     true,
       "description":   "Complete LaTeX workflow: 27 templates, compilation, PDF ops, format conversion",
-      "additional_tools": ["texlive", "latexmk", "poppler-utils", "pandoc"]
+      "additional_tools": ["texlive", "latexmk", "poppler-utils", "pandoc"],
+      "install_note":  "git clone repo to install_dir, symlink SKILL.md to skill_link"
     }
   }
 }
