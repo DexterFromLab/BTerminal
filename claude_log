@@ -1,0 +1,356 @@
+#!/usr/bin/env python3
+"""
+claude_log — Claude Code session log collector and parser.
+
+Copies JSONL session logs from ~/.claude/projects/ into <project_dir>/claude_log/,
+maintains retention (last 30 sessions), and provides a readable parse view.
+
+Usage: claude_log <command> [args]
+"""
+
+import json
+import os
+import re
+import sys
+import shutil
+from datetime import datetime, timezone
+from pathlib import Path
+
+CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
+LOG_SUBDIR = "claude_log"
+RETENTION = 30
+
+
+# ─── Helpers ────────────────────────────────────────────────────────────────
+
+def _project_key(project_dir: str) -> str:
+    """Convert project_dir to the key used by Claude Code in ~/.claude/projects/."""
+    path = str(Path(project_dir).resolve()).rstrip("/")
+    return re.sub(r"[^a-zA-Z0-9-]", "-", path)
+
+
+def _find_jsonl(project_dir: str, after: float | None = None) -> Path | None:
+    """Find the most recent JSONL for project_dir, optionally newer than `after` (epoch)."""
+    key = _project_key(project_dir)
+    pattern_dir = CLAUDE_PROJECTS_DIR / key
+    if not pattern_dir.exists():
+        return None
+    files = sorted(pattern_dir.glob("*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True)
+    if not files:
+        return None
+    if after is not None:
+        recent = [f for f in files if f.stat().st_mtime >= after]
+        return recent[0] if recent else files[0]
+    return files[0]
+
+
+def _log_dir(project_dir: str) -> Path:
+    return Path(project_dir) / LOG_SUBDIR
+
+
+def _apply_retention(log_dir: Path):
+    """Keep only the RETENTION newest .jsonl files in log_dir."""
+    files = sorted(log_dir.glob("*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True)
+    for old in files[RETENTION:]:
+        old.unlink()
+
+
+# ─── Commands ────────────────────────────────────────────────────────────────
+
+def cmd_collect(args):
+    """
+    Collect the current Claude Code session JSONL into <project_dir>/claude_log/.
+    Usage: claude_log collect <project_dir> [<jsonl_path>]
+      project_dir  — absolute path to the project
+      jsonl_path   — optional: explicit JSONL to copy (if omitted, auto-detected)
+    """
+    if len(args) < 1:
+        print("Usage: claude_log collect <project_dir> [<jsonl_path>]")
+        sys.exit(1)
+
+    project_dir = args[0]
+    explicit_jsonl = Path(args[1]) if len(args) >= 2 else None
+
+    src = explicit_jsonl or _find_jsonl(project_dir)
+    if src is None or not src.exists():
+        print(f"No JSONL found for {project_dir}", file=sys.stderr)
+        sys.exit(1)
+
+    log_dir = _log_dir(project_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    # Name: <iso-date>-<uuid>.jsonl (date from file mtime for stable sort)
+    mtime = datetime.fromtimestamp(src.stat().st_mtime, tz=timezone.utc)
+    dest_name = f"{mtime.strftime('%Y%m%dT%H%M%S')}-{src.stem}.jsonl"
+    dest = log_dir / dest_name
+
+    if dest.exists():
+        print(f"Already collected: {dest.name}")
+        return
+
+    shutil.copy2(src, dest)
+    _apply_retention(log_dir)
+    print(f"Collected: {dest.name}")
+
+
+def cmd_list(args):
+    """
+    List collected session logs for a project.
+    Usage: claude_log list <project_dir>
+    """
+    if len(args) < 1:
+        print("Usage: claude_log list <project_dir>")
+        sys.exit(1)
+
+    log_dir = _log_dir(args[0])
+    if not log_dir.exists():
+        print("No sessions collected yet.")
+        return
+
+    files = sorted(log_dir.glob("*.jsonl"), key=lambda f: f.stat().st_mtime)
+    if not files:
+        print("No sessions collected yet.")
+        return
+
+    print(f"Collected sessions in {log_dir} ({len(files)}/{RETENTION}):")
+    for f in files:
+        size_kb = f.stat().st_size // 1024
+        mtime = datetime.fromtimestamp(f.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+        print(f"  {mtime}  {f.name}  ({size_kb} KB)")
+
+
+def cmd_parse(args):
+    """
+    Parse a JSONL file to readable conversation format.
+    Usage: claude_log parse <jsonl_path> [--limit N]
+    """
+    if len(args) < 1:
+        print("Usage: claude_log parse <jsonl_path> [--limit N]")
+        sys.exit(1)
+
+    path = Path(args[0])
+    limit = None
+    if "--limit" in args:
+        idx = args.index("--limit")
+        if idx + 1 < len(args):
+            limit = int(args[idx + 1])
+
+    if not path.exists():
+        print(f"File not found: {path}", file=sys.stderr)
+        sys.exit(1)
+
+    messages = _parse_jsonl(path)
+    if limit:
+        messages = messages[-limit:]
+
+    for msg in messages:
+        _print_message(msg)
+
+
+def cmd_show(args):
+    """
+    Show the latest (or Nth most recent) collected session for a project.
+    Usage: claude_log show <project_dir> [N] [--limit M]
+    """
+    if len(args) < 1:
+        print("Usage: claude_log show <project_dir> [N] [--limit M]")
+        sys.exit(1)
+
+    log_dir = _log_dir(args[0])
+    if not log_dir.exists():
+        print("No sessions collected yet.")
+        return
+
+    files = sorted(log_dir.glob("*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True)
+    if not files:
+        print("No sessions collected yet.")
+        return
+
+    n = 1
+    limit = None
+    rest = args[1:]
+    i = 0
+    while i < len(rest):
+        if rest[i] == "--limit" and i + 1 < len(rest):
+            limit = int(rest[i + 1])
+            i += 2
+        else:
+            try:
+                n = int(rest[i])
+            except ValueError:
+                pass
+            i += 1
+
+    if n > len(files):
+        print(f"Only {len(files)} session(s) available.")
+        sys.exit(1)
+
+    path = files[n - 1]
+    print(f"=== Session: {path.name} ===\n")
+    messages = _parse_jsonl(path)
+    if limit:
+        messages = messages[-limit:]
+    for msg in messages:
+        _print_message(msg)
+
+
+# ─── JSONL parser ────────────────────────────────────────────────────────────
+
+def _parse_jsonl(path: Path) -> list[dict]:
+    """Extract user/assistant/tool_use messages from a Claude Code JSONL file."""
+    messages = []
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                role = entry.get("type")
+                msg = entry.get("message", {})
+                if not isinstance(msg, dict):
+                    continue
+
+                msg_role = msg.get("role")
+                timestamp = entry.get("timestamp", "")
+
+                if msg_role == "user":
+                    content = msg.get("content", "")
+                    text = _extract_text(content)
+                    if text:
+                        messages.append({
+                            "role": "user",
+                            "text": text,
+                            "timestamp": timestamp,
+                        })
+
+                elif msg_role == "assistant":
+                    content = msg.get("content", [])
+                    if isinstance(content, list):
+                        for item in content:
+                            if not isinstance(item, dict):
+                                continue
+                            if item.get("type") == "text":
+                                text = item.get("text", "").strip()
+                                if text:
+                                    messages.append({
+                                        "role": "assistant",
+                                        "text": text,
+                                        "timestamp": timestamp,
+                                    })
+                            elif item.get("type") == "tool_use":
+                                messages.append({
+                                    "role": "tool_use",
+                                    "tool": item.get("name", "?"),
+                                    "input": item.get("input", {}),
+                                    "timestamp": timestamp,
+                                })
+                    elif isinstance(content, str) and content.strip():
+                        messages.append({
+                            "role": "assistant",
+                            "text": content.strip(),
+                            "timestamp": timestamp,
+                        })
+    except OSError as e:
+        print(f"Error reading {path}: {e}", file=sys.stderr)
+
+    return messages
+
+
+def _extract_text(content) -> str:
+    """Extract plain text from a message content field (str or list)."""
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text":
+                parts.append(item.get("text", "").strip())
+            elif isinstance(item, str):
+                parts.append(item.strip())
+        return "\n".join(p for p in parts if p)
+    return ""
+
+
+def _print_message(msg: dict):
+    role = msg["role"]
+    ts = msg.get("timestamp", "")
+    if ts:
+        try:
+            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            ts = dt.strftime("%H:%M:%S")
+        except ValueError:
+            ts = ""
+
+    if role == "user":
+        header = f"[USER {ts}]" if ts else "[USER]"
+        print(f"\n{header}")
+        print(msg["text"][:500] + ("…" if len(msg["text"]) > 500 else ""))
+
+    elif role == "assistant":
+        header = f"[ASSISTANT {ts}]" if ts else "[ASSISTANT]"
+        print(f"\n{header}")
+        print(msg["text"][:800] + ("…" if len(msg["text"]) > 800 else ""))
+
+    elif role == "tool_use":
+        tool = msg["tool"]
+        inp = msg["input"]
+        summary = _tool_summary(tool, inp)
+        header = f"[TOOL {ts}]" if ts else "[TOOL]"
+        print(f"\n{header} {tool}: {summary}")
+
+
+def _tool_summary(tool: str, inp: dict) -> str:
+    """One-line summary of a tool call."""
+    if tool == "Bash":
+        cmd = inp.get("command", "")
+        return cmd[:120] + ("…" if len(cmd) > 120 else "")
+    if tool in ("Read", "Write", "Edit"):
+        return inp.get("file_path", "")
+    if tool == "Agent":
+        return inp.get("description", "")[:80]
+    if tool == "WebFetch":
+        return inp.get("url", "")[:80]
+    if tool == "WebSearch":
+        return inp.get("query", "")[:80]
+    # Generic: show first key=value
+    for k, v in list(inp.items())[:2]:
+        return f"{k}={str(v)[:60]}"
+    return ""
+
+
+# ─── Main ────────────────────────────────────────────────────────────────────
+
+COMMANDS = {
+    "collect": cmd_collect,
+    "list":    cmd_list,
+    "parse":   cmd_parse,
+    "show":    cmd_show,
+}
+
+
+def print_help():
+    print("claude_log — Claude Code session log collector\n")
+    print("Commands:")
+    print("  collect <project_dir> [<jsonl>]   Copy current session JSONL to claude_log/")
+    print("  list <project_dir>                List collected sessions")
+    print("  parse <jsonl_path> [--limit N]    Parse JSONL to readable conversation")
+    print("  show <project_dir> [N] [--limit M] Show Nth most recent session")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help", "help"):
+        print_help()
+        sys.exit(0)
+
+    cmd = sys.argv[1]
+    if cmd not in COMMANDS:
+        print(f"Unknown command: {cmd}")
+        print_help()
+        sys.exit(1)
+
+    COMMANDS[cmd](sys.argv[2:])

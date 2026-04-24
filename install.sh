@@ -172,7 +172,7 @@ fi
 
 echo "[3/7] Checking system tools..."
 
-check_tool() {  # check_tool <cmd> <apt_pkg> <required: true|false> <label>
+check_tool() {  # check_tool <cmd> <apt_pkg> <required: true|auto|false> <label>
     local cmd="$1" pkg="$2" required="$3" label="$4"
     if command -v "$cmd" &>/dev/null; then
         ok "$label"
@@ -183,6 +183,13 @@ check_tool() {  # check_tool <cmd> <apt_pkg> <required: true|false> <label>
         else
             fail "$label required but could not be installed — apt install $pkg"
         fi
+    elif [[ "$required" == "auto" ]]; then
+        info "$label not found — installing $pkg..."
+        if apt_install "$pkg"; then
+            ok "$label (installed)"
+        else
+            warn "$label could not be installed — apt install $pkg"
+        fi
     else
         warn "$label not found (optional) — apt install $pkg"
     fi
@@ -192,11 +199,11 @@ check_tool git        git             true  "git"
 check_tool git-lfs    git-lfs         false "git-lfs"
 check_tool ssh        openssh-client  true  "ssh"
 check_tool xdg-open   xdg-utils       false "xdg-open"
-check_tool meld       meld            false "meld"
-check_tool pdflatex   texlive-latex-extra false "pdflatex (LaTeX)"
-check_tool latexmk    latexmk         false "latexmk"
-check_tool pdftoppm   poppler-utils   false "poppler-utils (PDF preview)"
-check_tool pandoc     pandoc          false "pandoc"
+check_tool meld       meld            auto  "meld"
+check_tool pdflatex   texlive-latex-extra auto "pdflatex (LaTeX)"
+check_tool latexmk    latexmk         auto  "latexmk"
+check_tool pdftoppm   poppler-utils   auto  "poppler-utils (PDF preview)"
+check_tool pandoc     pandoc          auto  "pandoc"
 
 if command -v git-lfs &>/dev/null; then
     git lfs install --skip-repo >/dev/null 2>&1 || true
