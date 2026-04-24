@@ -2377,6 +2377,7 @@ class TerminalTab(Gtk.Box):
                 self._task_project = _resolve_ctx_project_name(project_dir)
                 self._stats_bar = SessionStatsBar(project_dir)
                 self.pack_end(self._stats_bar, False, False, 0)
+                Path(project_dir, "claude_log").mkdir(parents=True, exist_ok=True)
             self.terminal.connect("contents-changed", self._on_contents_changed_tasks)
 
         self.show_all()
