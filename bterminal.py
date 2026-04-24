@@ -10186,47 +10186,104 @@ def _restart_bterminal():
 
 def _do_update(window):
     """Pull changes and run install.sh in a background thread."""
-    spinner_dialog = Gtk.MessageDialog(
-        transient_for=window,
-        modal=True,
-        message_type=Gtk.MessageType.INFO,
-        text="Aktualizacja w toku...",
-    )
-    spinner_dialog.format_secondary_text("Pobieranie i instalacja nowej wersji.")
-    spinner_dialog.set_deletable(False)
-    spinner = Gtk.Spinner()
-    spinner.start()
-    spinner_dialog.get_content_area().pack_start(spinner, False, False, 10)
-    spinner_dialog.show_all()
+    dialog = Gtk.Dialog(title="Aktualizacja BTerminal", transient_for=window, modal=True)
+    dialog.set_default_size(480, 220)
+    dialog.set_resizable(False)
+    dialog.set_deletable(False)
+
+    vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+    vbox.set_border_width(20)
+
+    title_lbl = Gtk.Label()
+    title_lbl.set_markup("<b>Aktualizacja w toku…</b>")
+    title_lbl.set_halign(Gtk.Align.START)
+    vbox.pack_start(title_lbl, False, False, 0)
+
+    progress = Gtk.ProgressBar()
+    progress.set_pulse_step(0.08)
+    vbox.pack_start(progress, False, False, 0)
+
+    log_lbl = Gtk.Label(label="")
+    log_lbl.set_xalign(0)
+    log_lbl.set_halign(Gtk.Align.START)
+    log_lbl.set_line_wrap(False)
+    log_lbl.set_ellipsize(3)  # PANGO_ELLIPSIZE_END
+    log_lbl.get_style_context().add_class("dim-label")
+    vbox.pack_start(log_lbl, False, False, 0)
+
+    dialog.get_content_area().pack_start(vbox, True, True, 0)
+    dialog.show_all()
+
+    # Pulse the progress bar every 80 ms
+    pulse_source = GLib.timeout_add(80, lambda: (progress.pulse(), True)[1])
+
+    log_lines: list[str] = []
+
+    def _append_line(line: str):
+        line = line.rstrip()
+        if not line:
+            return False
+        log_lines.append(line)
+        log_lbl.set_text(log_lines[-1])
+        return False
+
+    spinner_dialog = dialog  # keep alias for _update_done compatibility
 
     def _run():
+        stderr_buf: list[str] = []
         try:
             result = subprocess.run(
                 ["git", "pull", "origin", "master"],
                 cwd=REPO_DIR, capture_output=True, text=True, timeout=30,
             )
+            GLib.idle_add(_append_line, "git pull: " + ("OK" if result.returncode == 0 else "failed"))
             if result.returncode != 0:
-                GLib.idle_add(_update_done, window, spinner_dialog,
+                GLib.idle_add(GLib.source_remove, pulse_source)
+                GLib.idle_add(_update_done, window, dialog,
                               f"git pull failed:\n{result.stderr}")
                 return
-            install = subprocess.run(
-                ["bash", os.path.join(REPO_DIR, "install.sh"),
-                 "--no-sudo"],
-                capture_output=True, text=True, timeout=60,
+
+            proc = subprocess.Popen(
+                ["bash", os.path.join(REPO_DIR, "install.sh"), "--no-sudo"],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, bufsize=1,
             )
-            if install.returncode != 0:
-                if "BTERMINAL_ROLLBACK_OK" in install.stderr:
+            import select as _select
+            while True:
+                reads = [proc.stdout, proc.stderr]
+                ready, _, _ = _select.select(reads, [], [], 0.1)
+                for fd in ready:
+                    line = fd.readline()
+                    if not line:
+                        continue
+                    if fd is proc.stderr:
+                        stderr_buf.append(line.rstrip())
+                    else:
+                        GLib.idle_add(_append_line, line)
+                if proc.poll() is not None:
+                    # drain remaining
+                    for line in proc.stdout:
+                        GLib.idle_add(_append_line, line)
+                    for line in proc.stderr:
+                        stderr_buf.append(line.rstrip())
+                    break
+
+            GLib.idle_add(GLib.source_remove, pulse_source)
+            stderr_str = "\n".join(stderr_buf)
+            if proc.returncode != 0:
+                if "BTERMINAL_ROLLBACK_OK" in stderr_str:
                     msg = ("Nowa wersja BTerminal nie mogła zostać zainstalowana.\n\n"
                            "Poprzednia wersja została automatycznie przywrócona — "
                            "BTerminal działa normalnie.")
                 else:
                     msg = ("Instalacja nie powiodła się i nie ma poprzedniej wersji do przywrócenia.\n\n"
-                           f"Szczegóły:\n{install.stderr or install.stdout}")
-                GLib.idle_add(_update_done, window, spinner_dialog, msg)
+                           f"Szczegóły:\n{stderr_str or ''.join(log_lines[-5:])}")
+                GLib.idle_add(_update_done, window, dialog, msg)
                 return
-            GLib.idle_add(_update_done, window, spinner_dialog, None)
+            GLib.idle_add(_update_done, window, dialog, None)
         except Exception as e:
-            GLib.idle_add(_update_done, window, spinner_dialog, str(e))
+            GLib.idle_add(GLib.source_remove, pulse_source)
+            GLib.idle_add(_update_done, window, dialog, str(e))
 
     threading.Thread(target=_run, daemon=True).start()
 
