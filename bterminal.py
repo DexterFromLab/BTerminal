@@ -10068,7 +10068,7 @@ def _prompt_update(window, log, errata=None):
     vbox.pack_start(title_lbl, False, False, 0)
 
     if errata:
-        latest = errata[-1]
+        latest = errata[0]
         admin_msg = latest.get("message", "").strip()
         if admin_msg:
             sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
@@ -10133,7 +10133,7 @@ def _show_errata_dialog(window, errata):
         empty.set_halign(Gtk.Align.START)
         vbox.pack_start(empty, False, False, 0)
     else:
-        for entry in reversed(errata):
+        for entry in errata:
             date = entry.get("date", "")
             message = entry.get("message", "").strip()
             changes = entry.get("changes", [])
