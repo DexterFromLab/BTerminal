@@ -2,7 +2,7 @@
 
 A GTK 3 terminal emulator built for developers who work with SSH servers and Claude Code. Combines session management, macro automation, a persistent context database, multi-model AI consultation, task orchestration, git awareness, a skills library and a global rules system in a single window. Ships with Catppuccin Mocha (dark) and Latte (light) themes.
 
-**Current release: v1.1.1**
+**Current release: v1.1.7**
 
 ![BTerminal](screenshot.png)
 
@@ -114,7 +114,7 @@ The sidebar **Files** tab is a project file browser similar to the IntelliJ proj
 | Copy Name | Filename only |
 | Paste Path to Terminal | Types the path into the active terminal |
 
-Requires `meld` — installed automatically by `install.sh` if missing (`sudo apt install meld`).
+Requires `meld` — installed automatically by `install.sh`.
 
 ### Extensions
 
@@ -126,14 +126,7 @@ Extensions are full tools or skill suites installed into `~/.local/share/btermin
 |-----------|-------------|
 | `latex-document-skill` | 27 LaTeX templates, compilation, PDF operations, format conversion — `/latex` skill |
 
-To install the LaTeX extension:
-
-```bash
-git clone https://github.com/ndpvt-web/latex-document-skill \
-    ~/.local/share/bterminal/extensions/latex-document-skill
-ln -s ~/.local/share/bterminal/extensions/latex-document-skill/SKILL.md \
-    ~/.claude/commands/latex.md
-```
+The LaTeX extension is installed and pinned to a verified commit automatically by `install.sh`. No manual steps needed.
 
 ### Consult (AI Models)
 
@@ -153,13 +146,13 @@ The sidebar **Consult** tab manages API keys, enables/disables individual models
 
 Adversarial debate across multiple AI models with four roles: Analyst, Advocate, Critic and Arbiter. Configurable round count (1-6), single-pass mode, and per-project presets.
 
+**Analyst** and **Arbiter** are always locked to `claude-code/opus` (full project file access + strongest model). **Advocate** and **Critic** are user-selectable OpenRouter models.
+
 ```bash
 consult debate "problem"
 consult debate "problem" \
-  --analyst claude-code/opus \
   --advocate openai/gpt-5-codex \
-  --critic deepseek/deepseek-r1 \
-  --arbiter claude-code/opus
+  --critic deepseek/deepseek-r1
 ```
 
 ### Task Management
@@ -195,6 +188,8 @@ Full plugin API and a minimal example: [docs/plugin-spec.md](docs/plugin-spec.md
 
 On startup BTerminal checks `origin/master` for new commits. If an update is available it shows a prompt with the new commit list and admin message from `errata.json`. One click pulls + reinstalls and restarts automatically.
 
+The update dialog shows a **live progress bar** and the current install step. If installation fails, the previous version is **automatically restored** — BTerminal continues to work and shows a user-friendly error message.
+
 ### Theme
 
 Toggle between Catppuccin Mocha (dark) and Latte (light) with the sun/moon button. The switch re-colors the terminal palette, sidebar, tabs, dialogs and scrollbars live without restarting.
@@ -222,7 +217,7 @@ The installer reads `defaults/dependencies.json` and enforces version requiremen
 
 1. Verify Python 3.10+, Node.js 22+, npm 10+ — upgrade Node via NodeSource if needed
 2. Install or update Claude Code CLI via npm; create a stable symlink at `~/.local/bin/claude`
-3. Install system tools: `git`, `ssh`, optionally `git-lfs` and `xdg-open`
+3. Install system tools: `git`, `ssh`, `meld`, `pandoc`, LaTeX tools (`pdflatex`, `latexmk`, `poppler-utils`) — all installed automatically via apt if missing
 4. Install GTK bindings: `python3-gi`, `gir1.2-gtk-3.0`, `gir1.2-vte-2.91`
 5. Copy `bterminal.py`, `ctx`, `consult`, `tasks`, `claude_log`, `memory_wizard` to `~/.local/share/bterminal/`
 6. Create live symlinks for `defaults/`, `README.md`, `VERSION` — `git pull` takes effect immediately, no reinstall needed
@@ -230,7 +225,7 @@ The installer reads `defaults/dependencies.json` and enforces version requiremen
 8. Create symlinks in `~/.local/bin/`
 9. Initialize the context database, write a desktop entry and update the icon cache
 
-On critical errors the installer exits with code 1 and writes a summary to `~/.config/bterminal/install_errors.json` (shown as a dialog on next BTerminal startup).
+On critical errors the installer exits with code 1 and writes a summary to `~/.config/bterminal/install_errors.json` (shown as a dialog on next BTerminal startup). If an update fails mid-way, the previous working installation is automatically restored.
 
 Use `./install.sh --no-sudo` for a non-root install (sets npm prefix to `~/.npm-global`).
 

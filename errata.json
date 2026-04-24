@@ -1,6 +1,13 @@
 [
   {
     "date": "2026-04-24",
+    "message": "BTerminal v1.1.8 — zaktualizowane README. Dokumentacja odzwierciedla zmiany od v1.1.1: Tribunal, instalator z rollbackiem, auto-instalacja zależności, belka postępu aktualizacji.",
+    "changes": [
+      "docs: README zaktualizowany do v1.1.7 — Tribunal, rollback, auto-deps, update dialog"
+    ]
+  },
+  {
+    "date": "2026-04-24",
     "message": "BTerminal v1.1.7 — okno aktualizacji pokazuje teraz belkę postępu i bieżący krok instalacji. Widać co robi instalator zamiast pustego spinnera.",
     "changes": [
       "feat: belka postępu (pulse) w oknie aktualizacji",
