@@ -2,7 +2,7 @@
 
 A GTK 3 terminal emulator built for developers who work with SSH servers and Claude Code. Combines session management, macro automation, a persistent context database, multi-model AI consultation, task orchestration, git awareness, a skills library and a global rules system in a single window. Ships with Catppuccin Mocha (dark) and Latte (light) themes.
 
-**Current release: v1.0.0**
+**Current release: v1.1.0**
 
 ![BTerminal](screenshot.png)
 
@@ -87,6 +87,34 @@ The sidebar **Skills** tab lists all installed Claude Code skills (markdown file
 | `/check-deps` | Check all BTerminal dependencies against `dependencies.json`, report available updates |
 
 Skills are never overwritten on update — user edits are preserved. New bundled skills are added on reinstall only if the file does not already exist.
+
+### Files
+
+The sidebar **Files** tab is a project file browser similar to the IntelliJ project tree.
+
+- **Project dropdown** — lists all saved Claude Code sessions with a `project_dir`; defaults to the active Claude Code tab. Switching the dropdown pins the tree to that project.
+- **Auto git root** — if the session's project directory is a generic subdirectory (`docs/`, `src/`, `tests/`, etc.), the panel automatically walks up to the nearest git root and shows the full project.
+- **Double-click a file** — opens a diff dialog in meld
+- **Double-click a directory** — expand / collapse
+
+**Diff dialog** (meld):
+- Dropdown with the last 10 commits (short hash + subject)
+- Text field for any custom ref: full hash, branch name, `HEAD~5`, etc.
+- Extracts the historical version via `git show` and opens `meld <old> <current>`
+
+**Right-click context menu:**
+
+| Option | Action |
+|--------|--------|
+| Open in Meld | Open file/directory directly in meld |
+| Diff with commit… | Show the diff dialog |
+| Open With ▸ | Submenu: Default App, VS Code, Zed, gedit, kate, Custom… |
+| Copy Path | Full absolute path to clipboard |
+| Copy Relative Path | Path relative to project root |
+| Copy Name | Filename only |
+| Paste Path to Terminal | Types the path into the active terminal |
+
+Requires `meld` — installed automatically by `install.sh` if missing (`sudo apt install meld`).
 
 ### Extensions
 
@@ -218,7 +246,7 @@ sudo apt install python3-gi gir1.2-gtk-3.0 gir1.2-vte-2.91
 bterminal
 ```
 
-The sidebar has seven built-in tabs: **Sessions**, **Ctx**, **Consult**, **Tasks**, **Memory**, **Skills** and **Plugins**. Claude Code tabs also get a **Git panel** on the right. Installed plugins can add their own sidebar tabs.
+The sidebar has eight built-in tabs: **Sessions**, **Ctx**, **Consult**, **Tasks**, **Memory**, **Skills**, **Files** and **Plugins**. Claude Code tabs also get a **Git panel** on the right. Installed plugins can add their own sidebar tabs.
 
 ## Keyboard Shortcuts
 

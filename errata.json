@@ -1,6 +1,19 @@
 [
   {
     "date": "2026-04-24",
+    "message": "BTerminal v1.1.0 — panel Files. Nowa zakładka w sidebarze pokazuje pliki projektu jak w IntelliJ: drzewo z katalogami, podgląd diff w meld z wyborem commita, menu kontekstowe z kopiowaniem ścieżek i otwieraniem w dowolnym programie. Zalecane: uruchom install.sh aby zaktualizować.",
+    "changes": [
+      "feat: panel Files — drzewo plików aktywnego projektu w sidebarze",
+      "feat: dropdown do wyboru projektu — lista zapisanych sesji Claude Code, domyślnie aktywna zakładka",
+      "feat: auto-wykrywanie git root — jeśli sesja wskazuje na podkatalog (np. docs/), panel pokaże cały projekt",
+      "feat: diff w meld — dwuklik otwiera dialog z dropdownem 10 ostatnich commitów i polem na własny hash/branch",
+      "feat: menu kontekstowe — Copy Path, Copy Relative Path, Copy Name, Paste Path to Terminal",
+      "feat: Open With ▸ — podmenu z Default App, VS Code, Zed, gedit, kate, Custom…",
+      "feat: meld dodany do instalatora (opcjonalna zależność)"
+    ]
+  },
+  {
+    "date": "2026-04-24",
     "message": "BTerminal v1.0.0 — pierwsze oficjalne wydanie. Dodano system globalnych reguł, panel Skills, rozszerzenia (latex-document-skill), nowy instalator z weryfikacją zależności, wersjonowanie oraz skill /check-deps. Zalecane: uruchom install.sh aby zaktualizować instalację i pobrać nowe skille.",
     "changes": [
       "feat: wersjonowanie v1.0.0 — plik VERSION, tytuł okna pokazuje wersję",
