@@ -8138,6 +8138,7 @@ class FilesPanel(Gtk.Box):
         self._tv.append_column(col)
 
         self._tv.connect("row-activated", self._on_row_activated)
+        self._tv.connect("button-press-event", self._on_button_press)
         self._tv.get_selection().connect("changed", self._on_selection_changed)
 
         tv_scroll = Gtk.ScrolledWindow()
@@ -8266,6 +8267,53 @@ class FilesPanel(Gtk.Box):
             subprocess.Popen(["meld", path])
         except Exception as e:
             show_error_dialog(self.app, f"Failed to open meld:\n{e}")
+
+    def _copy_to_clipboard(self, text: str):
+        Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).set_text(text, -1)
+
+    def _on_button_press(self, tv, event):
+        if event.button != 3:
+            return False
+        info = tv.get_path_at_pos(int(event.x), int(event.y))
+        if not info:
+            return False
+        tree_path, _col, _cx, _cy = info
+        tv.get_selection().select_path(tree_path)
+        it = self._store.get_iter(tree_path)
+        fpath = self._store.get_value(it, 1)
+        if not fpath or fpath == "__dummy__":
+            return False
+
+        rel = os.path.relpath(fpath, self._root_dir) if self._root_dir else fpath
+        name = os.path.basename(fpath)
+        is_dir = self._store.get_value(it, 2)
+
+        menu = Gtk.Menu()
+
+        def _item(label, cb):
+            it2 = Gtk.MenuItem(label=label)
+            it2.connect("activate", lambda _: cb())
+            menu.append(it2)
+
+        _item("Open in Meld",          lambda: self._open_with_meld(fpath))
+        menu.append(Gtk.SeparatorMenuItem())
+        _item("Copy Path",             lambda: self._copy_to_clipboard(fpath))
+        _item("Copy Relative Path",    lambda: self._copy_to_clipboard(rel))
+        _item("Copy Name",             lambda: self._copy_to_clipboard(name))
+        if not is_dir:
+            menu.append(Gtk.SeparatorMenuItem())
+            _item("Paste Path to Terminal", lambda: self._paste_to_terminal(fpath))
+
+        menu.show_all()
+        menu.popup_at_pointer(event)
+        return True
+
+    def _paste_to_terminal(self, path: str):
+        nb = self.app.notebook
+        tab = nb.get_nth_page(nb.get_current_page())
+        terminal = getattr(tab, "terminal", None)
+        if terminal:
+            terminal.feed_child((path + " ").encode())
 
 
 class PluginManagerPanel(Gtk.Box):
