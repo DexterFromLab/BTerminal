@@ -5,7 +5,7 @@
 # Changes take effect on the next rules injection.
 
 Nie commituj ani nie pushuj kodu bez wyraźnej prośby użytkownika.
-Przed użyciem `consult`, sprawdź dostępne modele: `consult models`. Używaj pełnych ID z prefixem providera, np. `google/gemini-2.5-pro` — nigdy nie skracaj.
+Przy wyborze modelu dla `consult -m <model>` używaj pełnych ID z prefixem providera (np. `google/gemini-2.5-pro`). Nigdy nie skracaj.
 Przy wykryciu błędu najpierw zidentyfikuj root cause (git log, grep, czytanie kodu) zanim zaproponujesz fix.
 Zawsze używaj w pierwszej kolejności narzędzi wbudowanych w BTerminal.
 Gdy użytkownik kilkukrotnie koryguje Cię w ten sam sposób — uruchom /reflect zamiast kontynuować.

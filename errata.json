@@ -1,6 +1,15 @@
 [
   {
     "date": "2026-04-24",
+    "message": "BTerminal — poprawka reguł i narzędzia Consult. Analyst i Arbiter w Tribunal są teraz zawsze zablokowane na claude-code/opus. Reguła o sprawdzaniu modeli zawężona — dotyczy tylko wyboru modelu przez -m.",
+    "changes": [
+      "fix: Tribunal — Analyst i Arbiter zablokowane na claude-code/opus w GUI i CLI (jedyny model z dostępem do plików projektu)",
+      "fix: global_rules.txt — reguła o modelach consult zawężona: dotyczy tylko `consult -m`, nie każdego użycia",
+      "fix: CLAUDE.md — zaktualizowana dokumentacja Tribunal (flagi --analyst/--arbiter usunięte z CLI)"
+    ]
+  },
+  {
+    "date": "2026-04-24",
     "message": "BTerminal v1.1.1 — latex-document-skill instaluje się teraz automatycznie i jest przypięty do konkretnego commita. Aktualizacja jest obsługiwana przez install.sh — nie trzeba nic robić ręcznie.",
     "changes": [
       "fix: latex-document-skill pinned do commita z dependencies.json — user zawsze dostaje zweryfikowaną wersję",
