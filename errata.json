@@ -1,6 +1,13 @@
 [
   {
     "date": "2026-04-24",
+    "message": "BTerminal v1.1.3 — katalog claude_log/ tworzony automatycznie przy starcie sesji Claude Code. Logi są widoczne w panelu Files od razu po otwarciu projektu.",
+    "changes": [
+      "fix: claude_log/ tworzony przy starcie taba Claude Code — nie dopiero po zamknięciu"
+    ]
+  },
+  {
+    "date": "2026-04-24",
     "message": "BTerminal v1.1.2 — poprawka reguł i narzędzia Consult. Analyst i Arbiter w Tribunal są teraz zawsze zablokowane na claude-code/opus. Reguła o sprawdzaniu modeli zawężona — dotyczy tylko wyboru modelu przez -m.",
     "changes": [
       "fix: Tribunal — Analyst i Arbiter zablokowane na claude-code/opus w GUI i CLI (jedyny model z dostępem do plików projektu)",
