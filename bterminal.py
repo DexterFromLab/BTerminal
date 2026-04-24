@@ -10053,11 +10053,17 @@ def _prompt_update(window, log, errata=None):
         transient_for=window,
         modal=True,
     )
-    dialog.set_default_size(520, -1)
+    dialog.set_default_size(520, 380)
+    dialog.set_resizable(False)
     dialog.set_border_width(0)
 
     content = dialog.get_content_area()
     content.set_spacing(0)
+
+    # Fixed-height scrollable area
+    scroll = Gtk.ScrolledWindow()
+    scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+    scroll.set_border_width(0)
 
     vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
     vbox.set_border_width(20)
@@ -10089,7 +10095,8 @@ def _prompt_update(window, log, errata=None):
         log_lbl.set_selectable(True)
         vbox.pack_start(log_lbl, False, False, 0)
 
-    content.pack_start(vbox, True, True, 0)
+    scroll.add(vbox)
+    content.pack_start(scroll, True, True, 0)
     content.show_all()
 
     dialog.add_button("Pokaż erratę", _RESP_ERRATA)
