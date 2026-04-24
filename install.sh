@@ -1,8 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
-# BTerminal installer
-# Installs BTerminal + ctx (Claude Code context manager)
+# BTerminal installer / updater
+# Reads defaults/dependencies.json and enforces version requirements.
+# Exit code 1 = critical dependency error (shown as dialog in GUI auto-update).
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 INSTALL_DIR="$HOME/.local/share/bterminal"
@@ -11,148 +12,245 @@ CONFIG_DIR="$HOME/.config/bterminal"
 CTX_DIR="$HOME/.claude-context"
 ICON_DIR="$HOME/.local/share/icons/hicolor/scalable/apps"
 DESKTOP_DIR="$HOME/.local/share/applications"
+DEPS_JSON="$SCRIPT_DIR/defaults/dependencies.json"
+ERRORS_FILE="$CONFIG_DIR/install_errors.json"
 
 NO_SUDO=false
-if [[ "${1:-}" == "--no-sudo" ]]; then
-    NO_SUDO=true
-fi
+[[ "${1:-}" == "--no-sudo" ]] && NO_SUDO=true
 
 BTERMINAL_VERSION="$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo 'unknown')"
+
 echo "=== BTerminal Installer v${BTERMINAL_VERSION} ==="
 echo ""
 
-# ─── Claude Code ──────────────────────────────────────────────────────
+# ─── Helpers ───────────────────────────────────────────────────────────────
 
-echo "[1/6] Checking Claude Code..."
+ERRORS=()
+WARNINGS=()
 
-# Ensure ~/.local/bin exists early — we'll symlink claude here for a stable path
-mkdir -p "$BIN_DIR"
+ok()   { printf "  \033[32m✓\033[0m %s\n" "$*"; }
+warn() { printf "  \033[33m⚠\033[0m %s\n" "$*"; WARNINGS+=("$*"); }
+fail() { printf "  \033[31m✗\033[0m %s\n" "$*"; ERRORS+=("$*"); }
+info() { printf "    %s\n" "$*"; }
+
+# Returns 0 if version $1 >= $2 (dot-separated)
+ver_ge() {
+    python3 -c "
+a = tuple(int(x) for x in '$1'.split('.')[:3] if x.isdigit())
+b = tuple(int(x) for x in '$2'.split('.')[:3] if x.isdigit())
+exit(0 if a >= b else 1)
+" 2>/dev/null
+}
+
+apt_install() {
+    if [[ "$NO_SUDO" == true ]]; then
+        warn "Cannot install $* without sudo — run install.sh without --no-sudo"
+        return 1
+    fi
+    sudo apt-get install -y "$@" -qq
+}
+
+# Read a value from dependencies.json using python3
+dep_get() {  # dep_get <category> <name> <field>
+    python3 -c "
+import json, sys
+d = json.load(open('$DEPS_JSON'))
+val = d.get('$1', {}).get('$2', {}).get('$3', '')
+print(val)
+" 2>/dev/null || true
+}
+
+mkdir -p "$CONFIG_DIR"
+
+# ─── [1/7] Runtime: Python, Node, npm ─────────────────────────────────────
+
+echo "[1/7] Checking runtime..."
+
+# Python 3
+PY_VER="$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')" 2>/dev/null || echo '0.0.0')"
+PY_MIN="$(dep_get runtime python3 version | tr -d '>=')"
+if ver_ge "$PY_VER" "$PY_MIN"; then
+    ok "python3 $PY_VER (>= $PY_MIN required)"
+else
+    fail "python3 $PY_VER found, need >= $PY_MIN — upgrade Python manually (pyenv or system package)"
+fi
+
+# Node.js
+NODE_RAW="$(node --version 2>/dev/null | tr -d 'v' || echo '0.0.0')"
+NODE_MIN="$(dep_get runtime nodejs version | tr -d '>=')"
+if ver_ge "$NODE_RAW" "$NODE_MIN"; then
+    ok "node v$NODE_RAW (>= $NODE_MIN required)"
+else
+    info "node v$NODE_RAW found, need >= $NODE_MIN — upgrading via NodeSource..."
+    if [[ "$NO_SUDO" == true ]]; then
+        fail "Node.js $NODE_RAW < $NODE_MIN — re-run installer without --no-sudo to upgrade"
+    else
+        if command -v curl &>/dev/null; then
+            curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash -
+        fi
+        sudo apt-get install -y nodejs
+        NODE_RAW="$(node --version 2>/dev/null | tr -d 'v' || echo '0.0.0')"
+        if ver_ge "$NODE_RAW" "$NODE_MIN"; then
+            ok "node v$NODE_RAW (upgraded)"
+        else
+            fail "Node.js upgrade failed — version $NODE_RAW, need >= $NODE_MIN"
+        fi
+    fi
+fi
+
+# npm
+NPM_VER="$(npm --version 2>/dev/null || echo '0.0.0')"
+NPM_MIN="$(dep_get runtime npm version | tr -d '>=')"
+if ver_ge "$NPM_VER" "$NPM_MIN"; then
+    ok "npm $NPM_VER (>= $NPM_MIN required)"
+else
+    info "npm $NPM_VER found, need >= $NPM_MIN — upgrading..."
+    if npm install -g npm@latest --quiet 2>/dev/null; then
+        NPM_VER="$(npm --version 2>/dev/null || echo '0.0.0')"
+        ok "npm $NPM_VER (upgraded)"
+    else
+        warn "npm upgrade failed — continuing with $NPM_VER"
+    fi
+fi
+
+# ─── [2/7] Claude Code ─────────────────────────────────────────────────────
+
+echo "[2/7] Checking Claude Code..."
 
 find_claude_bin() {
-    # Prefer real install locations over our own symlink so we can repoint it.
     local candidates=(
         "$HOME/.npm-global/bin/claude"
         "/usr/local/bin/claude"
         "/usr/bin/claude"
         "/opt/homebrew/bin/claude"
     )
-    for p in "${candidates[@]}"; do
-        [[ -x "$p" ]] && { echo "$p"; return; }
-    done
-    for p in "$HOME"/.nvm/versions/node/*/bin/claude; do
-        [[ -x "$p" ]] && { echo "$p"; return; }
-    done
-    # Last resort: our own symlink (or whatever is on PATH).
-    if [[ -x "$HOME/.local/bin/claude" ]]; then
-        echo "$HOME/.local/bin/claude"
-        return
-    fi
+    for p in "${candidates[@]}"; do [[ -x "$p" ]] && { echo "$p"; return; }; done
+    for p in "$HOME"/.nvm/versions/node/*/bin/claude; do [[ -x "$p" ]] && { echo "$p"; return; }; done
+    [[ -x "$BIN_DIR/claude" ]] && { echo "$BIN_DIR/claude"; return; }
     command -v claude 2>/dev/null || true
 }
 
 EXISTING_CLAUDE="$(find_claude_bin)"
+NPM_PREFIX="${HOME}/.npm-global"
+mkdir -p "$NPM_PREFIX"
 
 if [[ -n "$EXISTING_CLAUDE" ]]; then
     CLAUDE_VER="$("$EXISTING_CLAUDE" --version 2>/dev/null || echo 'unknown')"
-    echo "  Claude Code already installed: $CLAUDE_VER ($EXISTING_CLAUDE)"
-elif [[ "$NO_SUDO" == true ]]; then
-    echo "  Claude Code not found (skipped — no-sudo mode)."
-else
-    echo "  Claude Code not found. Installing via npm..."
-    if ! command -v npm &>/dev/null; then
-        echo "  npm not found. Installing Node.js..."
-        if command -v curl &>/dev/null; then
-            curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash -
-            sudo apt install -y nodejs
-        else
-            sudo apt install -y nodejs npm
-        fi
+    ok "claude $CLAUDE_VER ($EXISTING_CLAUDE)"
+    info "Updating to latest..."
+    npm config set prefix "$NPM_PREFIX" 2>/dev/null || true
+    export PATH="$NPM_PREFIX/bin:$PATH"
+    if npm install -g @anthropic-ai/claude-code --quiet 2>/dev/null; then
+        EXISTING_CLAUDE="$(find_claude_bin)"
+        CLAUDE_VER_NEW="$("$EXISTING_CLAUDE" --version 2>/dev/null || echo 'unknown')"
+        [[ "$CLAUDE_VER_NEW" != "$CLAUDE_VER" ]] && info "Updated: $CLAUDE_VER → $CLAUDE_VER_NEW" || info "Already up to date"
+    else
+        warn "Claude Code update failed — continuing with $CLAUDE_VER"
     fi
-    # Set up npm prefix for non-root installs
-    NPM_PREFIX="${HOME}/.npm-global"
-    mkdir -p "$NPM_PREFIX"
+elif [[ "$NO_SUDO" == true ]]; then
+    warn "Claude Code not found (skipped — no-sudo mode)"
+else
+    info "Claude Code not found — installing..."
     npm config set prefix "$NPM_PREFIX"
     export PATH="$NPM_PREFIX/bin:$PATH"
-    npm install -g @anthropic-ai/claude-code
-    EXISTING_CLAUDE="$(find_claude_bin)"
-    CLAUDE_VER="$("$EXISTING_CLAUDE" --version 2>/dev/null || echo 'unknown')"
-    echo "  Claude Code installed: $CLAUDE_VER ($EXISTING_CLAUDE)"
-fi
-
-# Symlink claude to ~/.local/bin for a PATH-independent stable location.
-# Without this, GUI launches (desktop entry) often fail to find claude
-# because ~/.npm-global/bin lives only in ~/.bashrc.
-if [[ -n "$EXISTING_CLAUDE" && "$EXISTING_CLAUDE" != "$BIN_DIR/claude" ]]; then
-    ln -sf "$EXISTING_CLAUDE" "$BIN_DIR/claude"
-    echo "  Linked $BIN_DIR/claude -> $EXISTING_CLAUDE"
-fi
-
-# ─── System dependencies ───────────────────────────────────────────────
-
-echo "[2/6] Checking system dependencies..."
-
-MISSING=()
-command -v git &>/dev/null || MISSING+=("git")
-command -v git-lfs &>/dev/null || MISSING+=("git-lfs")
-python3 -c "import gi" 2>/dev/null || MISSING+=("python3-gi")
-python3 -c "import gi; gi.require_version('Gtk', '3.0'); from gi.repository import Gtk" 2>/dev/null || MISSING+=("gir1.2-gtk-3.0")
-python3 -c "import gi; gi.require_version('Vte', '2.91'); from gi.repository import Vte" 2>/dev/null || MISSING+=("gir1.2-vte-2.91")
-
-if [ ${#MISSING[@]} -gt 0 ]; then
-    if [[ "$NO_SUDO" == true ]]; then
-        echo "  Missing: ${MISSING[*]} (skipped — no-sudo mode)"
+    if npm install -g @anthropic-ai/claude-code --quiet; then
+        EXISTING_CLAUDE="$(find_claude_bin)"
+        CLAUDE_VER="$("$EXISTING_CLAUDE" --version 2>/dev/null || echo 'unknown')"
+        ok "claude $CLAUDE_VER (installed)"
     else
-        echo "  Missing: ${MISSING[*]}"
-        echo "  Installing..."
-        sudo apt-get update -qq
-        sudo apt-get install -y "${MISSING[@]}"
+        fail "Claude Code installation failed — install manually: npm install -g @anthropic-ai/claude-code"
     fi
-else
-    echo "  All dependencies OK."
 fi
 
-# Initialize git-lfs if available
+# Stable symlink for GUI launches (desktop entry bypasses ~/.bashrc PATH)
+if [[ -n "${EXISTING_CLAUDE:-}" && "$EXISTING_CLAUDE" != "$BIN_DIR/claude" ]]; then
+    ln -sf "$EXISTING_CLAUDE" "$BIN_DIR/claude"
+    info "Linked $BIN_DIR/claude -> $EXISTING_CLAUDE"
+fi
+
+# ─── [3/7] System tools ────────────────────────────────────────────────────
+
+echo "[3/7] Checking system tools..."
+
+check_tool() {  # check_tool <cmd> <apt_pkg> <required: true|false> <label>
+    local cmd="$1" pkg="$2" required="$3" label="$4"
+    if command -v "$cmd" &>/dev/null; then
+        ok "$label"
+    elif [[ "$required" == "true" ]]; then
+        info "$label not found — installing $pkg..."
+        if apt_install "$pkg"; then
+            ok "$label (installed)"
+        else
+            fail "$label required but could not be installed — apt install $pkg"
+        fi
+    else
+        warn "$label not found (optional) — apt install $pkg"
+    fi
+}
+
+check_tool git        git             true  "git"
+check_tool git-lfs    git-lfs         false "git-lfs"
+check_tool ssh        openssh-client  true  "ssh"
+check_tool xdg-open   xdg-utils       false "xdg-open"
+
 if command -v git-lfs &>/dev/null; then
-    git lfs install --skip-repo >/dev/null 2>&1
-    echo "  git-lfs initialized."
+    git lfs install --skip-repo >/dev/null 2>&1 || true
 fi
 
-# ─── Install files ─────────────────────────────────────────────────────
+# ─── [4/7] GTK bindings ────────────────────────────────────────────────────
 
-echo "[3/6] Installing BTerminal..."
+echo "[4/7] Checking GTK bindings..."
+
+check_gtk() {  # check_gtk <label> <apt_pkg> <python_check>
+    local label="$1" pkg="$2" pycheck="$3"
+    if python3 -c "$pycheck" 2>/dev/null; then
+        ok "$label"
+    else
+        info "$label not found — installing $pkg..."
+        if apt_install "$pkg"; then
+            if python3 -c "$pycheck" 2>/dev/null; then
+                ok "$label (installed)"
+            else
+                fail "$label installed but import failed — try: apt install $pkg"
+            fi
+        else
+            fail "$label required but could not be installed — apt install $pkg"
+        fi
+    fi
+}
+
+check_gtk "python3-gi"   "python3-gi"        "import gi"
+check_gtk "GTK 3.0"      "gir1.2-gtk-3.0"   "import gi; gi.require_version('Gtk','3.0'); from gi.repository import Gtk"
+check_gtk "VTE 2.91"     "gir1.2-vte-2.91"  "import gi; gi.require_version('Vte','2.91'); from gi.repository import Vte"
+
+# ─── [5/7] Install BTerminal files ─────────────────────────────────────────
+
+echo "[5/7] Installing BTerminal files..."
 
 mkdir -p "$INSTALL_DIR" "$BIN_DIR" "$CONFIG_DIR" "$CTX_DIR" "$ICON_DIR"
 
-cp "$SCRIPT_DIR/bterminal.py" "$INSTALL_DIR/bterminal.py"
-cp "$SCRIPT_DIR/ctx" "$INSTALL_DIR/ctx"
-cp "$SCRIPT_DIR/consult" "$INSTALL_DIR/consult"
-cp "$SCRIPT_DIR/tasks" "$INSTALL_DIR/tasks"
-cp "$SCRIPT_DIR/claude_log" "$INSTALL_DIR/claude_log"
-cp "$SCRIPT_DIR/memory_wizard" "$INSTALL_DIR/memory_wizard"
+for f in bterminal.py ctx consult tasks claude_log memory_wizard; do
+    cp "$SCRIPT_DIR/$f" "$INSTALL_DIR/$f"
+done
 cp "$SCRIPT_DIR/bterminal.svg" "$ICON_DIR/bterminal.svg"
 gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor/" 2>/dev/null || true
-chmod +x "$INSTALL_DIR/bterminal.py" "$INSTALL_DIR/ctx" "$INSTALL_DIR/consult" "$INSTALL_DIR/tasks" "$INSTALL_DIR/claude_log" "$INSTALL_DIR/memory_wizard"
+chmod +x "$INSTALL_DIR/bterminal.py" "$INSTALL_DIR/ctx" "$INSTALL_DIR/consult" \
+         "$INSTALL_DIR/tasks" "$INSTALL_DIR/claude_log" "$INSTALL_DIR/memory_wizard"
 
-# Symlink defaults/ and README.md from repo so changes are live after git pull
+# Live symlinks from repo (git pull → immediate effect, no reinstall needed)
 ln -sfn "$SCRIPT_DIR/defaults" "$INSTALL_DIR/defaults"
-echo "  Linked $INSTALL_DIR/defaults -> $SCRIPT_DIR/defaults"
-ln -sf "$SCRIPT_DIR/README.md" "$INSTALL_DIR/README.md"
-echo "  Linked $INSTALL_DIR/README.md -> $SCRIPT_DIR/README.md"
-ln -sf "$SCRIPT_DIR/VERSION" "$INSTALL_DIR/VERSION"
-echo "  Linked $INSTALL_DIR/VERSION -> $SCRIPT_DIR/VERSION"
+ln -sf  "$SCRIPT_DIR/README.md" "$INSTALL_DIR/README.md"
+ln -sf  "$SCRIPT_DIR/VERSION"   "$INSTALL_DIR/VERSION"
+info "Live symlinks: defaults/ README.md VERSION"
 
-# Save repo path for auto-update
 echo "$SCRIPT_DIR" > "$CONFIG_DIR/repo_path"
-echo "  Repo path saved: $SCRIPT_DIR"
+info "Repo path: $SCRIPT_DIR"
 
-# ─── Install bundled skills ────────────────────────────────────────────
-
+# Bundled skills — install new ones, never overwrite user edits
 SKILLS_SRC="$SCRIPT_DIR/defaults/skills"
 SKILLS_DST="$HOME/.claude/commands"
 mkdir -p "$SKILLS_DST"
-
-SKILLS_NEW=0
-SKILLS_SKIP=0
+SKILLS_NEW=0; SKILLS_SKIP=0
 if [[ -d "$SKILLS_SRC" ]]; then
     for skill_file in "$SKILLS_SRC"/*.md; do
         [[ -f "$skill_file" ]] || continue
@@ -162,48 +260,34 @@ if [[ -d "$SKILLS_SRC" ]]; then
         else
             cp "$skill_file" "$SKILLS_DST/$skill_name"
             SKILLS_NEW=$((SKILLS_NEW + 1))
-            echo "  Installed skill: $skill_name"
+            info "Skill installed: $skill_name"
         fi
     done
-    echo "  Skills: $SKILLS_NEW installed, $SKILLS_SKIP already present (not overwritten)"
+    ok "Skills: $SKILLS_NEW installed, $SKILLS_SKIP already present"
 fi
 
-# ─── Symlinks ──────────────────────────────────────────────────────────
+# ─── [6/7] Symlinks ────────────────────────────────────────────────────────
 
-echo "[4/6] Creating symlinks in $BIN_DIR..."
+echo "[6/7] Creating symlinks..."
 
-ln -sf "$INSTALL_DIR/bterminal.py" "$BIN_DIR/bterminal"
-ln -sf "$INSTALL_DIR/ctx" "$BIN_DIR/ctx"
-ln -sf "$INSTALL_DIR/consult" "$BIN_DIR/consult"
-ln -sf "$INSTALL_DIR/tasks" "$BIN_DIR/tasks"
-ln -sf "$INSTALL_DIR/claude_log" "$BIN_DIR/claude_log"
-ln -sf "$INSTALL_DIR/memory_wizard" "$BIN_DIR/memory_wizard"
+for tool in bterminal ctx consult tasks claude_log memory_wizard; do
+    src="$INSTALL_DIR/$tool"
+    [[ "$tool" == "bterminal" ]] && src="$INSTALL_DIR/bterminal.py"
+    ln -sf "$src" "$BIN_DIR/$tool"
+done
+ok "Symlinks in $BIN_DIR"
 
-echo "  bterminal      -> $INSTALL_DIR/bterminal.py"
-echo "  ctx            -> $INSTALL_DIR/ctx"
-echo "  consult        -> $INSTALL_DIR/consult"
-echo "  tasks          -> $INSTALL_DIR/tasks"
-echo "  claude_log     -> $INSTALL_DIR/claude_log"
-echo "  memory_wizard  -> $INSTALL_DIR/memory_wizard"
+# ─── [7/7] Init ctx + desktop entry ────────────────────────────────────────
 
-# ─── Init ctx database ────────────────────────────────────────────────
+echo "[7/7] Finalizing..."
 
-echo "[5/6] Initializing context database..."
-
-if [ -f "$CTX_DIR/context.db" ]; then
-    echo "  Database already exists, skipping init."
-else
-    "$BIN_DIR/ctx" list >/dev/null 2>&1
-    echo "  Created $CTX_DIR/context.db"
+if [[ ! -f "$CTX_DIR/context.db" ]]; then
+    "$BIN_DIR/ctx" list >/dev/null 2>&1 || true
+    info "Created $CTX_DIR/context.db"
 fi
-
-# Set default shared context
-"$BIN_DIR/ctx" shared set user_preferences "At the start of each session, tell the user which model you are before beginning work."
-echo "  Shared context: user_preferences set"
-
-# ─── Desktop file ──────────────────────────────────────────────────────
-
-echo "[6/6] Creating desktop entry..."
+"$BIN_DIR/ctx" shared set user_preferences \
+    "At the start of each session, tell the user which model you are before beginning work." \
+    2>/dev/null || true
 
 mkdir -p "$DESKTOP_DIR"
 cat > "$DESKTOP_DIR/bterminal.desktop" << EOF
@@ -218,27 +302,47 @@ Terminal=false
 StartupNotify=true
 EOF
 update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
+ok "Desktop entry created"
+
+# ─── Summary ───────────────────────────────────────────────────────────────
 
 echo ""
-echo "=== Installation complete ==="
+
+# Write errors/warnings to JSON for bterminal startup check
+ERRORS_JSON="[]"
+WARNINGS_JSON="[]"
+if [[ ${#ERRORS[@]} -gt 0 ]]; then
+    ERRORS_JSON="$(python3 -c "import json,sys; print(json.dumps(sys.argv[1:]))" -- "${ERRORS[@]}")"
+fi
+if [[ ${#WARNINGS[@]} -gt 0 ]]; then
+    WARNINGS_JSON="$(python3 -c "import json,sys; print(json.dumps(sys.argv[1:]))" -- "${WARNINGS[@]}")"
+fi
+python3 -c "
+import json
+data = {'bterminal_version': '$BTERMINAL_VERSION', 'errors': $ERRORS_JSON, 'warnings': $WARNINGS_JSON}
+with open('$ERRORS_FILE', 'w') as f:
+    json.dump(data, f, indent=2)
+"
+
+if [[ ${#WARNINGS[@]} -gt 0 ]]; then
+    echo "Warnings (non-critical):"
+    for w in "${WARNINGS[@]}"; do printf "  \033[33m⚠\033[0m %s\n" "$w"; done
+    echo ""
+fi
+
+if [[ ${#ERRORS[@]} -gt 0 ]]; then
+    echo "ERRORS — action required:"
+    for e in "${ERRORS[@]}"; do printf "  \033[31m✗\033[0m %s\n" "$e"; done
+    echo ""
+    # Write clean error summary to stderr for GUI dialog
+    {
+        echo "BTerminal v${BTERMINAL_VERSION} — dependency errors:"
+        for e in "${ERRORS[@]}"; do echo "  • $e"; done
+    } >&2
+    exit 1
+fi
+
+echo "=== BTerminal v${BTERMINAL_VERSION} installed successfully ==="
 echo ""
-echo "Run BTerminal:"
-echo "  bterminal"
-echo ""
-echo "Context manager:"
-echo "  ctx --help"
-echo ""
-echo "Consult external AI models:"
-echo "  consult --help"
-echo ""
-echo "Task manager:"
-echo "  tasks --help"
-echo ""
-echo "Session log collector:"
-echo "  claude_log --help"
-echo ""
-echo "Memory wizard:"
-echo "  memory_wizard <project>"
-echo ""
-echo "Make sure these are in your PATH (add to ~/.bashrc):"
-echo "  export PATH=\"\$HOME/.local/bin:\$HOME/.npm-global/bin:\$PATH\""
+echo "Run:  bterminal"
+echo "PATH: export PATH=\"\$HOME/.local/bin:\$HOME/.npm-global/bin:\$PATH\""
