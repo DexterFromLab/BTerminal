@@ -28,6 +28,14 @@ from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk, Pango, Vte
 # ─── Stałe i konfiguracja ────────────────────────────────────────────────────
 
 APP_NAME = "BTerminal"
+
+def _read_version() -> str:
+    try:
+        return (Path(__file__).parent / "VERSION").read_text().strip()
+    except Exception:
+        return "unknown"
+
+APP_VERSION = _read_version()
 CONFIG_DIR = os.path.expanduser("~/.config/bterminal")
 SESSIONS_FILE = os.path.join(CONFIG_DIR, "sessions.json")
 CLAUDE_SESSIONS_FILE = os.path.join(CONFIG_DIR, "claude_sessions.json")
@@ -8812,7 +8820,7 @@ class BTerminalApp(Gtk.Window):
         n = self.notebook.get_n_pages()
         idx = self.notebook.get_current_page()
         if idx < 0 or n == 0:
-            self.set_title(APP_NAME)
+            self.set_title(f"{APP_NAME} v{APP_VERSION}")
             return
         tab = self.notebook.get_nth_page(idx)
         if isinstance(tab, TerminalTab):

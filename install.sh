@@ -17,7 +17,8 @@ if [[ "${1:-}" == "--no-sudo" ]]; then
     NO_SUDO=true
 fi
 
-echo "=== BTerminal Installer ==="
+BTERMINAL_VERSION="$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo 'unknown')"
+echo "=== BTerminal Installer v${BTERMINAL_VERSION} ==="
 echo ""
 
 # ─── Claude Code ──────────────────────────────────────────────────────
@@ -137,6 +138,8 @@ ln -sfn "$SCRIPT_DIR/defaults" "$INSTALL_DIR/defaults"
 echo "  Linked $INSTALL_DIR/defaults -> $SCRIPT_DIR/defaults"
 ln -sf "$SCRIPT_DIR/README.md" "$INSTALL_DIR/README.md"
 echo "  Linked $INSTALL_DIR/README.md -> $SCRIPT_DIR/README.md"
+ln -sf "$SCRIPT_DIR/VERSION" "$INSTALL_DIR/VERSION"
+echo "  Linked $INSTALL_DIR/VERSION -> $SCRIPT_DIR/VERSION"
 
 # Save repo path for auto-update
 echo "$SCRIPT_DIR" > "$CONFIG_DIR/repo_path"

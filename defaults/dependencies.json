@@ -1,0 +1,22 @@
+{
+  "_comment": "BTerminal dependency manifest. Each entry describes a known external tool or skill suite.",
+  "bundled": {
+    "ctx":           { "version": "bundled", "description": "Context manager CLI" },
+    "consult":       { "version": "bundled", "description": "External AI queries + Tribunal" },
+    "tasks":         { "version": "bundled", "description": "Task manager with auto-trigger" },
+    "claude_log":    { "version": "bundled", "description": "Claude Code session log collector" },
+    "memory_wizard": { "version": "bundled", "description": "Rules configuration wizard" }
+  },
+  "extensions": {
+    "latex-document-skill": {
+      "repo":         "https://github.com/ndpvt-web/latex-document-skill",
+      "version":      "latest",
+      "bterminal_min": "1.0.0",
+      "install_dir":  "~/.local/share/bterminal/extensions/latex-document-skill",
+      "skill_link":   "~/.claude/commands/latex.md",
+      "type":         "skill-suite",
+      "optional":     true,
+      "description":  "Complete LaTeX document creation: 27 templates, compilation, PDF ops, format conversion"
+    }
+  }
+}
