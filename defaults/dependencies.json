@@ -1,22 +1,129 @@
 {
-  "_comment": "BTerminal dependency manifest. Each entry describes a known external tool or skill suite.",
+  "_comment": "BTerminal dependency manifest. Describes all known dependencies and their constraints.",
+  "_bterminal_version": "1.0.0",
+
   "bundled": {
-    "ctx":           { "version": "bundled", "description": "Context manager CLI" },
-    "consult":       { "version": "bundled", "description": "External AI queries + Tribunal" },
-    "tasks":         { "version": "bundled", "description": "Task manager with auto-trigger" },
-    "claude_log":    { "version": "bundled", "description": "Claude Code session log collector" },
-    "memory_wizard": { "version": "bundled", "description": "Rules configuration wizard" }
+    "ctx":           { "version": "bundled", "required": true,  "description": "Context manager CLI (SQLite+FTS5)" },
+    "consult":       { "version": "bundled", "required": false, "description": "External AI queries + Tribunal (requires OpenRouter API key)" },
+    "tasks":         { "version": "bundled", "required": false, "description": "Task manager with auto-trigger" },
+    "claude_log":    { "version": "bundled", "required": true,  "description": "Claude Code session log collector" },
+    "memory_wizard": { "version": "bundled", "required": true,  "description": "Rules configuration wizard" }
   },
+
+  "runtime": {
+    "python3": {
+      "version": ">=3.10",
+      "required": true,
+      "description": "Main language — f-strings, pathlib, match/case",
+      "check": "python3 --version"
+    },
+    "nodejs": {
+      "version": ">=22.0",
+      "apt_package": "nodejs",
+      "required": true,
+      "description": "Required by Claude Code CLI",
+      "check": "node --version"
+    },
+    "npm": {
+      "version": ">=10.0",
+      "required": true,
+      "description": "Package manager for Claude Code",
+      "check": "npm --version"
+    }
+  },
+
+  "system_tools": {
+    "git": {
+      "version": ">=2.0",
+      "apt_package": "git",
+      "required": true,
+      "description": "Version control — used by Git panel, auto-update, log parsing",
+      "check": "git --version"
+    },
+    "git-lfs": {
+      "version": ">=3.0",
+      "apt_package": "git-lfs",
+      "required": false,
+      "description": "Large file storage — optional, gracefully skipped",
+      "check": "git-lfs --version"
+    },
+    "ssh": {
+      "apt_package": "openssh-client",
+      "required": true,
+      "description": "SSH terminal sessions",
+      "check": "ssh -V"
+    },
+    "xdg-open": {
+      "required": false,
+      "description": "Desktop file opener — used for log preview on Linux",
+      "check": "which xdg-open"
+    }
+  },
+
+  "gtk_bindings": {
+    "gtk-3.0": {
+      "version": "3.0",
+      "apt_package": "gir1.2-gtk-3.0",
+      "required": true,
+      "description": "Main UI framework — pinned to 3.0, GTK4 requires major rewrite",
+      "check": "python3 -c \"import gi; gi.require_version('Gtk','3.0')\""
+    },
+    "vte-2.91": {
+      "version": "2.91",
+      "apt_package": "gir1.2-vte-2.91",
+      "required": true,
+      "description": "Terminal emulator widget — must match GTK 3.0",
+      "check": "python3 -c \"import gi; gi.require_version('Vte','2.91')\""
+    },
+    "python3-gi": {
+      "apt_package": "python3-gi",
+      "required": true,
+      "description": "PyGObject bindings for GTK/GLib/VTE",
+      "check": "python3 -c \"import gi\""
+    }
+  },
+
+  "claude_code": {
+    "claude": {
+      "npm_package": "@anthropic-ai/claude-code",
+      "version": "latest",
+      "required": true,
+      "description": "Claude Code CLI — core IDE dependency, session management, metrics",
+      "check": "claude --version",
+      "notes": "BTerminal reads ~/.claude/projects/ JSONL logs — format changes here are a breaking risk"
+    }
+  },
+
+  "external_apis": {
+    "openrouter": {
+      "endpoint": "https://openrouter.ai/api/v1",
+      "api_version": "v1",
+      "required": false,
+      "description": "Multi-model AI queries via consult tool — requires OPENROUTER_API_KEY",
+      "used_in": ["consult", "bterminal.py ConsultPanel"],
+      "breaking_risk": "Response format changes, model ID renames"
+    },
+    "anthropic_oauth": {
+      "endpoint": "https://api.anthropic.com/api/oauth/usage",
+      "api_version": "oauth-2025-04-20",
+      "required": false,
+      "description": "Claude Code usage metrics (tokens, cost, cache) shown in session bar",
+      "used_in": ["bterminal.py _fetch_usage_metrics"],
+      "breaking_risk": "OAuth token format or endpoint changes"
+    }
+  },
+
   "extensions": {
     "latex-document-skill": {
-      "repo":         "https://github.com/ndpvt-web/latex-document-skill",
-      "version":      "latest",
+      "repo":          "https://github.com/ndpvt-web/latex-document-skill",
+      "version":       "latest",
       "bterminal_min": "1.0.0",
-      "install_dir":  "~/.local/share/bterminal/extensions/latex-document-skill",
-      "skill_link":   "~/.claude/commands/latex.md",
-      "type":         "skill-suite",
-      "optional":     true,
-      "description":  "Complete LaTeX document creation: 27 templates, compilation, PDF ops, format conversion"
+      "install_dir":   "~/.local/share/bterminal/extensions/latex-document-skill",
+      "skill_entry":   "SKILL.md",
+      "type":          "skill-suite",
+      "optional":      true,
+      "description":   "Complete LaTeX workflow: 27 templates, compilation, PDF ops, format conversion",
+      "additional_tools": ["texlive", "latexmk", "poppler-utils", "pandoc"]
     }
   }
 }
