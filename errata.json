@@ -1,6 +1,14 @@
 [
   {
     "date": "2026-04-24",
+    "message": "BTerminal v1.1.4 — naprawa instalatora. Plik claude_log był pominięty w repozytorium — fresh install przerywał się z błędem. Narzędzia meld, pandoc i LaTeX są teraz instalowane automatycznie.",
+    "changes": [
+      "fix: claude_log dodany do repozytorium — brak powodował crash przy fresh install",
+      "fix: meld, pdflatex, latexmk, poppler-utils, pandoc instalowane automatycznie przez apt (nie tylko ostrzeżenie)"
+    ]
+  },
+  {
+    "date": "2026-04-24",
     "message": "BTerminal v1.1.3 — katalog claude_log/ tworzony automatycznie przy starcie sesji Claude Code. Logi są widoczne w panelu Files od razu po otwarciu projektu.",
     "changes": [
       "fix: claude_log/ tworzony przy starcie taba Claude Code — nie dopiero po zamknięciu"
