@@ -1,6 +1,15 @@
 [
   {
     "date": "2026-04-24",
+    "message": "BTerminal v1.1.1 — latex-document-skill instaluje się teraz automatycznie i jest przypięty do konkretnego commita. Aktualizacja jest obsługiwana przez install.sh — nie trzeba nic robić ręcznie.",
+    "changes": [
+      "fix: latex-document-skill pinned do commita z dependencies.json — user zawsze dostaje zweryfikowaną wersję",
+      "fix: install.sh automatycznie klonuje i aktualizuje extension przy każdej instalacji",
+      "fix: zależności LaTeX (pdflatex, latexmk, poppler-utils, pandoc) instalowane automatycznie"
+    ]
+  },
+  {
+    "date": "2026-04-24",
     "message": "BTerminal v1.1.0 — panel Files. Nowa zakładka w sidebarze pokazuje pliki projektu jak w IntelliJ: drzewo z katalogami, podgląd diff w meld z wyborem commita, menu kontekstowe z kopiowaniem ścieżek i otwieraniem w dowolnym programie. Zalecane: uruchom install.sh aby zaktualizować.",
     "changes": [
       "feat: panel Files — drzewo plików aktywnego projektu w sidebarze",

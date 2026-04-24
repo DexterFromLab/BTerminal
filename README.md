@@ -2,7 +2,7 @@
 
 A GTK 3 terminal emulator built for developers who work with SSH servers and Claude Code. Combines session management, macro automation, a persistent context database, multi-model AI consultation, task orchestration, git awareness, a skills library and a global rules system in a single window. Ships with Catppuccin Mocha (dark) and Latte (light) themes.
 
-**Current release: v1.1.0**
+**Current release: v1.1.1**
 
 ![BTerminal](screenshot.png)
 
