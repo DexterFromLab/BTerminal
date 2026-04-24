@@ -1,7 +1,7 @@
 [
   {
     "date": "2026-04-24",
-    "message": "BTerminal — poprawka reguł i narzędzia Consult. Analyst i Arbiter w Tribunal są teraz zawsze zablokowane na claude-code/opus. Reguła o sprawdzaniu modeli zawężona — dotyczy tylko wyboru modelu przez -m.",
+    "message": "BTerminal v1.1.2 — poprawka reguł i narzędzia Consult. Analyst i Arbiter w Tribunal są teraz zawsze zablokowane na claude-code/opus. Reguła o sprawdzaniu modeli zawężona — dotyczy tylko wyboru modelu przez -m.",
     "changes": [
       "fix: Tribunal — Analyst i Arbiter zablokowane na claude-code/opus w GUI i CLI (jedyny model z dostępem do plików projektu)",
       "fix: global_rules.txt — reguła o modelach consult zawężona: dotyczy tylko `consult -m`, nie każdego użycia",

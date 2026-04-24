@@ -1,6 +1,6 @@
 {
   "_comment": "BTerminal dependency manifest. Describes all known dependencies and their constraints.",
-  "_bterminal_version": "1.1.1",
+  "_bterminal_version": "1.1.2",
 
   "bundled": {
     "ctx":           { "version": "bundled", "required": true,  "description": "Context manager CLI (SQLite+FTS5)" },
