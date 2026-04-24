@@ -10219,8 +10219,10 @@ def _do_update(window):
 
     log_lines: list[str] = []
 
+    _ansi_re = re.compile(r"\033\[[0-9;]*[a-zA-Z]")
+
     def _append_line(line: str):
-        line = line.rstrip()
+        line = _ansi_re.sub("", line).rstrip()
         if not line:
             return False
         log_lines.append(line)
