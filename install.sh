@@ -193,6 +193,10 @@ check_tool git-lfs    git-lfs         false "git-lfs"
 check_tool ssh        openssh-client  true  "ssh"
 check_tool xdg-open   xdg-utils       false "xdg-open"
 check_tool meld       meld            false "meld"
+check_tool pdflatex   texlive-latex-extra false "pdflatex (LaTeX)"
+check_tool latexmk    latexmk         false "latexmk"
+check_tool pdftoppm   poppler-utils   false "poppler-utils (PDF preview)"
+check_tool pandoc     pandoc          false "pandoc"
 
 if command -v git-lfs &>/dev/null; then
     git lfs install --skip-repo >/dev/null 2>&1 || true
@@ -265,6 +269,30 @@ if [[ -d "$SKILLS_SRC" ]]; then
         fi
     done
     ok "Skills: $SKILLS_NEW installed, $SKILLS_SKIP already present"
+fi
+
+# latex-document-skill extension — clone if missing, symlink skill
+LATEX_EXT_DIR="$INSTALL_DIR/extensions/latex-document-skill"
+LATEX_SKILL_LINK="$SKILLS_DST/latex.md"
+LATEX_REPO="https://github.com/ndpvt-web/latex-document-skill"
+mkdir -p "$INSTALL_DIR/extensions"
+if [[ -d "$LATEX_EXT_DIR/.git" ]]; then
+    info "latex-document-skill: updating..."
+    git -C "$LATEX_EXT_DIR" pull --quiet 2>/dev/null && ok "latex-document-skill (updated)" || warn "latex-document-skill update failed — using existing version"
+elif command -v git &>/dev/null; then
+    info "latex-document-skill: cloning..."
+    if git clone --quiet "$LATEX_REPO" "$LATEX_EXT_DIR" 2>/dev/null; then
+        ok "latex-document-skill (installed)"
+    else
+        warn "latex-document-skill clone failed — check internet connection"
+    fi
+fi
+if [[ -f "$LATEX_EXT_DIR/SKILL.md" ]]; then
+    if [[ ! -f "$LATEX_SKILL_LINK" ]]; then
+        ln -sf "$LATEX_EXT_DIR/SKILL.md" "$LATEX_SKILL_LINK"
+        info "Skill linked: latex.md"
+    fi
+    ok "/latex skill available"
 fi
 
 # ─── [6/7] Symlinks ────────────────────────────────────────────────────────

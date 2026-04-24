@@ -61,8 +61,32 @@
     "meld": {
       "apt_package": "meld",
       "required": false,
-      "description": "Visual diff/merge tool — used by Files panel to open project files",
+      "description": "Visual diff/merge tool — Files panel default action",
       "check": "which meld"
+    },
+    "pdflatex": {
+      "apt_package": "texlive-latex-extra",
+      "required": false,
+      "description": "LaTeX compiler — required by latex-document-skill",
+      "check": "which pdflatex"
+    },
+    "latexmk": {
+      "apt_package": "latexmk",
+      "required": false,
+      "description": "LaTeX build automation — used by compile_latex.sh",
+      "check": "which latexmk"
+    },
+    "pdftoppm": {
+      "apt_package": "poppler-utils",
+      "required": false,
+      "description": "PDF to image conversion — used for PDF previews in latex skill",
+      "check": "which pdftoppm"
+    },
+    "pandoc": {
+      "apt_package": "pandoc",
+      "required": false,
+      "description": "Document format conversion — Markdown/DOCX/HTML ↔ LaTeX",
+      "check": "which pandoc"
     }
   },
 
@@ -122,17 +146,14 @@
   "extensions": {
     "latex-document-skill": {
       "repo":          "https://github.com/ndpvt-web/latex-document-skill",
-      "version":       "3cd9f27",
       "bterminal_min": "1.0.0",
       "install_dir":   "~/.local/share/bterminal/extensions/latex-document-skill",
       "skill_entry":   "SKILL.md",
       "skill_link":    "~/.claude/commands/latex.md",
       "type":          "skill-suite",
-      "optional":      true,
-      "installed":     true,
-      "description":   "Complete LaTeX workflow: 27 templates, compilation, PDF ops, format conversion",
-      "additional_tools": ["texlive", "latexmk", "poppler-utils", "pandoc"],
-      "install_note":  "git clone repo to install_dir, symlink SKILL.md to skill_link"
+      "auto_install":  true,
+      "description":   "Complete LaTeX workflow: 27 templates, compilation, PDF ops, format conversion — /latex skill",
+      "requires":      ["pdflatex", "latexmk", "pdftoppm", "pandoc"]
     }
   }
 }
