@@ -132,9 +132,11 @@ cp "$SCRIPT_DIR/bterminal.svg" "$ICON_DIR/bterminal.svg"
 gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor/" 2>/dev/null || true
 chmod +x "$INSTALL_DIR/bterminal.py" "$INSTALL_DIR/ctx" "$INSTALL_DIR/consult" "$INSTALL_DIR/tasks" "$INSTALL_DIR/claude_log" "$INSTALL_DIR/memory_wizard"
 
-# Symlink defaults/ from repo so global_rules.txt updates on git pull
+# Symlink defaults/ and README.md from repo so changes are live after git pull
 ln -sfn "$SCRIPT_DIR/defaults" "$INSTALL_DIR/defaults"
 echo "  Linked $INSTALL_DIR/defaults -> $SCRIPT_DIR/defaults"
+ln -sf "$SCRIPT_DIR/README.md" "$INSTALL_DIR/README.md"
+echo "  Linked $INSTALL_DIR/README.md -> $SCRIPT_DIR/README.md"
 
 # Save repo path for auto-update
 echo "$SCRIPT_DIR" > "$CONFIG_DIR/repo_path"

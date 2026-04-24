@@ -964,10 +964,14 @@ def _build_intro_prompt(project_name):
     rules_block = _fetch_rules_block(project_name)
     global_rules = _read_global_rules()
 
+    readme_path = Path(__file__).parent / "README.md"
+    readme_hint = f" README: {readme_path}" if readme_path.exists() else ""
+    header = f"Pracujesz w środowisku BTerminal — terminal SSH/Claude z wbudowanymi narzędziami (ctx, consult, tasks, memory_wizard, skills).{readme_hint}"
+
     if ctx_output:
-        base = f"Kontekst projektu ({project_name}):\n{ctx_output}\n\n--- Narzędzia ---\n\n{tools}"
+        base = f"{header}\n\nKontekst projektu ({project_name}):\n{ctx_output}\n\n--- Narzędzia ---\n\n{tools}"
     else:
-        base = f"Nazwa projektu w ctx/tasks: {project_name}\n\n--- Narzędzia ---\n\n{tools}"
+        base = f"{header}\n\nNazwa projektu w ctx/tasks: {project_name}\n\n--- Narzędzia ---\n\n{tools}"
 
     if global_rules:
         base += "\n\n--- Reguły globalne (BTerminal defaults) ---\n" + \
@@ -2657,7 +2661,12 @@ class TerminalTab(Gtk.Box):
         if not project_block and not global_rules:
             return
 
-        parts = []
+        readme_path = Path(__file__).parent / "README.md"
+        readme_hint = f" README: {readme_path}" if readme_path.exists() else ""
+        header = (f"Przypomnienie: pracujesz w środowisku BTerminal "
+                  f"(ctx, consult, tasks, memory_wizard, skills).{readme_hint}")
+
+        parts = [header]
         if global_rules:
             parts.append("--- Reguły globalne (BTerminal defaults) ---\n" +
                          "\n".join(f"- {r}" for r in global_rules))
