@@ -47,10 +47,13 @@ _on_error() {
             [[ -f "$BACKUP_DIR/$f" ]] && cp -f "$BACKUP_DIR/$f" "$INSTALL_DIR/$f" 2>/dev/null || true
         done
         rm -rf "$BACKUP_DIR"
-        printf "  \033[32m✓\033[0m Previous version restored. Run bterminal — it should still work.\n"
+        printf "  \033[32m✓\033[0m Previous version restored.\n"
+        # Marker for BTerminal GUI — rollback succeeded, show user-friendly dialog
+        echo "BTERMINAL_ROLLBACK_OK" >&2
     else
         printf "  \033[31m✗\033[0m Installation failed (fresh install, nothing to restore).\n"
         printf "    Fix the error above and run ./install.sh again.\n"
+        echo "BTERMINAL_FRESH_INSTALL_FAILED" >&2
     fi
     exit "$code"
 }

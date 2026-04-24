@@ -10208,8 +10208,14 @@ def _do_update(window):
                 capture_output=True, text=True, timeout=60,
             )
             if install.returncode != 0:
-                GLib.idle_add(_update_done, window, spinner_dialog,
-                              f"install.sh failed:\n{install.stderr}")
+                if "BTERMINAL_ROLLBACK_OK" in install.stderr:
+                    msg = ("Nowa wersja BTerminal nie mogła zostać zainstalowana.\n\n"
+                           "Poprzednia wersja została automatycznie przywrócona — "
+                           "BTerminal działa normalnie.")
+                else:
+                    msg = ("Instalacja nie powiodła się i nie ma poprzedniej wersji do przywrócenia.\n\n"
+                           f"Szczegóły:\n{install.stderr or install.stdout}")
+                GLib.idle_add(_update_done, window, spinner_dialog, msg)
                 return
             GLib.idle_add(_update_done, window, spinner_dialog, None)
         except Exception as e:
@@ -10222,7 +10228,7 @@ def _update_done(window, spinner_dialog, error):
     """Handle update result on the main thread."""
     spinner_dialog.destroy()
     if error:
-        show_error_dialog(window, f"Update error:\n{error}")
+        show_error_dialog(window, error)
     else:
         _restart_bterminal()
     return False
