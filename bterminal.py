@@ -8182,6 +8182,31 @@ class FilesPanel(Gtk.Box):
         is_dir = model.get_value(it, 2)
         cell.set_property("text", "📁 " if is_dir else "  ")
 
+    @staticmethod
+    def _find_project_root(d: str) -> str:
+        """Return the project root for d.
+
+        If d itself is a git root → return d.
+        If d's basename is a generic subdir name (docs, src, …) → walk up to
+          the nearest git root (max 4 levels).
+        Otherwise → return d as-is (the project_dir is already meaningful).
+        """
+        path = d.rstrip("/")
+        if os.path.isdir(os.path.join(path, ".git")):
+            return path
+        basename = os.path.basename(path).lower()
+        if basename not in _GENERIC_SUBDIRS:
+            return d
+        # Generic subdir — walk up looking for .git (bounded)
+        current = os.path.dirname(path)
+        for _ in range(4):
+            if not current or current == os.path.dirname(current):
+                break
+            if os.path.isdir(os.path.join(current, ".git")):
+                return current
+            current = os.path.dirname(current)
+        return d
+
     def _get_project_dir(self) -> str:
         if self._pinned_dir:
             return self._pinned_dir if os.path.isdir(self._pinned_dir) else ""
@@ -8191,14 +8216,14 @@ class FilesPanel(Gtk.Box):
         if page and getattr(page, "claude_config", None):
             d = page.claude_config.get("project_dir", "")
             if d and os.path.isdir(d):
-                return d
+                return self._find_project_root(d)
         # Fallback: first Claude tab with a valid project dir
         for i in range(nb.get_n_pages()):
             tab = nb.get_nth_page(i)
             if getattr(tab, "claude_config", None):
                 d = tab.claude_config.get("project_dir", "")
                 if d and os.path.isdir(d):
-                    return d
+                    return self._find_project_root(d)
         return ""
 
     def _populate_combo(self):
@@ -8249,9 +8274,9 @@ class FilesPanel(Gtk.Box):
             entries = list(os.scandir(directory))
         except PermissionError:
             return
-        dirs = sorted([e for e in entries if e.is_dir(follow_symlinks=False)
+        dirs = sorted([e for e in entries if e.is_dir()
                        and e.name not in self._IGNORE], key=lambda e: e.name.lower())
-        files = sorted([e for e in entries if e.is_file(follow_symlinks=False)
+        files = sorted([e for e in entries if e.is_file()
                         and not e.name.startswith(".")], key=lambda e: e.name.lower())
         for e in dirs:
             it = self._store.append(parent_iter, [e.name, e.path, True])
