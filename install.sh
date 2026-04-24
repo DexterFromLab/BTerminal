@@ -132,9 +132,36 @@ cp "$SCRIPT_DIR/bterminal.svg" "$ICON_DIR/bterminal.svg"
 gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor/" 2>/dev/null || true
 chmod +x "$INSTALL_DIR/bterminal.py" "$INSTALL_DIR/ctx" "$INSTALL_DIR/consult" "$INSTALL_DIR/tasks" "$INSTALL_DIR/claude_log" "$INSTALL_DIR/memory_wizard"
 
+# Symlink defaults/ from repo so global_rules.txt updates on git pull
+ln -sfn "$SCRIPT_DIR/defaults" "$INSTALL_DIR/defaults"
+echo "  Linked $INSTALL_DIR/defaults -> $SCRIPT_DIR/defaults"
+
 # Save repo path for auto-update
 echo "$SCRIPT_DIR" > "$CONFIG_DIR/repo_path"
 echo "  Repo path saved: $SCRIPT_DIR"
+
+# ─── Install bundled skills ────────────────────────────────────────────
+
+SKILLS_SRC="$SCRIPT_DIR/defaults/skills"
+SKILLS_DST="$HOME/.claude/commands"
+mkdir -p "$SKILLS_DST"
+
+SKILLS_NEW=0
+SKILLS_SKIP=0
+if [[ -d "$SKILLS_SRC" ]]; then
+    for skill_file in "$SKILLS_SRC"/*.md; do
+        [[ -f "$skill_file" ]] || continue
+        skill_name="$(basename "$skill_file")"
+        if [[ -f "$SKILLS_DST/$skill_name" ]]; then
+            SKILLS_SKIP=$((SKILLS_SKIP + 1))
+        else
+            cp "$skill_file" "$SKILLS_DST/$skill_name"
+            SKILLS_NEW=$((SKILLS_NEW + 1))
+            echo "  Installed skill: $skill_name"
+        fi
+    done
+    echo "  Skills: $SKILLS_NEW installed, $SKILLS_SKIP already present (not overwritten)"
+fi
 
 # ─── Symlinks ──────────────────────────────────────────────────────────
 
