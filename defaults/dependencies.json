@@ -146,6 +146,7 @@
   "extensions": {
     "latex-document-skill": {
       "repo":          "https://github.com/ndpvt-web/latex-document-skill",
+      "version":       "3cd9f27",
       "bterminal_min": "1.0.0",
       "install_dir":   "~/.local/share/bterminal/extensions/latex-document-skill",
       "skill_entry":   "SKILL.md",

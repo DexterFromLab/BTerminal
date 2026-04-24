@@ -271,22 +271,39 @@ if [[ -d "$SKILLS_SRC" ]]; then
     ok "Skills: $SKILLS_NEW installed, $SKILLS_SKIP already present"
 fi
 
-# latex-document-skill extension — clone if missing, symlink skill
+# latex-document-skill extension — pin to commit from dependencies.json
 LATEX_EXT_DIR="$INSTALL_DIR/extensions/latex-document-skill"
 LATEX_SKILL_LINK="$SKILLS_DST/latex.md"
-LATEX_REPO="https://github.com/ndpvt-web/latex-document-skill"
+LATEX_REPO="$(dep_get extensions latex-document-skill repo)"
+LATEX_PIN="$(dep_get extensions latex-document-skill version)"
 mkdir -p "$INSTALL_DIR/extensions"
-if [[ -d "$LATEX_EXT_DIR/.git" ]]; then
-    info "latex-document-skill: updating..."
-    git -C "$LATEX_EXT_DIR" pull --quiet 2>/dev/null && ok "latex-document-skill (updated)" || warn "latex-document-skill update failed — using existing version"
-elif command -v git &>/dev/null; then
-    info "latex-document-skill: cloning..."
-    if git clone --quiet "$LATEX_REPO" "$LATEX_EXT_DIR" 2>/dev/null; then
-        ok "latex-document-skill (installed)"
-    else
-        warn "latex-document-skill clone failed — check internet connection"
+
+if [[ -n "$LATEX_REPO" ]] && command -v git &>/dev/null; then
+    if [[ ! -d "$LATEX_EXT_DIR/.git" ]]; then
+        info "latex-document-skill: cloning..."
+        if git clone --quiet "$LATEX_REPO" "$LATEX_EXT_DIR" 2>/dev/null; then
+            ok "latex-document-skill (cloned)"
+        else
+            warn "latex-document-skill clone failed — check internet connection"
+        fi
+    fi
+
+    if [[ -d "$LATEX_EXT_DIR/.git" && -n "$LATEX_PIN" ]]; then
+        CURRENT="$(git -C "$LATEX_EXT_DIR" rev-parse --short HEAD 2>/dev/null || echo '')"
+        if [[ "$CURRENT" != "$LATEX_PIN" ]]; then
+            info "latex-document-skill: switching $CURRENT → $LATEX_PIN"
+            git -C "$LATEX_EXT_DIR" fetch --quiet origin 2>/dev/null
+            if git -C "$LATEX_EXT_DIR" checkout --quiet "$LATEX_PIN" 2>/dev/null; then
+                ok "latex-document-skill @ $LATEX_PIN"
+            else
+                warn "latex-document-skill checkout $LATEX_PIN failed — staying at $CURRENT"
+            fi
+        else
+            ok "latex-document-skill @ $LATEX_PIN (up to date)"
+        fi
     fi
 fi
+
 if [[ -f "$LATEX_EXT_DIR/SKILL.md" ]]; then
     if [[ ! -f "$LATEX_SKILL_LINK" ]]; then
         ln -sf "$LATEX_EXT_DIR/SKILL.md" "$LATEX_SKILL_LINK"
