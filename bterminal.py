@@ -8103,21 +8103,27 @@ class FilesPanel(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.app = app
         self._root_dir: str = ""
+        self._pinned_dir: str = ""   # "" = follow active tab
 
         header = Gtk.Label(label="Files")
         header.get_style_context().add_class("sidebar-header")
         header.set_halign(Gtk.Align.START)
         self.pack_start(header, False, False, 0)
 
-        # ── Path label ──────────────────────────────────────────────────────
-        self._path_lbl = Gtk.Label(label="No project open")
-        self._path_lbl.get_style_context().add_class("dim-label")
-        self._path_lbl.set_halign(Gtk.Align.START)
-        self._path_lbl.set_ellipsize(Pango.EllipsizeMode.START)
-        self._path_lbl.set_margin_start(8)
-        self._path_lbl.set_margin_top(4)
-        self._path_lbl.set_margin_bottom(2)
-        self.pack_start(self._path_lbl, False, False, 0)
+        # ── Project dropdown ─────────────────────────────────────────────────
+        # ListStore: display label (str), project_dir (str)
+        self._proj_store = Gtk.ListStore(str, str)
+        self._combo = Gtk.ComboBox(model=self._proj_store)
+        ren = Gtk.CellRendererText()
+        ren.set_property("ellipsize", Pango.EllipsizeMode.END)
+        self._combo.pack_start(ren, True)
+        self._combo.add_attribute(ren, "text", 0)
+        self._combo.set_margin_start(8)
+        self._combo.set_margin_end(8)
+        self._combo.set_margin_top(4)
+        self._combo.set_margin_bottom(2)
+        self._combo.connect("changed", self._on_combo_changed)
+        self.pack_start(self._combo, False, False, 0)
 
         # ── TreeStore: display_name, full_path, is_dir ──────────────────────
         self._store = Gtk.TreeStore(str, str, bool)
@@ -8177,13 +8183,16 @@ class FilesPanel(Gtk.Box):
         cell.set_property("text", "📁 " if is_dir else "  ")
 
     def _get_project_dir(self) -> str:
+        if self._pinned_dir:
+            return self._pinned_dir if os.path.isdir(self._pinned_dir) else ""
+        # Auto: active Claude tab first
         nb = self.app.notebook
         page = nb.get_nth_page(nb.get_current_page())
         if page and getattr(page, "claude_config", None):
             d = page.claude_config.get("project_dir", "")
             if d and os.path.isdir(d):
                 return d
-        # Fallback: scan all tabs for a Claude tab with a project dir
+        # Fallback: first Claude tab with a valid project dir
         for i in range(nb.get_n_pages()):
             tab = nb.get_nth_page(i)
             if getattr(tab, "claude_config", None):
@@ -8191,6 +8200,49 @@ class FilesPanel(Gtk.Box):
                 if d and os.path.isdir(d):
                     return d
         return ""
+
+    def _populate_combo(self):
+        """Rebuild the project dropdown from saved Claude sessions + active tabs."""
+        self._combo.handler_block_by_func(self._on_combo_changed)
+        self._proj_store.clear()
+        self._proj_store.append(["— Active tab —", ""])
+
+        seen: set[str] = set()
+        # Sessions from saved configs
+        for cs in self.app.claude_manager.all():
+            d = cs.get("project_dir", "").rstrip("/")
+            name = cs.get("name", "") or os.path.basename(d)
+            if d and d not in seen and os.path.isdir(d):
+                seen.add(d)
+                short = os.path.basename(d)
+                self._proj_store.append([f"{name}  ({short})" if name != short else name, d])
+
+        # Open tabs not in saved configs
+        nb = self.app.notebook
+        for i in range(nb.get_n_pages()):
+            tab = nb.get_nth_page(i)
+            if getattr(tab, "claude_config", None):
+                d = tab.claude_config.get("project_dir", "").rstrip("/")
+                if d and d not in seen and os.path.isdir(d):
+                    seen.add(d)
+                    self._proj_store.append([os.path.basename(d) + "  (tab)", d])
+
+        # Restore selection
+        target = self._pinned_dir
+        active_idx = 0
+        for i, row in enumerate(self._proj_store):
+            if row[1] == target:
+                active_idx = i
+                break
+        self._combo.set_active(active_idx)
+        self._combo.handler_unblock_by_func(self._on_combo_changed)
+
+    def _on_combo_changed(self, combo):
+        it = combo.get_active_iter()
+        if it is None:
+            return
+        self._pinned_dir = self._proj_store.get_value(it, 1)
+        self._load_tree()
 
     def _populate(self, parent_iter, directory: str):
         try:
@@ -8218,18 +8270,21 @@ class FilesPanel(Gtk.Box):
     # ── Public ────────────────────────────────────────────────────────────────
 
     def _refresh(self):
+        """Rebuild dropdown then reload file tree."""
+        self._populate_combo()
+        self._load_tree()
+
+    def _load_tree(self):
+        """Reload the file tree for the currently selected project."""
         d = self._get_project_dir()
         self._root_dir = d
         self._store.clear()
         self._selected_path = ""
         self._btn_meld.set_sensitive(False)
         if not d:
-            self._path_lbl.set_text("No project open")
             return
-        self._path_lbl.set_text(d)
         self._tv.connect("row-expanded", self._on_row_expanded)
         self._populate(None, d)
-        # Expand top-level dirs automatically
         self._tv.expand_row(Gtk.TreePath.new_first(), False)
 
     # ── Callbacks ─────────────────────────────────────────────────────────────
