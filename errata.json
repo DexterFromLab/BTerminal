@@ -1,6 +1,13 @@
 [
   {
     "date": "2026-04-24",
+    "message": "BTerminal v1.1.6 — okno aktualizacji ma teraz stały rozmiar i scrollbar. Nie wychodzi już poza ekran przy długiej erracie.",
+    "changes": [
+      "fix: dialog 'Dostępna nowa wersja' — stały rozmiar 520×380px + scrollbar"
+    ]
+  },
+  {
+    "date": "2026-04-24",
     "message": "BTerminal v1.1.5 — bezpieczny instalator z rollbackiem. Jeśli instalacja się nie powiedzie, poprzednia wersja zostaje automatycznie przywrócona. BTerminal powinien nadal działać po nieudanej aktualizacji.",
     "changes": [
       "feat: rollback instalatora — backup przed [5/7], przywrócenie przy błędzie (trap ERR)",
