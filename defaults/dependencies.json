@@ -57,6 +57,12 @@
       "required": false,
       "description": "Desktop file opener — used for log preview on Linux",
       "check": "which xdg-open"
+    },
+    "meld": {
+      "apt_package": "meld",
+      "required": false,
+      "description": "Visual diff/merge tool — used by Files panel to open project files",
+      "check": "which meld"
     }
   },
 

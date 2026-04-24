@@ -192,6 +192,7 @@ check_tool git        git             true  "git"
 check_tool git-lfs    git-lfs         false "git-lfs"
 check_tool ssh        openssh-client  true  "ssh"
 check_tool xdg-open   xdg-utils       false "xdg-open"
+check_tool meld       meld            false "meld"
 
 if command -v git-lfs &>/dev/null; then
     git lfs install --skip-repo >/dev/null 2>&1 || true

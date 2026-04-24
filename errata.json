@@ -14,7 +14,7 @@
       "feat: defaults/dependencies.json — pełny manifest zależności (runtime, GTK, system tools, claude_code, APIs, extensions)",
       "feat: nagłówek środowiska BTerminal w intro prompt i periodic inject (ze ścieżką do README.md)",
       "feat: symlinki live — defaults/, README.md, VERSION linkowane z repo (git pull = natychmiastowy efekt)",
-      "fix: mkdir BIN_DIR i INSTALL_DIR przed krokiem [2/7] w install.sh (naprawione via test Docker)"
+      "fix: naprawiono błąd instalacji przy świeżym systemie (brak katalogu ~/.local/bin przed instalacją Claude Code)"
     ]
   },
   {
