@@ -8333,11 +8333,11 @@ class FilesPanel(Gtk.Box):
             else:
                 tv.expand_row(path, False)
         else:
-            self._open_with_meld(fpath)
+            self._show_diff_dialog(fpath)
 
     def _on_open_meld(self, _btn):
         if self._selected_path:
-            self._open_with_meld(self._selected_path)
+            self._show_diff_dialog(self._selected_path)
 
     def _open_with_meld(self, path: str):
         if not shutil.which("meld"):
@@ -8346,6 +8346,146 @@ class FilesPanel(Gtk.Box):
         try:
             subprocess.Popen(["meld", path])
         except Exception as e:
+            show_error_dialog(self.app, f"Failed to open meld:\n{e}")
+
+    def _get_git_root(self, path: str) -> str:
+        """Return the git root for path, or empty string if not in a repo."""
+        try:
+            r = subprocess.run(
+                ["git", "rev-parse", "--show-toplevel"],
+                cwd=os.path.dirname(path) if os.path.isfile(path) else path,
+                capture_output=True, text=True, timeout=5,
+            )
+            return r.stdout.strip() if r.returncode == 0 else ""
+        except Exception:
+            return ""
+
+    def _get_recent_commits(self, git_root: str, n: int = 10) -> list[tuple[str, str]]:
+        """Return list of (short_hash, subject) for the last n commits."""
+        try:
+            r = subprocess.run(
+                ["git", "log", f"-{n}", "--pretty=format:%h %s"],
+                cwd=git_root, capture_output=True, text=True, timeout=5,
+            )
+            commits = []
+            for line in r.stdout.splitlines():
+                parts = line.split(" ", 1)
+                if len(parts) == 2:
+                    commits.append((parts[0], parts[1]))
+            return commits
+        except Exception:
+            return []
+
+    def _show_diff_dialog(self, fpath: str):
+        if not shutil.which("meld"):
+            show_error_dialog(self.app, "meld not found.\nInstall it: sudo apt install meld")
+            return
+
+        git_root = self._get_git_root(fpath)
+        commits = self._get_recent_commits(git_root) if git_root else []
+
+        win = self.get_toplevel()
+        dlg = Gtk.Dialog(title="Diff with commit", transient_for=win, modal=True)
+        dlg.set_default_size(480, -1)
+        dlg.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                        "Open Meld",     Gtk.ResponseType.OK)
+
+        box = dlg.get_content_area()
+        box.set_spacing(8)
+        box.set_margin_start(12); box.set_margin_end(12)
+        box.set_margin_top(12);   box.set_margin_bottom(12)
+
+        name_lbl = Gtk.Label(label=f"File: {os.path.relpath(fpath, git_root) if git_root else fpath}")
+        name_lbl.set_xalign(0)
+        name_lbl.get_style_context().add_class("dim-label")
+        box.pack_start(name_lbl, False, False, 0)
+
+        # ── Commit dropdown ──────────────────────────────────────────────────
+        commit_lbl = Gtk.Label(label="Compare with:")
+        commit_lbl.set_xalign(0)
+        box.pack_start(commit_lbl, False, False, 0)
+
+        # ListStore: display (str), hash (str)
+        combo_store = Gtk.ListStore(str, str)
+        combo_store.append(["HEAD (last commit)", "HEAD"])
+        for h, subj in commits[1:]:   # skip HEAD duplicate if present
+            short_subj = subj[:60] + "…" if len(subj) > 60 else subj
+            combo_store.append([f"{h}  {short_subj}", h])
+
+        combo = Gtk.ComboBox(model=combo_store)
+        ren = Gtk.CellRendererText()
+        ren.set_property("ellipsize", Pango.EllipsizeMode.END)
+        combo.pack_start(ren, True)
+        combo.add_attribute(ren, "text", 0)
+        combo.set_active(0)
+        box.pack_start(combo, False, False, 0)
+
+        # ── Custom hash entry ────────────────────────────────────────────────
+        custom_lbl = Gtk.Label(label="Or enter commit hash / branch:")
+        custom_lbl.set_xalign(0)
+        box.pack_start(custom_lbl, False, False, 4)
+
+        custom_entry = Gtk.Entry()
+        custom_entry.set_placeholder_text("e.g. a1b2c3d  or  main  or  HEAD~5")
+        custom_entry.set_activates_default(True)
+        box.pack_start(custom_entry, False, False, 0)
+
+        dlg.set_default_response(Gtk.ResponseType.OK)
+        dlg.show_all()
+
+        if not commits:
+            combo.set_sensitive(False)
+            combo_lbl_warn = Gtk.Label(label="(not a git repository)")
+            combo_lbl_warn.get_style_context().add_class("dim-label")
+            box.pack_start(combo_lbl_warn, False, False, 0)
+            box.show_all()
+
+        response = dlg.run()
+        ref = custom_entry.get_text().strip()
+        if not ref:
+            it2 = combo.get_active_iter()
+            ref = combo_store.get_value(it2, 1) if it2 else "HEAD"
+        dlg.destroy()
+
+        if response != Gtk.ResponseType.OK:
+            return
+        self._meld_diff_with_commit(fpath, git_root, ref)
+
+    def _meld_diff_with_commit(self, fpath: str, git_root: str, ref: str):
+        """Extract file at ref from git and open meld for diff."""
+        if not git_root:
+            show_error_dialog(self.app, "File is not in a git repository.")
+            return
+        rel = os.path.relpath(fpath, git_root)
+        try:
+            result = subprocess.run(
+                ["git", "show", f"{ref}:{rel}"],
+                cwd=git_root, capture_output=True, timeout=10,
+            )
+            if result.returncode != 0:
+                msg = result.stderr.decode(errors="replace").strip()
+                show_error_dialog(self.app, f"git show failed:\n{msg}")
+                return
+        except Exception as e:
+            show_error_dialog(self.app, f"git show error:\n{e}")
+            return
+
+        import tempfile
+        suffix = os.path.splitext(fpath)[1] or ".txt"
+        short_ref = ref[:12]
+        tmp = tempfile.NamedTemporaryFile(
+            prefix=f"{os.path.basename(fpath)}.{short_ref}.",
+            suffix=suffix, delete=False,
+        )
+        tmp.write(result.stdout)
+        tmp.close()
+
+        try:
+            subprocess.Popen(["meld", tmp.name, fpath],
+                             start_new_session=True,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception as e:
+            os.unlink(tmp.name)
             show_error_dialog(self.app, f"Failed to open meld:\n{e}")
 
     def _copy_to_clipboard(self, text: str):
@@ -8376,6 +8516,8 @@ class FilesPanel(Gtk.Box):
             menu.append(it2)
 
         _item("Open in Meld",          lambda: self._open_with_meld(fpath))
+        if not is_dir:
+            _item("Diff with commit…",  lambda: self._show_diff_dialog(fpath))
 
         # "Open With ▸" submenu
         open_with_item = Gtk.MenuItem(label="Open With ▸")
