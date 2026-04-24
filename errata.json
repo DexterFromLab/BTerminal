@@ -1,6 +1,14 @@
 [
   {
     "date": "2026-04-24",
+    "message": "BTerminal v1.1.7 — okno aktualizacji pokazuje teraz belkę postępu i bieżący krok instalacji. Widać co robi instalator zamiast pustego spinnera.",
+    "changes": [
+      "feat: belka postępu (pulse) w oknie aktualizacji",
+      "feat: live log — ostatnia linia stdout install.sh wyświetlana na bieżąco"
+    ]
+  },
+  {
+    "date": "2026-04-24",
     "message": "BTerminal v1.1.6 — okno aktualizacji ma teraz stały rozmiar i scrollbar. Nie wychodzi już poza ekran przy długiej erracie.",
     "changes": [
       "fix: dialog 'Dostępna nowa wersja' — stały rozmiar 520×380px + scrollbar"
