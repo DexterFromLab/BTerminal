@@ -8093,6 +8093,181 @@ class SkillsPanel(Gtk.Box):
             pass
 
 
+class FilesPanel(Gtk.Box):
+    """Sidebar file browser — shows project files, opens with meld by default."""
+
+    # Dirs/files to skip in the tree
+    _IGNORE = {".git", "__pycache__", ".claude", "node_modules", ".venv", "venv"}
+
+    def __init__(self, app):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.app = app
+        self._root_dir: str = ""
+
+        header = Gtk.Label(label="Files")
+        header.get_style_context().add_class("sidebar-header")
+        header.set_halign(Gtk.Align.START)
+        self.pack_start(header, False, False, 0)
+
+        # ── Path label ──────────────────────────────────────────────────────
+        self._path_lbl = Gtk.Label(label="No project open")
+        self._path_lbl.get_style_context().add_class("dim-label")
+        self._path_lbl.set_halign(Gtk.Align.START)
+        self._path_lbl.set_ellipsize(Pango.EllipsizeMode.START)
+        self._path_lbl.set_margin_start(8)
+        self._path_lbl.set_margin_top(4)
+        self._path_lbl.set_margin_bottom(2)
+        self.pack_start(self._path_lbl, False, False, 0)
+
+        # ── TreeStore: display_name, full_path, is_dir ──────────────────────
+        self._store = Gtk.TreeStore(str, str, bool)
+        self._tv = Gtk.TreeView(model=self._store)
+        self._tv.set_headers_visible(False)
+        self._tv.set_enable_tree_lines(True)
+
+        ren_icon = Gtk.CellRendererText()
+        ren_name = Gtk.CellRendererText()
+        ren_name.set_property("ellipsize", Pango.EllipsizeMode.END)
+
+        col = Gtk.TreeViewColumn()
+        col.pack_start(ren_icon, False)
+        col.pack_start(ren_name, True)
+        col.set_cell_data_func(ren_icon, self._render_icon)
+        col.add_attribute(ren_name, "text", 0)
+        col.set_expand(True)
+        self._tv.append_column(col)
+
+        self._tv.connect("row-activated", self._on_row_activated)
+        self._tv.get_selection().connect("changed", self._on_selection_changed)
+
+        tv_scroll = Gtk.ScrolledWindow()
+        tv_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        tv_scroll.set_vexpand(True)
+        tv_scroll.add(self._tv)
+        self.pack_start(tv_scroll, True, True, 0)
+
+        # ── Buttons ──────────────────────────────────────────────────────────
+        btn_row = Gtk.Box(spacing=4)
+        btn_row.set_margin_start(8)
+        btn_row.set_margin_end(8)
+        btn_row.set_margin_top(4)
+        btn_row.set_margin_bottom(6)
+
+        self._btn_meld = Gtk.Button(label="Open in Meld")
+        self._btn_meld.get_style_context().add_class("sidebar-btn")
+        self._btn_meld.set_sensitive(False)
+        self._btn_meld.connect("clicked", self._on_open_meld)
+        btn_row.pack_start(self._btn_meld, True, True, 0)
+
+        btn_refresh = Gtk.Button(label="↺")
+        btn_refresh.get_style_context().add_class("sidebar-btn")
+        btn_refresh.set_tooltip_text("Refresh file tree")
+        btn_refresh.connect("clicked", lambda _: self._refresh())
+        btn_row.pack_start(btn_refresh, False, False, 0)
+
+        self.pack_start(btn_row, False, False, 0)
+
+        self._selected_path: str = ""
+
+    # ── Helpers ──────────────────────────────────────────────────────────────
+
+    def _render_icon(self, col, cell, model, it, _data):
+        is_dir = model.get_value(it, 2)
+        cell.set_property("text", "📁 " if is_dir else "  ")
+
+    def _get_project_dir(self) -> str:
+        nb = self.app.notebook
+        page = nb.get_nth_page(nb.get_current_page())
+        if page and getattr(page, "claude_config", None):
+            d = page.claude_config.get("project_dir", "")
+            if d and os.path.isdir(d):
+                return d
+        # Fallback: scan all tabs for a Claude tab with a project dir
+        for i in range(nb.get_n_pages()):
+            tab = nb.get_nth_page(i)
+            if getattr(tab, "claude_config", None):
+                d = tab.claude_config.get("project_dir", "")
+                if d and os.path.isdir(d):
+                    return d
+        return ""
+
+    def _populate(self, parent_iter, directory: str):
+        try:
+            entries = list(os.scandir(directory))
+        except PermissionError:
+            return
+        dirs = sorted([e for e in entries if e.is_dir(follow_symlinks=False)
+                       and e.name not in self._IGNORE], key=lambda e: e.name.lower())
+        files = sorted([e for e in entries if e.is_file(follow_symlinks=False)
+                        and not e.name.startswith(".")], key=lambda e: e.name.lower())
+        for e in dirs:
+            it = self._store.append(parent_iter, [e.name, e.path, True])
+            # Add a dummy child so the expander arrow appears
+            self._store.append(it, ["", "__dummy__", False])
+        for e in files:
+            self._store.append(parent_iter, [e.name, e.path, False])
+
+    def _on_row_expanded(self, tv, it, path):
+        # Remove dummy, populate real children
+        first = self._store.iter_children(it)
+        if first and self._store.get_value(first, 1) == "__dummy__":
+            self._store.remove(first)
+            self._populate(it, self._store.get_value(it, 1))
+
+    # ── Public ────────────────────────────────────────────────────────────────
+
+    def _refresh(self):
+        d = self._get_project_dir()
+        self._root_dir = d
+        self._store.clear()
+        self._selected_path = ""
+        self._btn_meld.set_sensitive(False)
+        if not d:
+            self._path_lbl.set_text("No project open")
+            return
+        self._path_lbl.set_text(d)
+        self._tv.connect("row-expanded", self._on_row_expanded)
+        self._populate(None, d)
+        # Expand top-level dirs automatically
+        self._tv.expand_row(Gtk.TreePath.new_first(), False)
+
+    # ── Callbacks ─────────────────────────────────────────────────────────────
+
+    def _on_selection_changed(self, sel):
+        model, it = sel.get_selected()
+        if it:
+            path = model.get_value(it, 1)
+            self._selected_path = path if path != "__dummy__" else ""
+        else:
+            self._selected_path = ""
+        self._btn_meld.set_sensitive(bool(self._selected_path))
+
+    def _on_row_activated(self, tv, path, col):
+        it = self._store.get_iter(path)
+        fpath = self._store.get_value(it, 1)
+        is_dir = self._store.get_value(it, 2)
+        if is_dir:
+            if tv.row_expanded(path):
+                tv.collapse_row(path)
+            else:
+                tv.expand_row(path, False)
+        else:
+            self._open_with_meld(fpath)
+
+    def _on_open_meld(self, _btn):
+        if self._selected_path:
+            self._open_with_meld(self._selected_path)
+
+    def _open_with_meld(self, path: str):
+        if not shutil.which("meld"):
+            show_error_dialog(self.app, "meld not found.\nInstall it: sudo apt install meld")
+            return
+        try:
+            subprocess.Popen(["meld", path])
+        except Exception as e:
+            show_error_dialog(self.app, f"Failed to open meld:\n{e}")
+
+
 class PluginManagerPanel(Gtk.Box):
     """Panel for managing BTerminal plugins."""
 
@@ -8572,6 +8747,9 @@ class BTerminalApp(Gtk.Window):
         self.skills_panel = SkillsPanel(self)
         self.sidebar_stack.add_titled(self.skills_panel, "skills", "Skills")
 
+        self.files_panel = FilesPanel(self)
+        self.sidebar_stack.add_titled(self.files_panel, "files", "Files")
+
         self.plugin_panel = PluginManagerPanel(self)
         self.sidebar_stack.add_titled(self.plugin_panel, "plugins", "Plugins")
 
@@ -8584,7 +8762,7 @@ class BTerminalApp(Gtk.Window):
 
         _tab_defs_row1 = [("sessions", "Sessions"), ("ctx", "Ctx"),
                           ("consult", "Consult"), ("tasks", "Tasks")]
-        _tab_defs_row2 = [("memory", "Memory"), ("skills", "Skills"), ("plugins", "Plugins")]
+        _tab_defs_row2 = [("memory", "Memory"), ("skills", "Skills"), ("files", "Files"), ("plugins", "Plugins")]
 
         self._sidebar_tab_buttons = []
         for name, title in _tab_defs_row1:
@@ -8728,6 +8906,8 @@ class BTerminalApp(Gtk.Window):
                 self.task_panel.refresh()
             elif child is self.skills_panel:
                 self.skills_panel._refresh()
+            elif child is self.files_panel:
+                self.files_panel._refresh()
             elif child is self.plugin_panel:
                 self.plugin_panel.refresh()
 
