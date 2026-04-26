@@ -84,6 +84,10 @@ def bterminal_process():
         "name": "test_sleeper",
         "title": "TestSleeper",
         "run_command": "sleep 9999",
+        # Fake URL — sleep doesn't serve HTTP, but having a non-empty
+        # healthcheck_url lets the health endpoint short-circuit on
+        # is_running rather than complaining about a missing field.
+        "healthcheck_url": "http://127.0.0.1:65500/never",
         "default_in_session": False,
         "auto_start": False,
     }))
