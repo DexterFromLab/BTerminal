@@ -13,6 +13,53 @@ Branch: `feat/sidecar-plugins` z `master`
 
 ---
 
+## Status implementacji
+
+Wszystkie 10 etapów zaplanowanych dla brancha — **gotowe**.
+
+| Etap | Zakres | Status | Commit |
+|---|---|---|---|
+| 1 | debug-REST szkielet (flaga, token, server, audit, idle, marker) | [x] | `2c4b4b5` |
+| 2 | Read-only endpointy + GLib.idle bridge + regex router | [x] | `c4f77bd` |
+| 3 | Mutujące endpointy (tabs/window/quit) + 501 stuby | [x] | `b6f0e98` |
+| 4 | pytest scaffold + 4 smoke (health/auth/tabs/quit) | [x] | `793394e` |
+| 5 | Sidecar runtime (Discovery/Runner/HealthChecker) | [x] | `28f3bf2` |
+| 6 | `/api/sidecars/{name}/{start,stop,health}` live | [x] | `b53b33b` |
+| 7 | 5 manifestów (btmsg/mr/taskboard/explorer/agent-tester) + slow test | [x] | `3ced20d` |
+| 8 | **Korelacja zakładka↔plugin** — hot toggle, per-tab, refcount | [x] | `4adee97` |
+| 9 | Sidecar prompts injected per-tab + `/api/tabs/{idx}/intro_prompt` | [x] | `ea4e9f0` |
+| 10 | Komplet smoke suite (GTK+sidecar coexist, audit, screenshot, idle) | [x] | `8cd8e2f` |
+
+Plus drobny **fix produkcyjny** zlewały w trakcie (poza branchem) na master
+`ssh_client/`: `b04a118 fix(tasks-panel): per-tab task project binding +
+claim cleanup` — dropdown Tasks panelu zapisuje wybór do
+`tab._task_project` (umożliwia auto-trigger per-zakładka, naprawa którą
+ten branch zaprojektował i wymaga do dalszej pracy).
+
+### Final test summary (VM michal_mint, xvfb)
+
+```
+24 collected, 22 passed, 2 skipped in 8.24s
+```
+
+Skipped:
+- `test_btmsg_starts_and_health` (slow) — manifest cwd missing on VM
+  (pełny test E2E uruchamiany tylko na laptopie z agent_controller)
+- `test_quit_with_confirm_kills_process` — destruktywny (zabiłby
+  session-scoped fixture); identyczny path jest egzekwowany przez
+  fixture teardown (`POST /api/quit?confirm=true`)
+
+### Smoke history (wybrane wizualne)
+
+| Commit | Smoke screenshot | Co potwierdza |
+|---|---|---|
+| `2c4b4b5` | gnome-screenshot z VM | Title bar `[DEBUG-REST :7780]` + czerwony pasek 2px nad notebookiem |
+| `c4f77bd` | `/tmp/etap2-self.png` (z REST) | `GET /api/window/screenshot` zwraca prawdziwy PNG, WM-niezależny |
+| `b6f0e98` | 4 screenshoty open→feed→close | REST faktycznie wpisuje w VTE: `echo from-debug-rest` widoczny |
+| `b53b33b` | 3 screenshoty start/during/stop dummy | Identyczny md5 — sidecar lifecycle bez side-effectów GUI |
+| `4adee97` | 4 screenshoty per-tab refcount | baseline ↔ after-second-close identyczny md5 (cleanup) |
+| `4adee97` | 3 screenshoty toggle smoke_panel | before ↔ enabled identyczny md5 (perfect re-load) |
+
 ## Zakres ustalony z użytkownikiem
 
 - **Tak:** dodajemy nowy loader pluginów typu *sidecar* (HTTP/subprocess)
