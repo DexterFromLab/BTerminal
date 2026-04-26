@@ -75,6 +75,42 @@ def bterminal_process():
     (5s) → kill → close http client → rmtree isolated HOME.
     """
     home = tempfile.mkdtemp(prefix="bterminal-test-home-")
+    # Seed a lightweight sidecar manifest so refcount + per-tab tests can
+    # exercise the full lifecycle without depending on agent_controller.
+    sidecars_dir = Path(home) / ".config" / "bterminal" / "sidecars"
+    sidecars_dir.mkdir(parents=True, exist_ok=True)
+    import json as _json
+    (sidecars_dir / "test_sleeper.json").write_text(_json.dumps({
+        "name": "test_sleeper",
+        "title": "TestSleeper",
+        "run_command": "sleep 9999",
+        "default_in_session": False,
+        "auto_start": False,
+    }))
+    # Seed a minimal GTK plugin so hot toggle tests can verify the
+    # importlib + activate/deactivate paths end-to-end.
+    plugins_dir = Path(home) / ".config" / "bterminal" / "plugins"
+    plugins_dir.mkdir(parents=True, exist_ok=True)
+    (plugins_dir / "test_panel.py").write_text(
+        "import gi\n"
+        "gi.require_version('Gtk', '3.0')\n"
+        "from gi.repository import Gtk\n\n"
+        "class BTerminalPlugin:\n"
+        "    name=''; title=''; version=''; description=''; author=''\n"
+        "    default_in_session=True\n"
+        "    def activate(self, app): return None\n"
+        "    def deactivate(self): pass\n"
+        "    def get_keyboard_shortcuts(self): return []\n"
+        "    def on_sidebar_shown(self): pass\n"
+        "    def get_session_context(self): return None\n\n"
+        "class TestPanel(BTerminalPlugin):\n"
+        "    name='test_panel'; title='TestPanel'; version='0.0.1'\n"
+        "    def activate(self, app):\n"
+        "        b = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)\n"
+        "        b.pack_start(Gtk.Label(label='test_panel active'), False, False, 0)\n"
+        "        return b\n\n"
+        "def create_plugin(app): return TestPanel()\n"
+    )
     env = {**os.environ, "HOME": home}
     proc = subprocess.Popen(
         ["xvfb-run", "-a", sys.executable, "bterminal.py", "--debug-rest"],
