@@ -10,6 +10,7 @@ gi.require_version("Gdk", "3.0")
 import argparse
 import atexit
 import http.server
+from collections import defaultdict
 from dataclasses import dataclass, field, fields
 import json
 import os
@@ -211,6 +212,9 @@ class BTerminalDebugHandler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         self._dispatch(self.server._routes_post)
 
+    def do_PUT(self):
+        self._dispatch(self.server._routes_put)
+
 
 class BTerminalDebugServer(http.server.HTTPServer):
     """Loopback-only debug REST server. Single-threaded — GTK calls via GLib.idle_add."""
@@ -222,6 +226,7 @@ class BTerminalDebugServer(http.server.HTTPServer):
         self.last_request_ts = time.time()
         self._routes_get: list = []   # list of (regex_str, handler)
         self._routes_post: list = []
+        self._routes_put: list = []
 
 
 def _via_glib_idle(callable_, timeout: float = 5.0):
@@ -424,6 +429,34 @@ def _route_post_tabs_local(h: BTerminalDebugHandler) -> None:
     h._send_json(200, {"ok": True, "idx": new_idx})
 
 
+def _route_post_tabs_claude(h: BTerminalDebugHandler) -> None:
+    body = h._read_json_body()
+    if body is None:
+        return
+    config_name = body.get("config_name")
+    if not isinstance(config_name, str) or not config_name:
+        h._send_error(400, "'config_name' required (string)")
+        return
+    enabled_override = body.get("enabled_plugins")
+    app = h.server.app
+
+    def _open():
+        for cfg in app.claude_manager.all():
+            if cfg.get("name") == config_name:
+                config = dict(cfg)
+                if isinstance(enabled_override, list):
+                    config["enabled_plugins"] = enabled_override
+                app.open_claude_tab(config)
+                return ("ok", app.notebook.get_current_page())
+        return ("not_found", None)
+
+    status, idx = _via_glib_idle(_open, timeout=10.0)
+    if status == "not_found":
+        h._send_error(404, f"claude session '{config_name}' not found")
+        return
+    h._send_json(200, {"ok": True, "idx": idx})
+
+
 def _route_post_tab_close(h: BTerminalDebugHandler, idx: str) -> None:
     app = h.server.app
     idx_int = int(idx)
@@ -539,8 +572,133 @@ def _route_post_quit(h: BTerminalDebugHandler) -> None:
     h._send_json(200, {"ok": True, "scheduled": True})
 
 
-def _route_stub_plugin(h: BTerminalDebugHandler, name: str, action: str) -> None:
-    h._send_error(501, f"plugins/{name}/{action} scheduled for Etap 8")
+def _route_get_tab_plugins(h: BTerminalDebugHandler, idx: str) -> None:
+    app = h.server.app
+    idx_int = int(idx)
+
+    def _read():
+        tab = _resolve_tab(app, idx_int)
+        if tab is None or not isinstance(tab, TerminalTab):
+            return ("not_found", None)
+        if tab.enabled_plugins is None:
+            return ("ok", None)
+        return ("ok", sorted(tab.enabled_plugins))
+
+    status, value = _via_glib_idle(_read)
+    if status == "not_found":
+        h._send_error(404, f"no terminal tab at idx {idx_int}")
+        return
+    h._send_json(200, {"idx": idx_int, "enabled_plugins": value})
+
+
+def _route_put_tab_plugins(h: BTerminalDebugHandler, idx: str) -> None:
+    body = h._read_json_body()
+    if body is None:
+        return
+    enabled = body.get("enabled")
+    if not isinstance(enabled, list) or not all(isinstance(x, str) for x in enabled):
+        h._send_error(400, "'enabled' must be a list of strings")
+        return
+    new_set = set(enabled)
+    app = h.server.app
+    idx_int = int(idx)
+
+    def _apply():
+        tab = _resolve_tab(app, idx_int)
+        if tab is None or not isinstance(tab, TerminalTab):
+            return ("not_found", None)
+        old_set = tab.enabled_plugins if tab.enabled_plugins is not None else set()
+        to_acquire = new_set - old_set
+        to_release = old_set - new_set
+        # Only sidecars participate in refcount; GTK plugins are global.
+        for name in to_acquire:
+            if name in app.sidecar_manifests:
+                app._sidecar_acquire(name)
+        for name in to_release:
+            if name in app.sidecar_manifests:
+                app._sidecar_release(name)
+        tab.enabled_plugins = new_set
+        return ("ok", {
+            "acquired": sorted(to_acquire & set(app.sidecar_manifests)),
+            "released": sorted(to_release & set(app.sidecar_manifests)),
+        })
+
+    status, info = _via_glib_idle(_apply)
+    if status == "not_found":
+        h._send_error(404, f"no terminal tab at idx {idx_int}")
+        return
+    h._send_json(200, {
+        "ok": True,
+        "idx": idx_int,
+        "enabled_plugins": sorted(new_set),
+        "diff": info,
+    })
+
+
+def _route_post_plugin_enable(h: BTerminalDebugHandler, name: str) -> None:
+    app = h.server.app
+
+    def _do():
+        cfg = {}
+        if os.path.isfile(PLUGINS_CONFIG_FILE):
+            try:
+                with open(PLUGINS_CONFIG_FILE) as fh:
+                    cfg = json.load(fh)
+            except (OSError, json.JSONDecodeError):
+                cfg = {}
+        cfg[name] = True
+        os.makedirs(os.path.dirname(PLUGINS_CONFIG_FILE), exist_ok=True)
+        with open(PLUGINS_CONFIG_FILE, "w") as fh:
+            json.dump(cfg, fh, indent=2)
+        already = name in app._plugins
+        if not already:
+            app._hot_load_plugin(name)
+        if hasattr(app, "plugin_panel"):
+            try:
+                app.plugin_panel.refresh()
+            except Exception:
+                pass
+        return {"already_loaded": already, "loaded_now": name in app._plugins}
+
+    try:
+        result = _via_glib_idle(_do, timeout=10.0)
+    except Exception as exc:  # noqa: BLE001
+        h._send_error(400, f"{type(exc).__name__}: {exc}")
+        return
+    h._send_json(200, {"ok": True, "name": name, **result})
+
+
+def _route_post_plugin_disable(h: BTerminalDebugHandler, name: str) -> None:
+    app = h.server.app
+
+    def _do():
+        cfg = {}
+        if os.path.isfile(PLUGINS_CONFIG_FILE):
+            try:
+                with open(PLUGINS_CONFIG_FILE) as fh:
+                    cfg = json.load(fh)
+            except (OSError, json.JSONDecodeError):
+                cfg = {}
+        cfg[name] = False
+        os.makedirs(os.path.dirname(PLUGINS_CONFIG_FILE), exist_ok=True)
+        with open(PLUGINS_CONFIG_FILE, "w") as fh:
+            json.dump(cfg, fh, indent=2)
+        was_loaded = name in app._plugins
+        if was_loaded:
+            app._hot_unload_plugin(name)
+        if hasattr(app, "plugin_panel"):
+            try:
+                app.plugin_panel.refresh()
+            except Exception:
+                pass
+        return {"was_loaded": was_loaded}
+
+    try:
+        result = _via_glib_idle(_do, timeout=10.0)
+    except Exception as exc:  # noqa: BLE001
+        h._send_error(400, f"{type(exc).__name__}: {exc}")
+        return
+    h._send_json(200, {"ok": True, "name": name, **result})
 
 
 def _route_post_sidecar_start(h: BTerminalDebugHandler, name: str) -> None:
@@ -768,6 +926,39 @@ class HealthChecker:
             return False
 
 
+def _list_available_plugins(app) -> list[dict]:
+    """Unified view of GTK plugins + sidecar manifests for per-tab UI
+    (ClaudeCodeDialog checkbox list, /api endpoints, intro-prompt builder).
+
+    Each entry: {name, title, type:'gtk'|'sidecar', default_in_session,
+    currently_enabled_globally}.
+
+    For GTK plugins, currently_enabled_globally reflects whether the plugin
+    is currently loaded in app._plugins. For sidecars, manifest existence is
+    enough — they are always available to be selected per tab (start happens
+    on demand via refcount).
+    """
+    out: list[dict] = []
+    for name, plugin in app._plugins.items():
+        out.append({
+            "name": name,
+            "title": getattr(plugin, "title", "") or name,
+            "type": "gtk",
+            "default_in_session": getattr(plugin, "default_in_session", True),
+            "currently_enabled_globally": True,
+        })
+    for name, manifest in app.sidecar_manifests.items():
+        out.append({
+            "name": name,
+            "title": manifest.title or name,
+            "type": "sidecar",
+            "default_in_session": manifest.default_in_session,
+            "currently_enabled_globally": True,
+        })
+    out.sort(key=lambda d: (d["type"], d["name"]))
+    return out
+
+
 def _start_debug_rest_server(app, token: str) -> BTerminalDebugServer:
     """Bind 127.0.0.1:7780, register routes, start serve_forever in daemon thread."""
     server = BTerminalDebugServer(app, token)
@@ -778,18 +969,24 @@ def _start_debug_rest_server(app, token: str) -> BTerminalDebugServer:
         (r"/api/plugins", _route_plugins),
         (r"/api/sidecars", _route_sidecars),
         (r"/api/sidecars/(?P<name>[\w.-]+)/health", _route_get_sidecar_health),
+        (r"/api/tabs/(?P<idx>\d+)/plugins", _route_get_tab_plugins),
         (r"/api/window/screenshot", _route_window_screenshot),
         (r"/api/debug/log", _route_debug_log),
     ])
+    server._routes_put.extend([
+        (r"/api/tabs/(?P<idx>\d+)/plugins", _route_put_tab_plugins),
+    ])
     server._routes_post.extend([
         (r"/api/tabs/local", _route_post_tabs_local),
+        (r"/api/tabs/claude", _route_post_tabs_claude),
         (r"/api/tabs/(?P<idx>\d+)/close", _route_post_tab_close),
         (r"/api/tabs/(?P<idx>\d+)/feed", _route_post_tab_feed),
         (r"/api/tabs/(?P<idx>\d+)/key", _route_post_tab_key),
         (r"/api/window/toggle_sidebar", _route_post_toggle_sidebar),
         (r"/api/window/toggle_git_panel", _route_post_toggle_git_panel),
         (r"/api/quit", _route_post_quit),
-        (r"/api/plugins/(?P<name>[\w.-]+)/(?P<action>enable|disable)", _route_stub_plugin),
+        (r"/api/plugins/(?P<name>[\w.-]+)/enable", _route_post_plugin_enable),
+        (r"/api/plugins/(?P<name>[\w.-]+)/disable", _route_post_plugin_disable),
         (r"/api/sidecars/(?P<name>[\w.-]+)/start", _route_post_sidecar_start),
         (r"/api/sidecars/(?P<name>[\w.-]+)/stop", _route_post_sidecar_stop),
     ])
@@ -1877,6 +2074,50 @@ class ClaudeCodeDialog(Gtk.Dialog):
         scrolled.add(self.textview)
         box.pack_start(scrolled, True, True, 0)
 
+        # Per-tab plugin selector (Etap 8)
+        box.pack_start(Gtk.Separator(), False, False, 2)
+        lbl_plugins = Gtk.Label(
+            label="Plugins available in this session:", halign=Gtk.Align.START,
+        )
+        box.pack_start(lbl_plugins, False, False, 0)
+
+        self._plugin_checks: dict = {}
+        saved_enabled = None
+        if session and isinstance(session.get("enabled_plugins"), list):
+            saved_enabled = set(session["enabled_plugins"])
+
+        plugins_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        available = _list_available_plugins(parent) if hasattr(parent, "_plugins") else []
+        for entry in available:
+            name = entry["name"]
+            tag = "[GTK]" if entry["type"] == "gtk" else "[sidecar]"
+            label = f"{tag} {entry['title']}"
+            if entry["title"] != name:
+                label += f"  ({name})"
+            chk = Gtk.CheckButton(label=label)
+            if saved_enabled is not None:
+                chk.set_active(name in saved_enabled)
+            else:
+                chk.set_active(
+                    entry["default_in_session"]
+                    and entry["currently_enabled_globally"]
+                )
+            self._plugin_checks[name] = chk
+            plugins_box.pack_start(chk, False, False, 0)
+        if not available:
+            empty_lbl = Gtk.Label(
+                label="(no plugins or sidecar manifests available)",
+                halign=Gtk.Align.START,
+            )
+            empty_lbl.get_style_context().add_class("dim-label")
+            plugins_box.pack_start(empty_lbl, False, False, 0)
+
+        plugins_scroll = Gtk.ScrolledWindow()
+        plugins_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        plugins_scroll.set_min_content_height(120)
+        plugins_scroll.add(plugins_box)
+        box.pack_start(plugins_scroll, False, False, 0)
+
         # Edit mode: fill fields
         if session:
             self.entry_name.set_text(session.get("name", ""))
@@ -1904,6 +2145,9 @@ class ClaudeCodeDialog(Gtk.Dialog):
             "skip_permissions": self.chk_skip_perms.get_active(),
             "prompt": prompt,
             "project_dir": self.entry_project_dir.get_text().strip(),
+            "enabled_plugins": sorted(
+                name for name, chk in self._plugin_checks.items() if chk.get_active()
+            ),
         }
 
     def validate(self):
@@ -3172,6 +3416,11 @@ class TerminalTab(Gtk.Box):
         self._task_session_id = str(uuid.uuid4())
         self._inject_pending = None  # (project, count, refresh_every) when rules inject is due
         self._stats_bar = None
+        # Per-tab plugin gating (Etap 8). None = backwards-compat: every
+        # globally-enabled plugin contributes to this tab's intro prompt and
+        # gets sidecar-acquired. A set means an explicit allow-list (e.g.
+        # the user picked checkboxes in ClaudeCodeDialog).
+        self.enabled_plugins: set[str] | None = None
         if claude_config:
             project_dir = claude_config.get("project_dir", "")
             if project_dir:
@@ -3283,8 +3532,15 @@ class TerminalTab(Gtk.Box):
                 prompt += "\n\n" + custom_prompt
         else:
             prompt = custom_prompt
-        # Inject plugin session context
+        # Inject plugin session context (Etap 8: filter by per-tab
+        # enabled_plugins; None = include every loaded plugin = backwards
+        # compat). Sidecar prompts are injected in a separate loop in Etap 9.
         for plugin in self.app._plugins.values():
+            if (
+                self.enabled_plugins is not None
+                and plugin.name not in self.enabled_plugins
+            ):
+                continue
             try:
                 ctx = plugin.get_session_context()
                 if ctx:
@@ -7996,6 +8252,11 @@ class BTerminalPlugin:
     version = ""
     description = ""
     author = ""
+    # Whether to enable this plugin by default in newly opened Claude Code
+    # tabs. Subclasses can override to False for opt-in plugins (e.g. heavy
+    # ones the user usually does not need). Used by Etap 8 per-tab plugin
+    # selection in ClaudeCodeDialog.
+    default_in_session = True
 
     def activate(self, app):
         return None
@@ -9623,15 +9884,26 @@ class PluginManagerPanel(Gtk.Box):
         config = self._load_config()
         config[mod_name] = enabled
         self._save_config(config)
-        action = "enabled" if enabled else "disabled"
-        dlg = Gtk.MessageDialog(
-            transient_for=self.app, modal=True,
-            message_type=Gtk.MessageType.INFO,
-            buttons=Gtk.ButtonsType.OK,
-            text=f'Plugin "{mod_name}" {action}.\nRestart BTerminal for changes to take effect.',
-        )
-        dlg.run()
-        dlg.destroy()
+
+        # Etap 8: hot toggle — no restart needed.
+        err = None
+        try:
+            if enabled:
+                self.app._hot_load_plugin(mod_name)
+            else:
+                self.app._hot_unload_plugin(mod_name)
+        except Exception as exc:  # noqa: BLE001
+            err = f"{type(exc).__name__}: {exc}"
+
+        if err is not None:
+            dlg = Gtk.MessageDialog(
+                transient_for=self.app, modal=True,
+                message_type=Gtk.MessageType.WARNING,
+                buttons=Gtk.ButtonsType.OK,
+                text=f'Plugin "{mod_name}" toggle failed:\n{err}',
+            )
+            dlg.run()
+            dlg.destroy()
         self.refresh()
 
     # ── Add plugin ──
@@ -10087,6 +10359,9 @@ class BTerminalApp(Gtk.Window):
         self.sidecar_discovery = SidecarDiscovery()
         self.sidecar_runner = SidecarRunner()
         self.sidecar_manifests = self.sidecar_discovery.load_all()
+        # Per-tab refcount (Etap 8): start sidecar when first tab claims it,
+        # stop when last tab drops it.
+        self.sidecar_refcounts: dict[str, int] = defaultdict(int)
         atexit.register(self.sidecar_runner.stop_all)
 
         # ── Debug REST (off unless --debug-rest / BTERMINAL_DEBUG_REST=1) ──
@@ -10310,6 +10585,18 @@ class BTerminalApp(Gtk.Window):
 
     def open_claude_tab(self, config):
         tab = TerminalTab(self, claude_config=config)
+        # Per-tab plugin gating (Etap 8): if the user picked specific plugins
+        # in ClaudeCodeDialog, persist that choice on the tab. None means
+        # "every globally-enabled plugin contributes" (backwards compat).
+        enabled = config.get("enabled_plugins")
+        if isinstance(enabled, list):
+            tab.enabled_plugins = set(enabled)
+            # Acquire sidecars referenced by this tab. The first tab to
+            # claim a sidecar starts it; the last to release it stops it
+            # (close_tab handles release in Etap 8.k).
+            for name in tab.enabled_plugins:
+                if name in self.sidecar_manifests:
+                    self._sidecar_acquire(name)
         base_name = config.get("name", "Claude Code")
         # Count existing tabs with the same base config name
         count = 0
@@ -10349,6 +10636,14 @@ class BTerminalApp(Gtk.Window):
                 db.close()
             except Exception:
                 pass
+        # Release sidecar refcounts (Etap 8.k). When the last tab using a
+        # sidecar closes, _sidecar_release fires runner.stop and the port
+        # is freed.
+        enabled = getattr(tab, "enabled_plugins", None)
+        if enabled is not None:
+            for name in enabled:
+                if name in self.sidecar_manifests:
+                    self._sidecar_release(name)
         # Collect Claude Code session log on tab close
         _collect_claude_log(tab)
         idx = self.notebook.page_num(tab)
@@ -10604,6 +10899,99 @@ class BTerminalApp(Gtk.Window):
                 print(f"[plugins] Failed to deactivate {plugin.name}: {e}")
         self._plugins.clear()
         self._plugin_shortcuts.clear()
+
+    # ── Hot toggle (Etap 8) ──
+
+    def _hot_load_plugin(self, mod_name):
+        """Load a single plugin from PLUGINS_DIR and register it without restart."""
+        if mod_name in self._plugins:
+            return
+        py_file = os.path.join(PLUGINS_DIR, mod_name + ".py")
+        pkg_init = os.path.join(PLUGINS_DIR, mod_name, "__init__.py")
+        if os.path.isfile(py_file):
+            path = py_file
+        elif os.path.isfile(pkg_init):
+            path = pkg_init
+        else:
+            raise FileNotFoundError(
+                f"plugin '{mod_name}' not found in {PLUGINS_DIR}"
+            )
+        spec = importlib.util.spec_from_file_location(
+            f"bterminal_plugin_{mod_name}", path,
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        plugin = module.create_plugin(self)
+        self._register_plugin(plugin)
+
+    def _hot_unload_plugin(self, mod_name):
+        """Deactivate + remove from sidebar without restart.
+
+        Shortcuts are flat-tracked (no per-plugin id), so we rebuild them
+        from the remaining plugins to drop entries that referenced bound
+        methods of the deactivated instance.
+        """
+        plugin = self._plugins.get(mod_name)
+        if plugin is None:
+            return
+        panel = self.sidebar_stack.get_child_by_name(plugin.name)
+        if panel is not None:
+            self.sidebar_stack.remove(panel)
+        for btn in list(self._sidebar_tab_buttons):
+            if btn.get_label() == plugin.title:
+                self._sidebar_switcher.remove(btn)
+                self._sidebar_tab_buttons.remove(btn)
+                break
+        try:
+            plugin.deactivate()
+        except Exception as exc:  # noqa: BLE001 — never raise on disable
+            print(f"[plugins] deactivate {mod_name} raised: {exc}")
+        del self._plugins[mod_name]
+        # Rebuild shortcuts from remaining loaded plugins
+        self._plugin_shortcuts.clear()
+        for p in self._plugins.values():
+            try:
+                for shortcut in p.get_keyboard_shortcuts():
+                    self._plugin_shortcuts.append(shortcut)
+            except Exception:
+                pass
+
+    # ── Sidecar refcount (Etap 8) ──
+
+    def _sidecar_acquire(self, name):
+        """Increment refcount for sidecar `name`. On 0→1 transition, start it.
+
+        No-op if `name` is not a known manifest (defensive against stale tab
+        state pointing at a manifest that was deleted between sessions).
+        """
+        manifest = self.sidecar_manifests.get(name)
+        if manifest is None:
+            return
+        prev = self.sidecar_refcounts[name]
+        self.sidecar_refcounts[name] = prev + 1
+        if prev == 0:
+            try:
+                self.sidecar_runner.start(name, manifest)
+            except Exception as exc:  # noqa: BLE001
+                # Roll back the refcount so the next acquire can retry the
+                # start. We deliberately swallow the error — the user will
+                # see it next time they hit /api/sidecars/{name}/health.
+                self.sidecar_refcounts[name] = prev
+                print(f"[sidecar] start {name} failed: {exc}")
+
+    def _sidecar_release(self, name):
+        """Decrement refcount. On 1→0 transition, stop the sidecar."""
+        if name not in self.sidecar_refcounts:
+            return
+        prev = self.sidecar_refcounts[name]
+        if prev <= 0:
+            return
+        self.sidecar_refcounts[name] = prev - 1
+        if prev == 1:
+            try:
+                self.sidecar_runner.stop(name)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[sidecar] stop {name} failed: {exc}")
 
     def _on_key_press(self, widget, event):
         mod = event.state & Gtk.accelerator_get_default_mod_mask()
