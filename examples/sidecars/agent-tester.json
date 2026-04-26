@@ -1,0 +1,15 @@
+{
+  "name": "agent-tester",
+  "title": "Agent Tester",
+  "description": "Autonomous QA agent driven by test graphs with visual comparison (Playwright + OpenCV)",
+  "plugin_address": "http://127.0.0.1:8081/api",
+  "plugin_dashboard": "http://127.0.0.1:8081/docs",
+  "healthcheck_url": "http://127.0.0.1:8081/api/health",
+  "run_command": "./.venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8081",
+  "reset_command": "pkill -f 'uvicorn api.main' || true",
+  "cwd": "/home/bartek/workspace/agent-tester",
+  "env": {},
+  "default_in_session": false,
+  "auto_start": false,
+  "prompt": "## agent-tester — Autonomous QA agent\n\nBase URL: http://127.0.0.1:8081/api\nSwagger UI: http://127.0.0.1:8081/docs\n\nDrives test runs through graphs of pages/elements with screenshot diffs and CV checks. Same surface is exposed via MCP stdio (`claude mcp add agent-tester -- .venv/bin/python -m agent.mcp_server`) — prefer MCP from inside Claude Code.\n\n### Key REST endpoints\n\n```\nGET  /api/health                      Liveness check\nGET  /api/graphs                      List test graphs\nGET  /api/graphs/{id}                 Get graph definition\nPOST /api/runs       {graph_id, breakpoints?}  Start a new test run\nGET  /api/runs/{run_id}/status        status, current_node, paused_at, cv_results\nGET  /api/runs/{run_id}/results       Full results (nodes, screenshots, findings)\nGET  /api/runs/{run_id}/events        Event stream (paused, finished, errors)\nPOST /api/runs/{run_id}/resume {findings[]}    Resume a paused run with analysis\nPOST /api/runs/{run_id}/stop          Stop a running test\nPOST /api/reports                     Create a report from a finished run\n```\n\n### Browser inspection (used inside breakpoints)\n\n```\nGET  /api/browser/screenshot          Current viewport PNG\nGET  /api/browser/dom                 Live DOM HTML\nGET  /api/browser/console_logs        JS console log lines\nPOST /api/browser/evaluate  {js}      Evaluate JS, return result\n```\n\n### Workflow\n\n1. POST /api/runs to start a graph run (optionally with breakpoints on specific nodes).\n2. Poll /api/runs/{id}/status — when paused, the runner blocks until you call resume.\n3. At a pause: use /api/browser/* to inspect DOM/console/screenshot, decide findings.\n4. POST /api/runs/{id}/resume with `findings[]` — runner moves to the next node.\n5. After completion: GET /api/runs/{id}/results, then POST /api/reports.\n\n### Ergonomic notes\n\n- Heavy process (FastAPI + Playwright). Start only when you need it (auto_start=false).\n- /docs is the live Swagger UI — quickest way to explore the schema.\n- Each finding is `{severity: info|warning|high|critical, description: str}`.\n"
+}
