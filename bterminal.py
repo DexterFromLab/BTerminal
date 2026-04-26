@@ -149,18 +149,20 @@ class BTerminalDebugHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
         _audit_log(self.command, self.path, status, message)
 
-    def _dispatch(self, routes: dict) -> None:
+    def _dispatch(self, routes: list) -> None:
         if not self._verify_auth():
             return
         self.server.last_request_ts = time.time()
-        handler = routes.get(self.path)
-        if handler is None:
-            self._send_error(404, "not found")
+        for pattern, handler in routes:
+            m = re.fullmatch(pattern, self.path)
+            if not m:
+                continue
+            try:
+                handler(self, **m.groupdict())
+            except Exception as exc:  # noqa: BLE001 — REST must not propagate
+                self._send_error(500, f"{type(exc).__name__}: {exc}")
             return
-        try:
-            handler(self)
-        except Exception as exc:  # noqa: BLE001 — REST must not propagate
-            self._send_error(500, f"{type(exc).__name__}: {exc}")
+        self._send_error(404, "not found")
 
     def do_GET(self):
         self._dispatch(self.server._routes_get)
@@ -177,8 +179,33 @@ class BTerminalDebugServer(http.server.HTTPServer):
         self.app = app
         self.token = token
         self.last_request_ts = time.time()
-        self._routes_get: dict = {}
-        self._routes_post: dict = {}
+        self._routes_get: list = []   # list of (regex_str, handler)
+        self._routes_post: list = []
+
+
+def _via_glib_idle(callable_, timeout: float = 5.0):
+    """Run a no-arg callable on the GTK main loop, return its result.
+
+    Bridges REST handler thread → GTK thread. Raises TimeoutError or
+    the callable's own exception.
+    """
+    result_q: queue.Queue = queue.Queue(1)
+
+    def _wrapper():
+        try:
+            result_q.put(("ok", callable_()))
+        except Exception as exc:  # noqa: BLE001
+            result_q.put(("err", exc))
+        return False
+
+    GLib.idle_add(_wrapper)
+    try:
+        kind, val = result_q.get(timeout=timeout)
+    except queue.Empty as exc:
+        raise TimeoutError(f"GTK callback exceeded {timeout}s") from exc
+    if kind == "err":
+        raise val
+    return val
 
 
 def _route_health(h: BTerminalDebugHandler) -> None:
@@ -190,10 +217,153 @@ def _route_health(h: BTerminalDebugHandler) -> None:
     })
 
 
+def _route_state(h: BTerminalDebugHandler) -> None:
+    app = h.server.app
+
+    def _gather():
+        return {
+            "version": APP_VERSION,
+            "debug_mode": True,
+            "tabs_count": app.notebook.get_n_pages(),
+            "current_tab": app.notebook.get_current_page(),
+            "plugins_loaded": sorted(app._plugins.keys()),
+            "sidecars": [],
+            "options": {
+                "theme": _OPTIONS.get("theme"),
+                "font": _OPTIONS.get("font"),
+            },
+        }
+
+    h._send_json(200, _via_glib_idle(_gather))
+
+
+def _route_tabs(h: BTerminalDebugHandler) -> None:
+    app = h.server.app
+
+    def _gather():
+        out = []
+        for idx in range(app.notebook.get_n_pages()):
+            tab = app.notebook.get_nth_page(idx)
+            if not isinstance(tab, TerminalTab):
+                continue
+            entry = {"idx": idx, "title": tab.get_label()}
+            if getattr(tab, "claude_config", None):
+                entry["type"] = "claude"
+                entry["claude_config_name"] = tab.claude_config.get("name")
+            elif getattr(tab, "session", None):
+                entry["type"] = "ssh"
+                entry["session_name"] = tab.session.get("name")
+            else:
+                entry["type"] = "local"
+            if getattr(tab, "_task_project", None):
+                entry["task_project"] = tab._task_project
+            out.append(entry)
+        return out
+
+    h._send_json(200, {"tabs": _via_glib_idle(_gather)})
+
+
+def _route_plugins(h: BTerminalDebugHandler) -> None:
+    app = h.server.app
+
+    def _gather():
+        out = []
+        loaded_names = set(app._plugins.keys())
+        for name, plugin in app._plugins.items():
+            out.append({
+                "name": name,
+                "title": getattr(plugin, "title", name) or name,
+                "version": getattr(plugin, "version", "") or "",
+                "author": getattr(plugin, "author", "") or "",
+                "description": getattr(plugin, "description", "") or "",
+                "loaded": True,
+                "enabled": True,
+            })
+        if os.path.isdir(PLUGINS_DIR):
+            cfg = {}
+            if os.path.isfile(PLUGINS_CONFIG_FILE):
+                try:
+                    with open(PLUGINS_CONFIG_FILE) as f:
+                        cfg = json.load(f)
+                except (OSError, json.JSONDecodeError):
+                    cfg = {}
+            for entry in sorted(os.listdir(PLUGINS_DIR)):
+                path = os.path.join(PLUGINS_DIR, entry)
+                if os.path.isfile(path) and entry.endswith(".py"):
+                    mod = entry[:-3]
+                elif os.path.isdir(path) and os.path.isfile(
+                    os.path.join(path, "__init__.py")
+                ):
+                    mod = entry
+                else:
+                    continue
+                if mod in loaded_names:
+                    continue
+                out.append({
+                    "name": mod,
+                    "title": mod,
+                    "loaded": False,
+                    "enabled": cfg.get(mod, True),
+                })
+        return out
+
+    h._send_json(200, {"plugins": _via_glib_idle(_gather)})
+
+
+def _route_sidecars(h: BTerminalDebugHandler) -> None:
+    # Real implementation in Etap 5 (SidecarDiscovery wired up)
+    h._send_json(200, {"sidecars": []})
+
+
+def _route_window_screenshot(h: BTerminalDebugHandler) -> None:
+    app = h.server.app
+
+    def _capture():
+        gdk_window = app.get_window()
+        if gdk_window is None:
+            raise RuntimeError("window not realized yet")
+        w = gdk_window.get_width()
+        h_ = gdk_window.get_height()
+        pixbuf = Gdk.pixbuf_get_from_window(gdk_window, 0, 0, w, h_)
+        if pixbuf is None:
+            raise RuntimeError("pixbuf_get_from_window returned None")
+        fd, tmp = tempfile.mkstemp(prefix="bterminal-shot-", suffix=".png")
+        os.close(fd)
+        pixbuf.savev(tmp, "png", [], [])
+        return tmp, w, h_
+
+    path, width, height = _via_glib_idle(_capture, timeout=10.0)
+    h._send_json(200, {
+        "path": path,
+        "width": width,
+        "height": height,
+        "taken_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+    })
+
+
+def _route_debug_log(h: BTerminalDebugHandler) -> None:
+    lines: list[str] = []
+    if os.path.isfile(DEBUG_LOG_FILE):
+        try:
+            with open(DEBUG_LOG_FILE) as f:
+                lines = f.readlines()[-200:]
+        except OSError:
+            pass
+    h._send_json(200, {"lines": [ln.rstrip("\n") for ln in lines]})
+
+
 def _start_debug_rest_server(app, token: str) -> BTerminalDebugServer:
     """Bind 127.0.0.1:7780, register routes, start serve_forever in daemon thread."""
     server = BTerminalDebugServer(app, token)
-    server._routes_get["/api/health"] = _route_health
+    server._routes_get.extend([
+        (r"/api/health", _route_health),
+        (r"/api/state", _route_state),
+        (r"/api/tabs", _route_tabs),
+        (r"/api/plugins", _route_plugins),
+        (r"/api/sidecars", _route_sidecars),
+        (r"/api/window/screenshot", _route_window_screenshot),
+        (r"/api/debug/log", _route_debug_log),
+    ])
     thread = threading.Thread(target=server.serve_forever, daemon=True, name="debug-rest")
     thread.start()
     server._thread = thread
