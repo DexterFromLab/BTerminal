@@ -5,3 +5,5 @@ CLAUDE.md
 copied_images/
 .tribunal/
 plugins/
+.claude_log/
+claude_log/

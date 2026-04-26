@@ -45,7 +45,11 @@ def _find_jsonl(project_dir: str, after: float | None = None) -> Path | None:
 
 
 def _log_dir(project_dir: str) -> Path:
-    return Path(project_dir) / LOG_SUBDIR
+    base = Path(project_dir)
+    primary = base / LOG_SUBDIR
+    if primary.exists() and not primary.is_dir():
+        return base / ("." + LOG_SUBDIR)
+    return primary
 
 
 def _apply_retention(log_dir: Path):

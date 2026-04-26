@@ -102,6 +102,22 @@ def _find_claude_path():
 
 CLAUDE_PATH = _find_claude_path()
 
+
+def _claude_log_dir(project_dir):
+    """Per-project Claude log dir, with safe fallback to `.claude_log/`.
+
+    Why: the BTerminal repo itself ships an executable named `claude_log`
+    in its root, which collides with the default `<project_dir>/claude_log/`
+    directory and breaks `Path.mkdir(exist_ok=True)`. The hidden fallback
+    keeps every other project on the original path.
+    """
+    base = Path(project_dir)
+    primary = base / "claude_log"
+    if primary.exists() and not primary.is_dir():
+        return base / ".claude_log"
+    return primary
+
+
 FONT = _OPTIONS["font"]
 SCROLLBACK_LINES = 10000
 
@@ -2377,7 +2393,7 @@ class TerminalTab(Gtk.Box):
                 self._task_project = _resolve_ctx_project_name(project_dir)
                 self._stats_bar = SessionStatsBar(project_dir)
                 self.pack_end(self._stats_bar, False, False, 0)
-                Path(project_dir, "claude_log").mkdir(parents=True, exist_ok=True)
+                _claude_log_dir(project_dir).mkdir(parents=True, exist_ok=True)
             self.terminal.connect("contents-changed", self._on_contents_changed_tasks)
 
         self.show_all()
@@ -7534,7 +7550,7 @@ class MemoryPanel(Gtk.Box):
             db.close()
             if not row or not row[0]:
                 return
-            log_dir = Path(row[0]) / "claude_log"
+            log_dir = _claude_log_dir(row[0])
             if not log_dir.exists():
                 return
             files = sorted(log_dir.glob("*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True)
@@ -7699,7 +7715,7 @@ class MemoryPanel(Gtk.Box):
                 _log.write("calling _refresh_logs\n"); _log.flush()
                 self._refresh_logs()
                 _log.write("_refresh_logs done\n"); _log.flush()
-                log_dir = Path(project_dir) / "claude_log"
+                log_dir = _claude_log_dir(project_dir)
                 files = sorted(log_dir.glob("*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True) if log_dir.exists() else []
                 _log.write(f"files found: {len(files)}, log_dir={log_dir}\n"); _log.flush()
                 if files:
