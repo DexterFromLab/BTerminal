@@ -572,6 +572,25 @@ def _route_post_quit(h: BTerminalDebugHandler) -> None:
     h._send_json(200, {"ok": True, "scheduled": True})
 
 
+def _route_get_tab_intro_prompt(h: BTerminalDebugHandler, idx: str) -> None:
+    """Read-only: return the intro prompt that would be injected into Claude
+    Code if it started in this tab right now. No side effects."""
+    app = h.server.app
+    idx_int = int(idx)
+
+    def _build():
+        tab = _resolve_tab(app, idx_int)
+        if tab is None or not isinstance(tab, TerminalTab):
+            return ("not_found", None)
+        return ("ok", _compute_intro_prompt_for_tab(app, tab))
+
+    status, prompt = _via_glib_idle(_build)
+    if status == "not_found":
+        h._send_error(404, f"no terminal tab at idx {idx_int}")
+        return
+    h._send_json(200, {"idx": idx_int, "intro_prompt": prompt})
+
+
 def _route_get_tab_plugins(h: BTerminalDebugHandler, idx: str) -> None:
     app = h.server.app
     idx_int = int(idx)
@@ -959,6 +978,71 @@ def _list_available_plugins(app) -> list[dict]:
     return out
 
 
+def _build_sidecar_intro_section(manifest: SidecarManifest) -> str:
+    """Format a sidecar manifest's prompt for injection into the Claude Code
+    intro prompt. Mirrors the style of GTK plugin .get_session_context() —
+    just text, no surrounding scaffolding.
+
+    If the manifest's prompt already starts with a markdown header (## ...)
+    we pass it through; otherwise we prefix one built from manifest.title.
+    """
+    title = manifest.title or manifest.name
+    prompt = (manifest.prompt or "").strip()
+    if not prompt:
+        return f"## {title}\n(no prompt configured)"
+    if prompt.lstrip().startswith("#"):
+        return prompt
+    return f"## {title}\n\n{prompt}"
+
+
+def _compute_intro_prompt_for_tab(app, tab) -> str:
+    """Pure-function variant of the intro-prompt builder used at
+    start_claude_session. Returns the string that would be injected if
+    Claude Code were spawned in this tab right now. No side effects —
+    safe to call from REST endpoints.
+    """
+    config = getattr(tab, "claude_config", None) or {}
+    custom_prompt = config.get("prompt", "")
+    project_dir = config.get("project_dir", "")
+    if project_dir:
+        project_name = _resolve_ctx_project_name(project_dir)
+        prompt = _build_intro_prompt(project_name)
+        if custom_prompt:
+            prompt += "\n\n" + custom_prompt
+    else:
+        prompt = custom_prompt
+
+    enabled = getattr(tab, "enabled_plugins", None)
+
+    # GTK plugins
+    for plugin in app._plugins.values():
+        if enabled is not None and plugin.name not in enabled:
+            continue
+        try:
+            ctx = plugin.get_session_context()
+            if ctx:
+                prompt = (prompt + "\n\n" + ctx) if prompt else ctx
+        except Exception:
+            pass
+
+    # Sidecars
+    if enabled is not None:
+        sidecar_names = set(enabled) & set(app.sidecar_manifests)
+    else:
+        sidecar_names = {
+            n for n, m in app.sidecar_manifests.items() if m.default_in_session
+        }
+    for name in sorted(sidecar_names):
+        manifest = app.sidecar_manifests[name]
+        try:
+            section = _build_sidecar_intro_section(manifest)
+            if section:
+                prompt = (prompt + "\n\n" + section) if prompt else section
+        except Exception:
+            pass
+    return prompt
+
+
 def _start_debug_rest_server(app, token: str) -> BTerminalDebugServer:
     """Bind 127.0.0.1:7780, register routes, start serve_forever in daemon thread."""
     server = BTerminalDebugServer(app, token)
@@ -970,6 +1054,7 @@ def _start_debug_rest_server(app, token: str) -> BTerminalDebugServer:
         (r"/api/sidecars", _route_sidecars),
         (r"/api/sidecars/(?P<name>[\w.-]+)/health", _route_get_sidecar_health),
         (r"/api/tabs/(?P<idx>\d+)/plugins", _route_get_tab_plugins),
+        (r"/api/tabs/(?P<idx>\d+)/intro_prompt", _route_get_tab_intro_prompt),
         (r"/api/window/screenshot", _route_window_screenshot),
         (r"/api/debug/log", _route_debug_log),
     ])
@@ -3522,31 +3607,7 @@ class TerminalTab(Gtk.Box):
         if config.get("skip_permissions"):
             flags.append("--dangerously-skip-permissions")
 
-        custom_prompt = config.get("prompt", "")
-        project_dir = config.get("project_dir", "")
-        # Build prompt: always start with fresh intro, then append custom part
-        if project_dir:
-            project_name = _resolve_ctx_project_name(project_dir)
-            prompt = _build_intro_prompt(project_name)
-            if custom_prompt:
-                prompt += "\n\n" + custom_prompt
-        else:
-            prompt = custom_prompt
-        # Inject plugin session context (Etap 8: filter by per-tab
-        # enabled_plugins; None = include every loaded plugin = backwards
-        # compat). Sidecar prompts are injected in a separate loop in Etap 9.
-        for plugin in self.app._plugins.values():
-            if (
-                self.enabled_plugins is not None
-                and plugin.name not in self.enabled_plugins
-            ):
-                continue
-            try:
-                ctx = plugin.get_session_context()
-                if ctx:
-                    prompt = (prompt + "\n\n" + ctx) if prompt else ctx
-            except Exception:
-                pass
+        prompt = _compute_intro_prompt_for_tab(self.app, self)
         prompt_arg = ""
         if prompt:
             escaped = prompt.replace("'", "'\\''")
