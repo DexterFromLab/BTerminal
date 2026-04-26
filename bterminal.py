@@ -56,13 +56,16 @@ OPTIONS_FILE = os.path.join(CONFIG_DIR, "options.json")
 SSH_PATH = "/usr/bin/ssh"
 
 # ─── Debug REST API (off by default; enabled via --debug-rest or BTERMINAL_DEBUG_REST=1) ──
-DEBUG_REST_PORT = 7780
+# All three knobs accept env overrides so tests (and ad-hoc smokes) can
+# co-exist with a session-scoped instance on a different port and shorten
+# the idle window from 30 min to a few seconds.
+DEBUG_REST_PORT = int(os.environ.get("BTERMINAL_DEBUG_REST_PORT", "7780"))
 DEBUG_TOKEN_FILE = os.path.join(CONFIG_DIR, "debug_token")
 DEBUG_PID_FILE = os.path.join(CONFIG_DIR, "debug_pid")
 DEBUG_LOG_DIR = os.path.expanduser("~/.cache/bterminal")
 DEBUG_LOG_FILE = os.path.join(DEBUG_LOG_DIR, "debug-rest.log")
-DEBUG_IDLE_TIMEOUT_SEC = 1800  # 30 min — auto-shutdown if no requests
-DEBUG_IDLE_CHECK_SEC = 60       # how often watchdog wakes
+DEBUG_IDLE_TIMEOUT_SEC = int(os.environ.get("BTERMINAL_DEBUG_IDLE_TIMEOUT", "1800"))
+DEBUG_IDLE_CHECK_SEC = int(os.environ.get("BTERMINAL_DEBUG_IDLE_CHECK", "60"))
 DEBUG_LOG_MAX_BYTES = 10 * 1024 * 1024  # 10 MB → rotate
 DEBUG_KEY_WHITELIST = {
     "enter", "tab", "escape", "ctrl-c", "ctrl-d",
