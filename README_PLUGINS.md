@@ -159,19 +159,84 @@ Vue UI. Przyjmujemy plan:
 
 ---
 
-## Plan etapów (do akceptacji przed kodem)
+## Decyzje przyjęte (runda 2)
+
+| # | Decyzja | Uzasadnienie |
+|---|---|---|
+| 1 | **Cały kod sidecarów dolepiamy do `bterminal.py`** (nowe klasy obok istniejących). Refaktor pliku to oddzielne zadanie. | Trzymamy konwencję single-file repo |
+| 2 | **Manifesty w `~/.config/bterminal/sidecars/*.json`** (jeden plik na sidecar) | Spójność z `~/.config/bterminal/{sessions,plugins,options,plugins.json}`; jawna rejestracja; portowalność (manifest niezależny od ścieżek do repo); łatwo edytować bez ruszania repo źródła |
+| 3 | **`agent-tester` startuje on-demand** (nie auto przy starcie BTerminala) | Ciężkie procesy (FastAPI + ewent. Playwright) odpalamy tylko gdy zakładka tego potrzebuje |
+| 4 | **Naprawiamy korelację zakładka ↔ plugin** — dwie warstwy: hot enable/disable globalny + per-zakładka opt-in | Dziś toggle wymaga restartu, pluginy są globalne dla wszystkich zakładek — to centralny brak |
+
+### Anatomia braku w korelacji zakładka ↔ plugin (stan dzisiaj)
+
+- `PluginManagerPanel._on_enabled_toggled` (`bterminal.py:8834`) — zapisuje
+  `~/.config/bterminal/plugins.json`, wyświetla "Restart BTerminal for changes
+  to take effect", **nie** wywołuje `activate/deactivate` w runtime
+- Pętla `for plugin in self.app._plugins.values()` (`bterminal.py:2502`) —
+  iteruje po wszystkich pluginach załadowanych przy starcie. Brak filtra
+  per-tab, brak filtra po `enabled` (jeśli plugin był enabled przy starcie,
+  zostaje w dictie nawet po zmianie toggle)
+- `TerminalTab` (l. 2330) nie ma żadnego pola typu `enabled_plugins` —
+  korelacja sesja↔plugin nie istnieje strukturalnie
+
+Plan naprawy:
+- **Hot toggle globalny:** `_on_enabled_toggled` faktycznie wywołuje
+  `plugin.activate(self.app)` / `plugin.deactivate()` i ustawia/zdejmuje
+  panel sidebar bez restartu. Dotyczy zarówno GTK pluginów (RemoteControll
+  — sprawdzić czy `deactivate()` jest reentrant) jak i sidecarów (`SidecarRunner.start/stop`)
+- **Per-zakładka opt-in:** `TerminalTab` zyskuje
+  `self.enabled_plugins: set[str] | None` (None = "wszystkie globalnie
+  włączone"). `ClaudeCodeDialog` przy nowej sesji pokazuje checkbox-listę
+  pluginów; kontekst-menu na zakładce: *„Pluginy w tej sesji…"* otwiera tę
+  samą listę. Pętla intro-promptu (l. 2502) filtruje po
+  `tab.enabled_plugins`
+- **Refcount sidecarów:** sidecar startuje gdy pierwsza zakładka go
+  używa, zatrzymywany gdy ostatnia odpina (lub się zamyka). Zapobiega
+  trzymaniu portów przez zombie procesy gdy nikt z nich nie korzysta
+
+---
+
+## Plan etapów (zaktualizowany — do akceptacji przed kodem)
 
 | Etap | Co | Test akceptacyjny |
 |---|---|---|
-| **0** | Branch + ten README | (zrobione) |
-| **1** | `SidecarDiscovery` + `SidecarRunner` + `HealthChecker` jako nowy moduł | Unit testy na `subprocess.Popen` (mockowanym) i `httpx` ping |
-| **2** | Wpięcie loadera do `BTerminalApp.__init__` (po `_load_plugins`) | BTerminal startuje, loguje wykryte sidecary, RemoteControll dalej działa |
-| **3** | Manifesty dla `btmsg`, `explorer`, `mr`, `taskboard`, `agent-tester` w `~/.config/bterminal/sidecars/` | Wszystkie sidecary startują, `/health` zwraca ok |
-| **4** | `get_session_context()` analog dla sidecarów — ich `prompt` z manifestu doklejany do intro Claude | Nowa sesja Claude ma sekcje per-sidecar; RemoteControll dalej widoczny |
-| **5** | (opcjonalne) Mały `SidecarPanel` w sidebarze — lista, status `/health`, przycisk Restart | Można zrestartować pojedynczy sidecar bez restartu BTerminala |
+| **0** | Branch + ten README | (zrobione, commit `015a42f`) |
+| **1** | `SidecarDiscovery` + `SidecarRunner` + `HealthChecker` jako nowe klasy w `bterminal.py` (ok. 200 linii). Manifest schema: `{name, plugin_address, healthcheck_url, run_command, reset_command, cwd, prompt}`. Lokalizacja manifestów: `~/.config/bterminal/sidecars/*.json` | Smoke test: ręczne dodanie 1 manifestu, BTerminal startuje, sidecar wykryty, `start()` faktycznie odpala proces, `stop()` go zabija (z `start_new_session=True`), `atexit` ubija wszystko |
+| **2** | Wpięcie loadera do `BTerminalApp.__init__` (po `_load_plugins`). **Bez** auto-startu sidecarów — tylko discovery | BTerminal startuje, w logach lista wykrytych sidecarów, RemoteControll i wszystkie wbudowane panele dalej działają |
+| **3** | Manifesty dla `btmsg`, `explorer`, `mr`, `taskboard`, `agent-tester`. Skopiowane/przepisane z `agent_controller/plugins/*/default_config.json` z dodanym polem `cwd` (root agent_controllera lub agent-testera) | Wszystkie 5 manifestów wykryte; ręczny `start` jednego (np. `btmsg`) wstaje na :8766, `/health` zwraca ok |
+| **4 (kluczowy)** | **Korelacja zakładka ↔ plugin.** (a) Hot toggle globalny w `PluginManagerPanel` — `_on_enabled_toggled` woła activate/deactivate bez restartu. (b) `TerminalTab.enabled_plugins`. (c) `ClaudeCodeDialog` z listą pluginów (GTK + sidecar) z checkboxami. (d) Pętla intro-promptu (l. 2502) filtruje po `tab.enabled_plugins`. (e) Refcount: sidecar startuje przy pierwszej zakładce, kończy się przy ostatniej | Dwie zakładki Claude jednocześnie: jedna z `btmsg` zaznaczonym, druga bez. `btmsg` :8766 wstał gdy ruszyła pierwsza zakładka. Toggle "off" w PluginManager — plugin natychmiast znika z sidebara, sidecar gaśnie. Zamknięcie zakładki używającej `btmsg` (i to jedynej) → `btmsg` :8766 gaśnie automatycznie. RemoteControll: hot disable / hot enable bez crashu BTerminala |
+| **5** | `prompt` z manifestu sidecara doklejany do intro promptu Claude (analog `get_session_context()` dla GTK). Filtrowany per-tab przez `enabled_plugins` (z Etapu 4) | Intro prompt nowej sesji Claude zawiera sekcje tylko aktywnych w niej sidecarów; RemoteControll dalej widoczny |
+| **6** | (opcjonalne, później) Drobny `SidecarStatusPanel` w sidebarze — lista sidecarów, status `/health`, przycisk Restart | Można restartować pojedynczy sidecar bez restartu BTerminala |
 
-Etap 5 jest opcjonalny — jeśli wystarczą sidecary uruchamiane w tle, panel
-nie jest konieczny w pierwszej iteracji.
+Etap 6 jest opcjonalny i może wypaść z tego brancha. Etapy 1–5 są w zakresie.
+
+---
+
+## Konwencja manifestu sidecara
+
+Plik `~/.config/bterminal/sidecars/<name>.json`:
+
+```json
+{
+  "name": "btmsg",
+  "title": "BtMsg (web)",
+  "description": "Inter-agent messaging — send/receive messages between Claude Code sessions.",
+  "plugin_address": "http://127.0.0.1:8766/api",
+  "plugin_dashboard": "http://127.0.0.1:8766/",
+  "healthcheck_url": "http://127.0.0.1:8766/api/health",
+  "run_command": "python3 -m plugins.btmsg.run",
+  "reset_command": "pkill -f 'plugins.btmsg.run' || true",
+  "cwd": "/home/bartek/workspace/agent_controller",
+  "env": { "BTMSG_PORT": "8766" },
+  "auto_start": false,
+  "prompt": "## btmsg — Inter-Agent Messenger\n\nBase URL: http://127.0.0.1:8766/api\n..."
+}
+```
+
+Pola opcjonalne: `title` (domyślnie `name`), `env`, `auto_start` (default
+`false` — sidecar startuje on-demand z zakładki), `cwd` (jeśli `run_command`
+używa `python -m plugins.X.run`, MUSI wskazywać root projektu).
 
 ---
 
@@ -189,16 +254,21 @@ nie jest konieczny w pierwszej iteracji.
 
 ---
 
-## Następny krok
+## Pytanie otwarte przed Etapem 1
 
-Czekam na decyzję:
-1. **Gdzie umieścić nowy kod sidecarów?** Osobny moduł
-   `bterminal_sidecars.py` obok `bterminal.py`, czy dokleić klasy do samego
-   `bterminal.py` (zachowanie "single file")?
-2. **Manifesty sidecarów** — czytamy z `~/workspace/<projekt>/default_config.json`
-   (auto-discovery po katalogach) czy z dedykowanego katalogu
-   `~/.config/bterminal/sidecars/*.json` (rejestracja jawna)?
-3. **Czy w tym branchu `agent-tester` ma się startować automatycznie**, czy
-   tylko być wykrywany i startowany ręcznie z panelu?
+**Per-zakładka opt-in domyślnie ON czy OFF?**
+
+Gdy user otwiera nową zakładkę Claude, lista pluginów w `ClaudeCodeDialog`:
+- **Wariant A:** wszystkie pluginy/sidecary domyślnie zaznaczone
+  (opt-out — żeby nie zmieniać dotychczasowego doświadczenia użytkownika
+  z RemoteControll, który dziś działa wszędzie)
+- **Wariant B:** wszystkie domyślnie odznaczone (opt-in — user świadomie
+  wybiera co potrzebuje, mniej zombie sidecarów)
+- **Wariant C:** per-plugin domyślna wartość w manifeście
+  (`"default_in_session": true|false`); RemoteControll = `true`,
+  ciężkie sidecary jak `agent-tester` = `false`
+
+Domyślnie skłaniam się do **C** — daje kontrolę bez ukrytych regresji
+i pasuje do `auto_start` z manifestu.
 
 Po decyzji ruszam Etap 1.
