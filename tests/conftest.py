@@ -22,6 +22,11 @@ import httpx
 import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
+# Make `import bterminal` work in tests that need internal classes
+# (SidecarManifest/Discovery etc) without going through subprocess.
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 DEBUG_REST_BASE = "http://127.0.0.1:7780"
 HEALTH_TIMEOUT_SEC = 10.0
 HEALTH_POLL_INTERVAL = 0.3
