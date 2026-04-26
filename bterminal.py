@@ -25,6 +25,7 @@ import threading
 import time
 from pathlib import Path
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 import importlib
@@ -64,6 +65,20 @@ DEBUG_KEY_WHITELIST = {
     "enter", "tab", "escape", "ctrl-c", "ctrl-d",
     "up", "down", "left", "right", "backspace", "space",
 }
+DEBUG_KEY_BYTES = {
+    "enter":     b"\n",
+    "tab":       b"\t",
+    "escape":    b"\x1b",
+    "ctrl-c":    b"\x03",
+    "ctrl-d":    b"\x04",
+    "up":        b"\x1b[A",
+    "down":      b"\x1b[B",
+    "left":      b"\x1b[D",
+    "right":     b"\x1b[C",
+    "backspace": b"\x7f",
+    "space":     b" ",
+}
+DEBUG_FEED_MAX_BYTES = 64 * 1024
 DEBUG_REST_ENABLED = False  # set in main() based on CLI flag / env
 SIDECARS_DIR = os.path.join(CONFIG_DIR, "sidecars")
 
@@ -153,8 +168,11 @@ class BTerminalDebugHandler(http.server.BaseHTTPRequestHandler):
         if not self._verify_auth():
             return
         self.server.last_request_ts = time.time()
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+        self._query = urllib.parse.parse_qs(parsed.query)
         for pattern, handler in routes:
-            m = re.fullmatch(pattern, self.path)
+            m = re.fullmatch(pattern, path)
             if not m:
                 continue
             try:
@@ -163,6 +181,26 @@ class BTerminalDebugHandler(http.server.BaseHTTPRequestHandler):
                 self._send_error(500, f"{type(exc).__name__}: {exc}")
             return
         self._send_error(404, "not found")
+
+    def _read_json_body(self):
+        """Read + parse JSON request body. On failure sends error and returns None."""
+        length = int(self.headers.get("Content-Length", "0") or "0")
+        if length == 0:
+            return {}
+        if length > DEBUG_FEED_MAX_BYTES:
+            self._send_error(413, f"body > {DEBUG_FEED_MAX_BYTES} bytes")
+            return None
+        raw = self.rfile.read(length)
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError as exc:
+            self._send_error(400, f"invalid JSON: {exc.msg}")
+            return None
+
+    def _query_flag(self, name: str) -> bool:
+        """Return True if ?name=true present in query string."""
+        vals = self._query.get(name, [])
+        return bool(vals) and vals[0].lower() in ("1", "true", "yes")
 
     def do_GET(self):
         self._dispatch(self.server._routes_get)
@@ -352,6 +390,146 @@ def _route_debug_log(h: BTerminalDebugHandler) -> None:
     h._send_json(200, {"lines": [ln.rstrip("\n") for ln in lines]})
 
 
+def _resolve_tab(app, idx: int):
+    if idx < 0 or idx >= app.notebook.get_n_pages():
+        return None
+    return app.notebook.get_nth_page(idx)
+
+
+def _route_post_tabs_local(h: BTerminalDebugHandler) -> None:
+    app = h.server.app
+
+    def _open():
+        app.add_local_tab()
+        return app.notebook.get_current_page()
+
+    new_idx = _via_glib_idle(_open)
+    h._send_json(200, {"ok": True, "idx": new_idx})
+
+
+def _route_post_tab_close(h: BTerminalDebugHandler, idx: str) -> None:
+    app = h.server.app
+    idx_int = int(idx)
+    force = h._query_flag("force")
+
+    def _close():
+        tab = _resolve_tab(app, idx_int)
+        if tab is None:
+            return ("not_found", None)
+        if not isinstance(tab, TerminalTab):
+            return ("not_terminal", None)
+        if getattr(tab, "_task_project", None) and not force:
+            return ("conflict", tab._task_project)
+        app.close_tab(tab)
+        return ("ok", None)
+
+    status, info = _via_glib_idle(_close)
+    if status == "not_found":
+        h._send_error(404, f"no tab at idx {idx_int}")
+    elif status == "not_terminal":
+        h._send_error(400, f"tab {idx_int} is not a TerminalTab")
+    elif status == "conflict":
+        h._send_error(409, f"tab has active task '{info}'; pass ?force=true")
+    else:
+        h._send_json(200, {"ok": True})
+
+
+def _route_post_tab_feed(h: BTerminalDebugHandler, idx: str) -> None:
+    body = h._read_json_body()
+    if body is None:
+        return  # _read_json_body already sent error
+    text = body.get("text", "")
+    if not isinstance(text, str):
+        h._send_error(400, "'text' must be a string")
+        return
+    payload = text.encode("utf-8")
+    if len(payload) > DEBUG_FEED_MAX_BYTES:
+        h._send_error(413, f"text > {DEBUG_FEED_MAX_BYTES} bytes")
+        return
+    app = h.server.app
+    idx_int = int(idx)
+
+    def _feed():
+        tab = _resolve_tab(app, idx_int)
+        if tab is None or not isinstance(tab, TerminalTab):
+            return False
+        tab.terminal.feed_child(payload)
+        return True
+
+    ok = _via_glib_idle(_feed)
+    if not ok:
+        h._send_error(404, f"no terminal tab at idx {idx_int}")
+        return
+    preview = text[:80].replace("\n", "\\n")
+    _audit_log("POST", f"/api/tabs/{idx_int}/feed", 200, f"len={len(payload)} preview={preview!r}")
+    h._send_json(200, {"ok": True, "bytes": len(payload)})
+
+
+def _route_post_tab_key(h: BTerminalDebugHandler, idx: str) -> None:
+    body = h._read_json_body()
+    if body is None:
+        return
+    key = body.get("key", "")
+    if key not in DEBUG_KEY_WHITELIST:
+        h._send_error(400, f"key '{key}' not in whitelist {sorted(DEBUG_KEY_WHITELIST)}")
+        return
+    payload = DEBUG_KEY_BYTES[key]
+    app = h.server.app
+    idx_int = int(idx)
+
+    def _send():
+        tab = _resolve_tab(app, idx_int)
+        if tab is None or not isinstance(tab, TerminalTab):
+            return False
+        tab.terminal.feed_child(payload)
+        return True
+
+    ok = _via_glib_idle(_send)
+    if not ok:
+        h._send_error(404, f"no terminal tab at idx {idx_int}")
+        return
+    h._send_json(200, {"ok": True, "key": key})
+
+
+def _route_post_toggle_sidebar(h: BTerminalDebugHandler) -> None:
+    app = h.server.app
+
+    def _toggle():
+        app.toggle_sidebar()
+        return app._sidebar_visible
+
+    visible = _via_glib_idle(_toggle)
+    h._send_json(200, {"ok": True, "visible": visible})
+
+
+def _route_post_toggle_git_panel(h: BTerminalDebugHandler) -> None:
+    app = h.server.app
+
+    def _toggle():
+        app.toggle_git_panel()
+        return app._git_visible
+
+    visible = _via_glib_idle(_toggle)
+    h._send_json(200, {"ok": True, "visible": visible})
+
+
+def _route_post_quit(h: BTerminalDebugHandler) -> None:
+    if not h._query_flag("confirm"):
+        h._send_error(400, "destructive action — pass ?confirm=true")
+        return
+    app = h.server.app
+    GLib.idle_add(lambda: (GLib.timeout_add(100, app.destroy), False)[1])
+    h._send_json(200, {"ok": True, "scheduled": True})
+
+
+def _route_stub_plugin(h: BTerminalDebugHandler, name: str, action: str) -> None:
+    h._send_error(501, f"plugins/{name}/{action} scheduled for Etap 8")
+
+
+def _route_stub_sidecar(h: BTerminalDebugHandler, name: str, action: str) -> None:
+    h._send_error(501, f"sidecars/{name}/{action} scheduled for Etap 6")
+
+
 def _start_debug_rest_server(app, token: str) -> BTerminalDebugServer:
     """Bind 127.0.0.1:7780, register routes, start serve_forever in daemon thread."""
     server = BTerminalDebugServer(app, token)
@@ -361,8 +539,20 @@ def _start_debug_rest_server(app, token: str) -> BTerminalDebugServer:
         (r"/api/tabs", _route_tabs),
         (r"/api/plugins", _route_plugins),
         (r"/api/sidecars", _route_sidecars),
+        (r"/api/sidecars/(?P<name>[\w.-]+)/(?P<action>health)", _route_stub_sidecar),
         (r"/api/window/screenshot", _route_window_screenshot),
         (r"/api/debug/log", _route_debug_log),
+    ])
+    server._routes_post.extend([
+        (r"/api/tabs/local", _route_post_tabs_local),
+        (r"/api/tabs/(?P<idx>\d+)/close", _route_post_tab_close),
+        (r"/api/tabs/(?P<idx>\d+)/feed", _route_post_tab_feed),
+        (r"/api/tabs/(?P<idx>\d+)/key", _route_post_tab_key),
+        (r"/api/window/toggle_sidebar", _route_post_toggle_sidebar),
+        (r"/api/window/toggle_git_panel", _route_post_toggle_git_panel),
+        (r"/api/quit", _route_post_quit),
+        (r"/api/plugins/(?P<name>[\w.-]+)/(?P<action>enable|disable)", _route_stub_plugin),
+        (r"/api/sidecars/(?P<name>[\w.-]+)/(?P<action>start|stop)", _route_stub_sidecar),
     ])
     thread = threading.Thread(target=server.serve_forever, daemon=True, name="debug-rest")
     thread.start()
