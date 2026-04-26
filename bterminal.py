@@ -543,8 +543,77 @@ def _route_stub_plugin(h: BTerminalDebugHandler, name: str, action: str) -> None
     h._send_error(501, f"plugins/{name}/{action} scheduled for Etap 8")
 
 
-def _route_stub_sidecar(h: BTerminalDebugHandler, name: str, action: str) -> None:
-    h._send_error(501, f"sidecars/{name}/{action} scheduled for Etap 6")
+def _route_post_sidecar_start(h: BTerminalDebugHandler, name: str) -> None:
+    app = h.server.app
+    manifest = app.sidecar_manifests.get(name)
+    if manifest is None:
+        h._send_error(404, f"sidecar '{name}' not found")
+        return
+    try:
+        result = app.sidecar_runner.start(name, manifest)
+    except (RuntimeError, FileNotFoundError, OSError) as exc:
+        h._send_error(400, f"{type(exc).__name__}: {exc}")
+        return
+    h._send_json(200, {
+        "ok": True,
+        "name": name,
+        "pid": result["pid"],
+        "already_running": result["already_running"],
+    })
+
+
+def _route_post_sidecar_stop(h: BTerminalDebugHandler, name: str) -> None:
+    app = h.server.app
+    if name not in app.sidecar_manifests:
+        h._send_error(404, f"sidecar '{name}' not found")
+        return
+    result = app.sidecar_runner.stop(name)
+    h._send_json(200, {
+        "ok": True,
+        "name": name,
+        "was_running": result["was_running"],
+    })
+
+
+def _route_get_sidecar_health(h: BTerminalDebugHandler, name: str) -> None:
+    app = h.server.app
+    manifest = app.sidecar_manifests.get(name)
+    if manifest is None:
+        h._send_error(404, f"sidecar '{name}' not found")
+        return
+    if not manifest.healthcheck_url:
+        h._send_json(200, {
+            "ok": False, "url": "", "reason": "no healthcheck_url in manifest",
+        })
+        return
+    if not app.sidecar_runner.is_running(name):
+        h._send_json(200, {
+            "ok": False, "url": manifest.healthcheck_url, "reason": "not running",
+        })
+        return
+    started = time.monotonic()
+    status_code = None
+    ok = False
+    error = None
+    try:
+        with urllib.request.urlopen(manifest.healthcheck_url, timeout=2.0) as resp:
+            status_code = resp.status
+            ok = status_code < 500
+    except urllib.error.HTTPError as exc:
+        status_code = exc.code
+        ok = exc.code < 500
+    except (urllib.error.URLError, OSError) as exc:
+        error = f"{type(exc).__name__}: {exc}"
+    payload = {
+        "ok": ok,
+        "url": manifest.healthcheck_url,
+        "latency_ms": int((time.monotonic() - started) * 1000),
+    }
+    if status_code is not None:
+        payload["status_code"] = status_code
+    if error:
+        payload["error"] = error
+    h._send_json(200, payload)
 
 
 # ─── Sidecar infrastructure (Etap 5) ──────────────────────────────────────────
@@ -708,7 +777,7 @@ def _start_debug_rest_server(app, token: str) -> BTerminalDebugServer:
         (r"/api/tabs", _route_tabs),
         (r"/api/plugins", _route_plugins),
         (r"/api/sidecars", _route_sidecars),
-        (r"/api/sidecars/(?P<name>[\w.-]+)/(?P<action>health)", _route_stub_sidecar),
+        (r"/api/sidecars/(?P<name>[\w.-]+)/health", _route_get_sidecar_health),
         (r"/api/window/screenshot", _route_window_screenshot),
         (r"/api/debug/log", _route_debug_log),
     ])
@@ -721,7 +790,8 @@ def _start_debug_rest_server(app, token: str) -> BTerminalDebugServer:
         (r"/api/window/toggle_git_panel", _route_post_toggle_git_panel),
         (r"/api/quit", _route_post_quit),
         (r"/api/plugins/(?P<name>[\w.-]+)/(?P<action>enable|disable)", _route_stub_plugin),
-        (r"/api/sidecars/(?P<name>[\w.-]+)/(?P<action>start|stop)", _route_stub_sidecar),
+        (r"/api/sidecars/(?P<name>[\w.-]+)/start", _route_post_sidecar_start),
+        (r"/api/sidecars/(?P<name>[\w.-]+)/stop", _route_post_sidecar_stop),
     ])
     thread = threading.Thread(target=server.serve_forever, daemon=True, name="debug-rest")
     thread.start()
