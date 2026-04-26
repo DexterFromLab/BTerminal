@@ -7,9 +7,14 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("Vte", "2.91")
 gi.require_version("Gdk", "3.0")
 
+import argparse
+import atexit
+import http.server
 import json
 import os
+import queue
 import random
+import secrets
 import sys
 import re
 import shutil
@@ -17,6 +22,7 @@ import sqlite3
 import subprocess
 import tempfile
 import threading
+import time
 from pathlib import Path
 import urllib.error
 import urllib.request
@@ -44,6 +50,185 @@ PLUGINS_DIR = os.path.join(CONFIG_DIR, "plugins")
 PLUGINS_CONFIG_FILE = os.path.join(CONFIG_DIR, "plugins.json")
 OPTIONS_FILE = os.path.join(CONFIG_DIR, "options.json")
 SSH_PATH = "/usr/bin/ssh"
+
+# ─── Debug REST API (off by default; enabled via --debug-rest or BTERMINAL_DEBUG_REST=1) ──
+DEBUG_REST_PORT = 7780
+DEBUG_TOKEN_FILE = os.path.join(CONFIG_DIR, "debug_token")
+DEBUG_PID_FILE = os.path.join(CONFIG_DIR, "debug_pid")
+DEBUG_LOG_DIR = os.path.expanduser("~/.cache/bterminal")
+DEBUG_LOG_FILE = os.path.join(DEBUG_LOG_DIR, "debug-rest.log")
+DEBUG_IDLE_TIMEOUT_SEC = 1800  # 30 min — auto-shutdown if no requests
+DEBUG_IDLE_CHECK_SEC = 60       # how often watchdog wakes
+DEBUG_LOG_MAX_BYTES = 10 * 1024 * 1024  # 10 MB → rotate
+DEBUG_KEY_WHITELIST = {
+    "enter", "tab", "escape", "ctrl-c", "ctrl-d",
+    "up", "down", "left", "right", "backspace", "space",
+}
+DEBUG_REST_ENABLED = False  # set in main() based on CLI flag / env
+SIDECARS_DIR = os.path.join(CONFIG_DIR, "sidecars")
+
+_audit_log_lock = threading.Lock()
+
+
+def _generate_debug_token() -> str:
+    """Generate fresh debug-REST token, persist with chmod 600."""
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    token = secrets.token_urlsafe(32)
+    with open(DEBUG_TOKEN_FILE, "w") as f:
+        f.write(token)
+    os.chmod(DEBUG_TOKEN_FILE, 0o600)
+    return token
+
+
+def _load_or_create_debug_token() -> str:
+    """Rotate token at every debug-mode startup, write pid file alongside."""
+    token = _generate_debug_token()
+    try:
+        with open(DEBUG_PID_FILE, "w") as f:
+            f.write(str(os.getpid()))
+        os.chmod(DEBUG_PID_FILE, 0o600)
+    except OSError:
+        pass
+    return token
+
+
+def _rotate_debug_log_if_needed() -> None:
+    try:
+        if os.path.getsize(DEBUG_LOG_FILE) > DEBUG_LOG_MAX_BYTES:
+            os.replace(DEBUG_LOG_FILE, DEBUG_LOG_FILE + ".1")
+    except OSError:
+        pass
+
+
+def _audit_log(method: str, path: str, status: int, message: str = "") -> None:
+    """Append one audit entry. Never raises — logging must not crash REST."""
+    try:
+        os.makedirs(DEBUG_LOG_DIR, exist_ok=True)
+        with _audit_log_lock:
+            _rotate_debug_log_if_needed()
+            ts = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime())
+            line = f"[{ts}] {method} {path} -> {status}"
+            if message:
+                line += f" ({message})"
+            with open(DEBUG_LOG_FILE, "a") as f:
+                f.write(line + "\n")
+    except OSError:
+        pass
+
+
+class BTerminalDebugHandler(http.server.BaseHTTPRequestHandler):
+    """Per-request handler. Bearer auth + dispatch via server._routes_*."""
+
+    def log_message(self, format, *args):
+        return  # silence default stderr access log; we use _audit_log
+
+    def _verify_auth(self) -> bool:
+        token = getattr(self.server, "token", "") or ""
+        header = self.headers.get("Authorization", "") or ""
+        expected = f"Bearer {token}"
+        if not token or not secrets.compare_digest(header, expected):
+            self._send_error(401, "unauthorized")
+            return False
+        return True
+
+    def _send_json(self, status: int, payload: dict) -> None:
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+        _audit_log(self.command, self.path, status)
+
+    def _send_error(self, status: int, message: str) -> None:
+        body = json.dumps({"error": message}).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+        _audit_log(self.command, self.path, status, message)
+
+    def _dispatch(self, routes: dict) -> None:
+        if not self._verify_auth():
+            return
+        self.server.last_request_ts = time.time()
+        handler = routes.get(self.path)
+        if handler is None:
+            self._send_error(404, "not found")
+            return
+        try:
+            handler(self)
+        except Exception as exc:  # noqa: BLE001 — REST must not propagate
+            self._send_error(500, f"{type(exc).__name__}: {exc}")
+
+    def do_GET(self):
+        self._dispatch(self.server._routes_get)
+
+    def do_POST(self):
+        self._dispatch(self.server._routes_post)
+
+
+class BTerminalDebugServer(http.server.HTTPServer):
+    """Loopback-only debug REST server. Single-threaded — GTK calls via GLib.idle_add."""
+
+    def __init__(self, app, token: str):
+        super().__init__(("127.0.0.1", DEBUG_REST_PORT), BTerminalDebugHandler)
+        self.app = app
+        self.token = token
+        self.last_request_ts = time.time()
+        self._routes_get: dict = {}
+        self._routes_post: dict = {}
+
+
+def _route_health(h: BTerminalDebugHandler) -> None:
+    h._send_json(200, {
+        "ok": True,
+        "version": APP_VERSION,
+        "debug_mode": True,
+        "idle_seconds": int(time.time() - h.server.last_request_ts),
+    })
+
+
+def _start_debug_rest_server(app, token: str) -> BTerminalDebugServer:
+    """Bind 127.0.0.1:7780, register routes, start serve_forever in daemon thread."""
+    server = BTerminalDebugServer(app, token)
+    server._routes_get["/api/health"] = _route_health
+    thread = threading.Thread(target=server.serve_forever, daemon=True, name="debug-rest")
+    thread.start()
+    server._thread = thread
+    return server
+
+
+def _stop_debug_rest_server(server) -> None:
+    """Idempotent shutdown."""
+    if server is None:
+        return
+    try:
+        server.shutdown()
+        server.server_close()
+    except Exception:
+        pass
+
+
+def _start_idle_watchdog(server: BTerminalDebugServer) -> None:
+    """Monitor last_request_ts; auto-stop after DEBUG_IDLE_TIMEOUT_SEC of silence."""
+    def _loop():
+        while getattr(server, "_alive", True):
+            time.sleep(DEBUG_IDLE_CHECK_SEC)
+            if time.time() - server.last_request_ts > DEBUG_IDLE_TIMEOUT_SEC:
+                sys.stderr.write(
+                    f"[debug-rest] idle for {DEBUG_IDLE_TIMEOUT_SEC}s — shutting down server\n"
+                )
+                server._alive = False
+                _stop_debug_rest_server(server)
+                if hasattr(server.app, "_debug_server"):
+                    server.app._debug_server = None
+                return
+
+    server._alive = True
+    t = threading.Thread(target=_loop, daemon=True, name="debug-rest-idle")
+    t.start()
 
 _OPTIONS_DEFAULTS = {
     "theme": "dark",
@@ -223,6 +408,7 @@ KEY_MAP = {
 def _build_css(t):
     """Generate CSS from a Catppuccin theme dict."""
     return f"""
+.debug-rest-bar {{ background-color: #e74c3c; min-height: 2px; }}
 window {{ background-color: {t['base']}; color: {t['text']}; }}
 .sidebar {{ background-color: {t['mantle']}; border-right: 1px solid {t['surface0']}; color: {t['text']}; }}
 .sidebar label {{ color: {t['text']}; }}
@@ -9080,6 +9266,12 @@ class BTerminalApp(Gtk.Window):
 
         root_box.pack_start(self._build_menubar(), False, False, 0)
 
+        if DEBUG_REST_ENABLED:
+            debug_bar = Gtk.Box()
+            debug_bar.get_style_context().add_class("debug-rest-bar")
+            debug_bar.set_size_request(-1, 2)
+            root_box.pack_start(debug_bar, False, False, 0)
+
         paned = Gtk.HPaned()
         root_box.pack_start(paned, True, True, 0)
 
@@ -9292,6 +9484,19 @@ class BTerminalApp(Gtk.Window):
         self._load_plugins()
         self.plugin_panel.refresh()
 
+        # ── Debug REST (off unless --debug-rest / BTERMINAL_DEBUG_REST=1) ──
+        self._debug_token = None
+        self._debug_server = None
+        if DEBUG_REST_ENABLED:
+            self._debug_token = _load_or_create_debug_token()
+            self._debug_server = _start_debug_rest_server(self, self._debug_token)
+            _start_idle_watchdog(self._debug_server)
+            atexit.register(_stop_debug_rest_server, self._debug_server)
+            sys.stderr.write(
+                f"[debug-rest] listening on http://127.0.0.1:{DEBUG_REST_PORT} "
+                f"(token in {DEBUG_TOKEN_FILE})\n"
+            )
+
     def _build_menubar(self):
         menubar = Gtk.MenuBar()
 
@@ -9361,10 +9566,11 @@ class BTerminalApp(Gtk.Window):
 
     def _update_window_title(self):
         """Update window title bar: 'BTerminal — tab_name [n/total]'."""
+        suffix = f" [DEBUG-REST :{DEBUG_REST_PORT}]" if DEBUG_REST_ENABLED else ""
         n = self.notebook.get_n_pages()
         idx = self.notebook.get_current_page()
         if idx < 0 or n == 0:
-            self.set_title(f"{APP_NAME} v{APP_VERSION}")
+            self.set_title(f"{APP_NAME} v{APP_VERSION}{suffix}")
             return
         tab = self.notebook.get_nth_page(idx)
         if isinstance(tab, TerminalTab):
@@ -9372,9 +9578,9 @@ class BTerminalApp(Gtk.Window):
         else:
             name = "Terminal"
         if n > 1:
-            self.set_title(f"{APP_NAME} — {name} [{idx + 1}/{n}]")
+            self.set_title(f"{APP_NAME} — {name} [{idx + 1}/{n}]{suffix}")
         else:
-            self.set_title(f"{APP_NAME} — {name}")
+            self.set_title(f"{APP_NAME} — {name}{suffix}")
 
     def _on_switch_page(self, notebook, page, page_num):
         GLib.idle_add(self._update_window_title)
@@ -10317,6 +10523,19 @@ def _update_done(window, spinner_dialog, error):
 
 
 def main():
+    global DEBUG_REST_ENABLED
+
+    parser = argparse.ArgumentParser(prog="bterminal", add_help=True)
+    parser.add_argument(
+        "--debug-rest",
+        action="store_true",
+        help="Enable loopback debug REST API on :7780 (token in ~/.config/bterminal/debug_token).",
+    )
+    args, _unknown = parser.parse_known_args()
+    DEBUG_REST_ENABLED = bool(
+        args.debug_rest or os.environ.get("BTERMINAL_DEBUG_REST") == "1"
+    )
+
     GLib.set_prgname("bterminal")
     GLib.set_application_name("BTerminal")
 
