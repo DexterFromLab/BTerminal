@@ -254,6 +254,147 @@ używa `python -m plugins.X.run`, MUSI wskazywać root projektu).
 
 ---
 
+---
+
+## Debug-REST + mechanika testowania (rozszerzenie zakresu)
+
+### Stan zastany — luka, którą wypełniamy
+
+| Aspekt | Co dziś jest w BTerminalu |
+|---|---|
+| REST API samego procesu | **Brak.** Pluginy mają własne (RemoteControll :7777, sidecary :876x), sam BTerminal — zero |
+| Testy | **Brak.** Żadnego `tests/`, żadnego CI |
+| Flagi CLI | **Brak.** `main()` (`bterminal.py:10319`) używa wyłącznie `Gtk.Application` bez `argparse` |
+| Punkty wejścia GTK do automatyzacji | Już są: `add_local_tab` (l. 9428), `open_ssh_tab` (l. 9474), `open_claude_tab` (l. 9501), `close_tab` (l. 9528), `toggle_sidebar` (l. 9593), `toggle_git_panel` (l. 9646), `terminal.feed_child(bytes)` (l. 2565). Stabilna powierzchnia — nadaje się do wystawienia 1:1 |
+| Introspekcja | `self._plugins` dict, `self.notebook.get_nth_page(i)` — wszystko czytelne z poziomu Pythona |
+
+Wniosek: **mamy zero infrastruktury testowej, ale mamy gotowe API
+wewnętrzne** (publiczne metody `BTerminalApp`). Wystawienie ich przez REST
+to ~300 linii w `bterminal.py` plus moduł testów.
+
+### Cel funkcjonalny
+
+1. **Móc z zewnątrz (z Claude'a, z `pytest`, z agent-testera) wywoływać
+   akcje na żywym BTerminalu** — otworzyć zakładkę, wstrzyknąć tekst,
+   przełączyć plugin, zrobić screenshot
+2. **Móc napisać smoke-testy** całej aplikacji — uruchom BTerminal,
+   wywołaj scenariusz, zweryfikuj stan, ubij. Bez tego refaktor sidecarów
+   jest hazardem
+3. **Zachować bezpieczeństwo produkcyjne** — w wersji wydanej REST debug
+   musi być **niemożliwy do włączenia bez świadomej akcji użytkownika**
+
+### Model bezpieczeństwa
+
+Domyślnie OFF. Włączany **wyłącznie** przez świadomą akcję — i to wprost,
+nie ukryte w opcjach.
+
+| Warstwa | Mechanizm |
+|---|---|
+| **Aktywacja** | Flaga CLI `--debug-rest` LUB env `BTERMINAL_DEBUG_REST=1`. Brak w opcjach GUI w pierwszej iteracji (zbyt łatwo zostawić włączone) |
+| **Bind** | Wyłącznie `127.0.0.1:7780` (loopback). Brak `0.0.0.0`, brak konfiguracji adresu |
+| **Auth** | Token bearer w `Authorization: Bearer <token>`. Token generowany **przy każdym starcie** (`secrets.token_urlsafe(32)`), zapisywany do `~/.config/bterminal/debug_token` z `chmod 600`. Klient czyta plik, BTerminal weryfikuje string-compare. Brak — 401 |
+| **Whitelist** | Sztywna lista endpointów. Brak `eval`, brak `exec`, brak generycznego "send-key", tylko nazwane akcje. Endpoint `/api/window/screenshot` nigdy nie ujawnia treści innych okien — tylko `BTerminalApp` |
+| **Audit log** | Każde wywołanie (timestamp, endpoint, wynik) → `~/.cache/bterminal/debug-rest.log`. Append-only, rotacja przy 10 MB |
+| **Idle auto-off** | 30 min bez requestu → REST server gaśnie. Restart wymaga ponownego uruchomienia z flagą |
+| **Wizualny marker** | Gdy debug REST aktywny: title bar dodaje suffix `[DEBUG-REST]`, kolor menubara zmieniony — żeby nigdy nie zostawić włączonego niezauważenie |
+| **Destruktywne akcje** | `POST /api/quit`, `POST /api/tabs/*/close` z `?force=true` — wymagają flagi w request body, **nie** są domyślne |
+
+Drugi tryb — **`--readonly-rest`** (`:7781`) — bez tokena, tylko GET-y
+(state, tabs, plugins, screenshot). Do skryptów monitorujących bez ryzyka.
+Też off by default. Decyzja czy go robimy w tym branchu — opcjonalna.
+
+### Powierzchnia API (szkielet)
+
+```
+GET  /api/health                            — {ok, version, debug_mode, idle_seconds}
+GET  /api/state                             — snapshot: {tabs[], plugins{}, sidecars{}, options{}}
+GET  /api/tabs                              — [{idx, type, title, claude_config, task_project}]
+POST /api/tabs/local                        — open_local_tab → {idx}
+POST /api/tabs/ssh    {session_name}        — open_ssh_tab z istniejącej konfiguracji
+POST /api/tabs/claude {claude_config_name}  — open_claude_tab
+POST /api/tabs/{idx}/close                  — close_tab (wymaga ?force=true gdy task aktywny)
+POST /api/tabs/{idx}/feed   {text}          — terminal.feed_child(text.encode())
+POST /api/tabs/{idx}/key    {key}           — wyślij klawisz (whitelist enter/tab/esc/ctrl-c)
+GET  /api/tabs/{idx}/screenshot             — PNG ramki VTE (Gdk.Window.get_pixbuf)
+GET  /api/window/screenshot                 — PNG całego okna BTerminala
+POST /api/window/toggle_sidebar
+POST /api/window/toggle_git_panel
+GET  /api/plugins                           — lista GTK pluginów + enabled + loaded
+POST /api/plugins/{name}/enable             — hot enable (Etap 4)
+POST /api/plugins/{name}/disable            — hot disable
+GET  /api/sidecars                          — lista sidecarów + /health status
+POST /api/sidecars/{name}/start             — SidecarRunner.start
+POST /api/sidecars/{name}/stop              — SidecarRunner.stop
+GET  /api/sidecars/{name}/health            — proxy do healthcheck_url
+GET  /api/debug/log                         — ogon audit logu (ostatnie 200 wpisów)
+POST /api/quit                              — graceful shutdown (wymaga ?confirm=true)
+```
+
+Wszystkie akcje mutujące GTK-stan idą przez `GLib.idle_add(callable)`,
+żeby trafić do GTK main loop. Wynik wraca przez `queue.Queue` z timeoutem 5s.
+
+### Mechanika testowania
+
+`tests/` w repo (pierwszy raz). Stos: `pytest` + `httpx` + `Pillow`
+(do diff screenshotów).
+
+**Fixture `bterminal_process`:**
+1. `subprocess.Popen(["python", "bterminal.py", "--debug-rest"], env={"DISPLAY": ":99"})` —
+   `:99` = Xvfb headless dla CI
+2. Czekaj na `GET /api/health` (max 10s)
+3. Czytaj token z `~/.config/bterminal/debug_token`
+4. Yield klient (`httpx.Client` z `Authorization: Bearer <token>`,
+   `base_url="http://127.0.0.1:7780"`)
+5. Po teście: `POST /api/quit?confirm=true`, fallback `process.terminate()`
+
+**Smoke-testy obowiązkowe (każdy commit do brancha):**
+- `test_health_returns_ok`
+- `test_can_open_close_local_tab` — sanity loop
+- `test_remote_controll_loads_with_get_session_context` — RemoteControll
+  GTK plugin nie pęka po dodaniu sidecar runtime
+- `test_sidecar_btmsg_starts_and_health_ok` — sidecar lifecycle
+- `test_plugin_hot_disable_removes_from_sidebar` — Etap 4 weryfikacja
+- `test_per_tab_enabled_plugins_filter_intro_prompt` — Etap 4 weryfikacja
+- `test_quit_without_confirm_returns_400`
+- `test_unauthorized_request_returns_401`
+
+**Integracja z agent-tester:**
+Agent-tester potrafi testować dowolny serwis HTTP. BTerminal z aktywnym
+debug-REST staje się jednym z możliwych targetów. Graf agent-testera może
+mieć węzły: "open Claude tab → feed prompt → screenshot → assert".
+Ten use-case projektujemy jako możliwość, **nie** implementujemy w tym
+branchu — chcę tylko żeby API debug-REST nadawało się do tego.
+
+---
+
+## Plan etapów (zaktualizowany — z debug-REST i testami)
+
+| Etap | Co | Test akceptacyjny |
+|---|---|---|
+| **0** | Branch + ten README | (zrobione, commit `015a42f` + `04a1087`) |
+| **1** | `SidecarDiscovery` + `SidecarRunner` + `HealthChecker` jako klasy w `bterminal.py`. Manifest schema. Lokalizacja: `~/.config/bterminal/sidecars/*.json` | Smoke ręczny: 1 manifest, BTerminal startuje, sidecar wykryty, `start()`/`stop()` działa, `atexit` ubija |
+| **2** | Wpięcie loadera do `BTerminalApp.__init__` (po `_load_plugins`). Bez auto-startu sidecarów | BTerminal startuje, lista wykrytych sidecarów w logach, RemoteControll i wbudowane panele dalej działają |
+| **3** | Manifesty dla `btmsg`, `explorer`, `mr`, `taskboard`, `agent-tester` | Wszystkie 5 wykryte; ręczny start `btmsg` wstaje na :8766, `/health` ok |
+| **4** | **Korelacja zakładka ↔ plugin** (kluczowy etap, bez zmian z poprzedniej rundy) | Dwie zakładki Claude, jedna z `btmsg` druga bez. Hot toggle bez restartu. Refcount sidecara. RemoteControll przeżywa hot disable/enable |
+| **5** | `prompt` z manifestu sidecara doklejany do intro Claude, filtrowany per-tab | Intro prompt nowej sesji zawiera sekcje tylko aktywnych w niej sidecarów |
+| **6** | **Debug-REST szkielet:** flaga `--debug-rest`, `BTerminalDebugServer` na :7780, token w `~/.config/bterminal/debug_token`, audit log, idle auto-off, wizualny marker `[DEBUG-REST]` w title barze | `bterminal --debug-rest` startuje, `curl -H "Authorization: Bearer $(cat ~/.config/bterminal/debug_token)" http://127.0.0.1:7780/api/health` zwraca `{ok, version, debug_mode: true}`. Bez flagi — port 7780 nie jest otwarty |
+| **7** | **Debug-REST endpointy read-only:** `/api/state`, `/api/tabs`, `/api/plugins`, `/api/sidecars`, `/api/health`, `/api/window/screenshot`, `/api/debug/log`. Wszystko przez `GLib.idle_add` | Smoke z curl: każdy endpoint zwraca sensowne dane; screenshot to ważny PNG |
+| **8** | **Debug-REST endpointy mutujące:** `/api/tabs/*` (open/close/feed/key), `/api/plugins/{name}/{enable,disable}`, `/api/sidecars/{name}/{start,stop}`, `/api/window/{toggle_sidebar,toggle_git_panel}`, `/api/quit?confirm=true`. Whitelist klawiszy, `?force=true` dla destruktywnych | Każda akcja wywołana przez REST powoduje obserwowalną zmianę w GUI. Bez `?confirm=true` quit zwraca 400 |
+| **9** | **Tests scaffold:** `tests/conftest.py` z fixture `bterminal_process` (Xvfb-friendly), 8 obowiązkowych smoke-testów z listy powyżej | `pytest tests/` zielone na świeżym Xvfb. Test runtime < 30s |
+| **10** | (opcjonalne) `SidecarStatusPanel` w sidebarze (lista, /health, restart). Można odpuścić |  |
+| **11** | (opcjonalne) `--readonly-rest` na :7781 bez tokena, tylko GET. Decyzja na koniec |  |
+
+Etapy 1–9 są w zakresie tego brancha. 10 i 11 opcjonalne.
+
+### Notatka o kosztach
+
+Etap 6+7+8 to ok. 400-500 linii w `bterminal.py` (zgodnie z konwencją
+single-file). Etap 9 to ok. 200 linii w `tests/`. Łącznie + Etapy 1-5
+szacuję na 1500-2000 linii zmian. Realne, ale duże — warto rozważyć
+podzielenie merge'u na 2 PR (1-5 + 6-9).
+
+---
+
 ## Pytanie otwarte przed Etapem 1
 
 **Per-zakładka opt-in domyślnie ON czy OFF?**
@@ -271,4 +412,15 @@ Gdy user otwiera nową zakładkę Claude, lista pluginów w `ClaudeCodeDialog`:
 Domyślnie skłaniam się do **C** — daje kontrolę bez ukrytych regresji
 i pasuje do `auto_start` z manifestu.
 
-Po decyzji ruszam Etap 1.
+## Pytania otwarte przed Etapami 6–9 (debug-REST)
+
+1. **Port `:7780`** — pasuje, czy zarezerwowany u Ciebie?
+   (Aktualne porty w użyciu: RemoteControll 7777, agent-tester 8081,
+   ctx 8765, btmsg 8766, explorer 8770)
+2. **Debug REST = osobny PR** czy razem z sidecarami w jednym mergu?
+3. **`--readonly-rest` :7781** (tryb tylko-do-odczytu, bez tokena, do
+   skryptów monitorujących) — robimy w tym branchu czy odpuszczamy?
+4. **Wizualny marker `[DEBUG-REST]`** — title bar, kolor menubara, czy
+   coś bardziej wyraźnego (np. czerwony pasek nad notebookiem)?
+
+Po decyzji o A/B/C (sesja↔plugin) i powyższych — ruszam Etap 1.
