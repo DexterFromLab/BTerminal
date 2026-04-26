@@ -138,6 +138,13 @@ def cmd_done(args):
            WHERE project = ? AND task_id = ?""",
         (project, task_id),
     )
+    # Release the auto-trigger claim \u2014 done tasks should not occupy
+    # task_claims. Without this the table grows by one row per finished
+    # task per session until the owning tab is closed.
+    db.execute(
+        "DELETE FROM task_claims WHERE project = ? AND task_id = ?",
+        (project, task_id),
+    )
     db.commit()
     if cursor.rowcount:
         print(f"[{project}] Task {task_id} \u2713 done")
