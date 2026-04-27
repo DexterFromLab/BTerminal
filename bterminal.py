@@ -7,9 +7,17 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("Vte", "2.91")
 gi.require_version("Gdk", "3.0")
 
+import argparse
+import atexit
+import http.server
+from collections import defaultdict
+from dataclasses import dataclass, field, fields
 import json
 import os
+import queue
 import random
+import secrets
+import shlex
 import sys
 import re
 import shutil
@@ -17,8 +25,10 @@ import sqlite3
 import subprocess
 import tempfile
 import threading
+import time
 from pathlib import Path
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 import importlib
@@ -44,6 +54,1065 @@ PLUGINS_DIR = os.path.join(CONFIG_DIR, "plugins")
 PLUGINS_CONFIG_FILE = os.path.join(CONFIG_DIR, "plugins.json")
 OPTIONS_FILE = os.path.join(CONFIG_DIR, "options.json")
 SSH_PATH = "/usr/bin/ssh"
+
+# ─── Debug REST API (off by default; enabled via --debug-rest or BTERMINAL_DEBUG_REST=1) ──
+# All three knobs accept env overrides so tests (and ad-hoc smokes) can
+# co-exist with a session-scoped instance on a different port and shorten
+# the idle window from 30 min to a few seconds.
+DEBUG_REST_PORT = int(os.environ.get("BTERMINAL_DEBUG_REST_PORT", "7780"))
+DEBUG_TOKEN_FILE = os.path.join(CONFIG_DIR, "debug_token")
+DEBUG_PID_FILE = os.path.join(CONFIG_DIR, "debug_pid")
+DEBUG_LOG_DIR = os.path.expanduser("~/.cache/bterminal")
+DEBUG_LOG_FILE = os.path.join(DEBUG_LOG_DIR, "debug-rest.log")
+DEBUG_IDLE_TIMEOUT_SEC = int(os.environ.get("BTERMINAL_DEBUG_IDLE_TIMEOUT", "1800"))
+DEBUG_IDLE_CHECK_SEC = int(os.environ.get("BTERMINAL_DEBUG_IDLE_CHECK", "60"))
+DEBUG_LOG_MAX_BYTES = 10 * 1024 * 1024  # 10 MB → rotate
+DEBUG_KEY_WHITELIST = {
+    "enter", "tab", "escape", "ctrl-c", "ctrl-d",
+    "up", "down", "left", "right", "backspace", "space",
+}
+DEBUG_KEY_BYTES = {
+    "enter":     b"\n",
+    "tab":       b"\t",
+    "escape":    b"\x1b",
+    "ctrl-c":    b"\x03",
+    "ctrl-d":    b"\x04",
+    "up":        b"\x1b[A",
+    "down":      b"\x1b[B",
+    "left":      b"\x1b[D",
+    "right":     b"\x1b[C",
+    "backspace": b"\x7f",
+    "space":     b" ",
+}
+DEBUG_FEED_MAX_BYTES = 64 * 1024
+DEBUG_REST_ENABLED = False  # set in main() based on CLI flag / env
+SIDECARS_DIR = os.path.join(CONFIG_DIR, "sidecars")
+os.makedirs(SIDECARS_DIR, exist_ok=True)
+
+_audit_log_lock = threading.Lock()
+
+
+def _generate_debug_token() -> str:
+    """Generate fresh debug-REST token, persist with chmod 600."""
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    token = secrets.token_urlsafe(32)
+    with open(DEBUG_TOKEN_FILE, "w") as f:
+        f.write(token)
+    os.chmod(DEBUG_TOKEN_FILE, 0o600)
+    return token
+
+
+def _load_or_create_debug_token() -> str:
+    """Rotate token at every debug-mode startup, write pid file alongside."""
+    token = _generate_debug_token()
+    try:
+        with open(DEBUG_PID_FILE, "w") as f:
+            f.write(str(os.getpid()))
+        os.chmod(DEBUG_PID_FILE, 0o600)
+    except OSError:
+        pass
+    return token
+
+
+def _rotate_debug_log_if_needed() -> None:
+    try:
+        if os.path.getsize(DEBUG_LOG_FILE) > DEBUG_LOG_MAX_BYTES:
+            os.replace(DEBUG_LOG_FILE, DEBUG_LOG_FILE + ".1")
+    except OSError:
+        pass
+
+
+def _audit_log(method: str, path: str, status: int, message: str = "") -> None:
+    """Append one audit entry. Never raises — logging must not crash REST."""
+    try:
+        os.makedirs(DEBUG_LOG_DIR, exist_ok=True)
+        with _audit_log_lock:
+            _rotate_debug_log_if_needed()
+            ts = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime())
+            line = f"[{ts}] {method} {path} -> {status}"
+            if message:
+                line += f" ({message})"
+            with open(DEBUG_LOG_FILE, "a") as f:
+                f.write(line + "\n")
+    except OSError:
+        pass
+
+
+class BTerminalDebugHandler(http.server.BaseHTTPRequestHandler):
+    """Per-request handler. Bearer auth + dispatch via server._routes_*."""
+
+    def log_message(self, format, *args):
+        return  # silence default stderr access log; we use _audit_log
+
+    def _verify_auth(self) -> bool:
+        token = getattr(self.server, "token", "") or ""
+        header = self.headers.get("Authorization", "") or ""
+        expected = f"Bearer {token}"
+        if not token or not secrets.compare_digest(header, expected):
+            self._send_error(401, "unauthorized")
+            return False
+        return True
+
+    def _send_json(self, status: int, payload: dict) -> None:
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+        _audit_log(self.command, self.path, status)
+
+    def _send_error(self, status: int, message: str) -> None:
+        body = json.dumps({"error": message}).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+        _audit_log(self.command, self.path, status, message)
+
+    def _dispatch(self, routes: list) -> None:
+        if not self._verify_auth():
+            return
+        self.server.last_request_ts = time.time()
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+        self._query = urllib.parse.parse_qs(parsed.query)
+        for pattern, handler in routes:
+            m = re.fullmatch(pattern, path)
+            if not m:
+                continue
+            try:
+                handler(self, **m.groupdict())
+            except Exception as exc:  # noqa: BLE001 — REST must not propagate
+                self._send_error(500, f"{type(exc).__name__}: {exc}")
+            return
+        self._send_error(404, "not found")
+
+    def _read_json_body(self):
+        """Read + parse JSON request body. On failure sends error and returns None."""
+        length = int(self.headers.get("Content-Length", "0") or "0")
+        if length == 0:
+            return {}
+        if length > DEBUG_FEED_MAX_BYTES:
+            self._send_error(413, f"body > {DEBUG_FEED_MAX_BYTES} bytes")
+            return None
+        raw = self.rfile.read(length)
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError as exc:
+            self._send_error(400, f"invalid JSON: {exc.msg}")
+            return None
+
+    def _query_flag(self, name: str) -> bool:
+        """Return True if ?name=true present in query string."""
+        vals = self._query.get(name, [])
+        return bool(vals) and vals[0].lower() in ("1", "true", "yes")
+
+    def do_GET(self):
+        self._dispatch(self.server._routes_get)
+
+    def do_POST(self):
+        self._dispatch(self.server._routes_post)
+
+    def do_PUT(self):
+        self._dispatch(self.server._routes_put)
+
+
+class BTerminalDebugServer(http.server.HTTPServer):
+    """Loopback-only debug REST server. Single-threaded — GTK calls via GLib.idle_add."""
+
+    def __init__(self, app, token: str):
+        super().__init__(("127.0.0.1", DEBUG_REST_PORT), BTerminalDebugHandler)
+        self.app = app
+        self.token = token
+        self.last_request_ts = time.time()
+        self._routes_get: list = []   # list of (regex_str, handler)
+        self._routes_post: list = []
+        self._routes_put: list = []
+
+
+def _via_glib_idle(callable_, timeout: float = 5.0):
+    """Run a no-arg callable on the GTK main loop, return its result.
+
+    Bridges REST handler thread → GTK thread. Raises TimeoutError or
+    the callable's own exception.
+    """
+    result_q: queue.Queue = queue.Queue(1)
+
+    def _wrapper():
+        try:
+            result_q.put(("ok", callable_()))
+        except Exception as exc:  # noqa: BLE001
+            result_q.put(("err", exc))
+        return False
+
+    GLib.idle_add(_wrapper)
+    try:
+        kind, val = result_q.get(timeout=timeout)
+    except queue.Empty as exc:
+        raise TimeoutError(f"GTK callback exceeded {timeout}s") from exc
+    if kind == "err":
+        raise val
+    return val
+
+
+def _route_health(h: BTerminalDebugHandler) -> None:
+    h._send_json(200, {
+        "ok": True,
+        "version": APP_VERSION,
+        "debug_mode": True,
+        "idle_seconds": int(time.time() - h.server.last_request_ts),
+    })
+
+
+def _route_state(h: BTerminalDebugHandler) -> None:
+    app = h.server.app
+
+    def _gather():
+        return {
+            "version": APP_VERSION,
+            "debug_mode": True,
+            "tabs_count": app.notebook.get_n_pages(),
+            "current_tab": app.notebook.get_current_page(),
+            "plugins_loaded": sorted(app._plugins.keys()),
+            "sidecars": [],
+            "options": {
+                "theme": _OPTIONS.get("theme"),
+                "font": _OPTIONS.get("font"),
+            },
+        }
+
+    h._send_json(200, _via_glib_idle(_gather))
+
+
+def _route_tabs(h: BTerminalDebugHandler) -> None:
+    app = h.server.app
+
+    def _gather():
+        out = []
+        for idx in range(app.notebook.get_n_pages()):
+            tab = app.notebook.get_nth_page(idx)
+            if not isinstance(tab, TerminalTab):
+                continue
+            entry = {"idx": idx, "title": tab.get_label()}
+            if getattr(tab, "claude_config", None):
+                entry["type"] = "claude"
+                entry["claude_config_name"] = tab.claude_config.get("name")
+            elif getattr(tab, "session", None):
+                entry["type"] = "ssh"
+                entry["session_name"] = tab.session.get("name")
+            else:
+                entry["type"] = "local"
+            if getattr(tab, "_task_project", None):
+                entry["task_project"] = tab._task_project
+            out.append(entry)
+        return out
+
+    h._send_json(200, {"tabs": _via_glib_idle(_gather)})
+
+
+def _route_plugins(h: BTerminalDebugHandler) -> None:
+    app = h.server.app
+
+    def _gather():
+        out = []
+        loaded_names = set(app._plugins.keys())
+        for name, plugin in app._plugins.items():
+            out.append({
+                "name": name,
+                "title": getattr(plugin, "title", name) or name,
+                "version": getattr(plugin, "version", "") or "",
+                "author": getattr(plugin, "author", "") or "",
+                "description": getattr(plugin, "description", "") or "",
+                "loaded": True,
+                "enabled": True,
+            })
+        if os.path.isdir(PLUGINS_DIR):
+            cfg = {}
+            if os.path.isfile(PLUGINS_CONFIG_FILE):
+                try:
+                    with open(PLUGINS_CONFIG_FILE) as f:
+                        cfg = json.load(f)
+                except (OSError, json.JSONDecodeError):
+                    cfg = {}
+            for entry in sorted(os.listdir(PLUGINS_DIR)):
+                path = os.path.join(PLUGINS_DIR, entry)
+                if os.path.isfile(path) and entry.endswith(".py"):
+                    mod = entry[:-3]
+                elif os.path.isdir(path) and os.path.isfile(
+                    os.path.join(path, "__init__.py")
+                ):
+                    mod = entry
+                else:
+                    continue
+                if mod in loaded_names:
+                    continue
+                out.append({
+                    "name": mod,
+                    "title": mod,
+                    "loaded": False,
+                    "enabled": cfg.get(mod, True),
+                })
+        return out
+
+    h._send_json(200, {"plugins": _via_glib_idle(_gather)})
+
+
+def _route_sidecars(h: BTerminalDebugHandler) -> None:
+    app = h.server.app
+    runner = app.sidecar_runner
+    out = [
+        {
+            "name": m.name,
+            "title": m.title or m.name,
+            "description": m.description,
+            "plugin_address": m.plugin_address,
+            "healthcheck_url": m.healthcheck_url,
+            "running": runner.is_running(m.name),
+            "default_in_session": m.default_in_session,
+            "auto_start": m.auto_start,
+        }
+        for m in app.sidecar_manifests.values()
+    ]
+    h._send_json(200, {"sidecars": out})
+
+
+def _route_window_screenshot(h: BTerminalDebugHandler) -> None:
+    app = h.server.app
+
+    def _capture():
+        gdk_window = app.get_window()
+        if gdk_window is None:
+            raise RuntimeError("window not realized yet")
+        w = gdk_window.get_width()
+        h_ = gdk_window.get_height()
+        pixbuf = Gdk.pixbuf_get_from_window(gdk_window, 0, 0, w, h_)
+        if pixbuf is None:
+            raise RuntimeError("pixbuf_get_from_window returned None")
+        fd, tmp = tempfile.mkstemp(prefix="bterminal-shot-", suffix=".png")
+        os.close(fd)
+        pixbuf.savev(tmp, "png", [], [])
+        return tmp, w, h_
+
+    path, width, height = _via_glib_idle(_capture, timeout=10.0)
+    h._send_json(200, {
+        "path": path,
+        "width": width,
+        "height": height,
+        "taken_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+    })
+
+
+def _route_debug_log(h: BTerminalDebugHandler) -> None:
+    lines: list[str] = []
+    if os.path.isfile(DEBUG_LOG_FILE):
+        try:
+            with open(DEBUG_LOG_FILE) as f:
+                lines = f.readlines()[-200:]
+        except OSError:
+            pass
+    h._send_json(200, {"lines": [ln.rstrip("\n") for ln in lines]})
+
+
+def _resolve_tab(app, idx: int):
+    if idx < 0 or idx >= app.notebook.get_n_pages():
+        return None
+    return app.notebook.get_nth_page(idx)
+
+
+def _route_post_tabs_local(h: BTerminalDebugHandler) -> None:
+    app = h.server.app
+
+    def _open():
+        app.add_local_tab()
+        return app.notebook.get_current_page()
+
+    new_idx = _via_glib_idle(_open)
+    h._send_json(200, {"ok": True, "idx": new_idx})
+
+
+def _route_post_tabs_claude(h: BTerminalDebugHandler) -> None:
+    body = h._read_json_body()
+    if body is None:
+        return
+    config_name = body.get("config_name")
+    if not isinstance(config_name, str) or not config_name:
+        h._send_error(400, "'config_name' required (string)")
+        return
+    enabled_override = body.get("enabled_plugins")
+    app = h.server.app
+
+    def _open():
+        for cfg in app.claude_manager.all():
+            if cfg.get("name") == config_name:
+                config = dict(cfg)
+                if isinstance(enabled_override, list):
+                    config["enabled_plugins"] = enabled_override
+                app.open_claude_tab(config)
+                return ("ok", app.notebook.get_current_page())
+        return ("not_found", None)
+
+    status, idx = _via_glib_idle(_open, timeout=10.0)
+    if status == "not_found":
+        h._send_error(404, f"claude session '{config_name}' not found")
+        return
+    h._send_json(200, {"ok": True, "idx": idx})
+
+
+def _route_post_tab_close(h: BTerminalDebugHandler, idx: str) -> None:
+    app = h.server.app
+    idx_int = int(idx)
+    force = h._query_flag("force")
+
+    def _close():
+        tab = _resolve_tab(app, idx_int)
+        if tab is None:
+            return ("not_found", None)
+        if not isinstance(tab, TerminalTab):
+            return ("not_terminal", None)
+        if getattr(tab, "_task_project", None) and not force:
+            return ("conflict", tab._task_project)
+        app.close_tab(tab)
+        return ("ok", None)
+
+    status, info = _via_glib_idle(_close)
+    if status == "not_found":
+        h._send_error(404, f"no tab at idx {idx_int}")
+    elif status == "not_terminal":
+        h._send_error(400, f"tab {idx_int} is not a TerminalTab")
+    elif status == "conflict":
+        h._send_error(409, f"tab has active task '{info}'; pass ?force=true")
+    else:
+        h._send_json(200, {"ok": True})
+
+
+def _route_post_tab_feed(h: BTerminalDebugHandler, idx: str) -> None:
+    body = h._read_json_body()
+    if body is None:
+        return  # _read_json_body already sent error
+    text = body.get("text", "")
+    if not isinstance(text, str):
+        h._send_error(400, "'text' must be a string")
+        return
+    payload = text.encode("utf-8")
+    if len(payload) > DEBUG_FEED_MAX_BYTES:
+        h._send_error(413, f"text > {DEBUG_FEED_MAX_BYTES} bytes")
+        return
+    app = h.server.app
+    idx_int = int(idx)
+
+    def _feed():
+        tab = _resolve_tab(app, idx_int)
+        if tab is None or not isinstance(tab, TerminalTab):
+            return False
+        tab.terminal.feed_child(payload)
+        return True
+
+    ok = _via_glib_idle(_feed)
+    if not ok:
+        h._send_error(404, f"no terminal tab at idx {idx_int}")
+        return
+    preview = text[:80].replace("\n", "\\n")
+    _audit_log("POST", f"/api/tabs/{idx_int}/feed", 200, f"len={len(payload)} preview={preview!r}")
+    h._send_json(200, {"ok": True, "bytes": len(payload)})
+
+
+def _route_post_tab_key(h: BTerminalDebugHandler, idx: str) -> None:
+    body = h._read_json_body()
+    if body is None:
+        return
+    key = body.get("key", "")
+    if key not in DEBUG_KEY_WHITELIST:
+        h._send_error(400, f"key '{key}' not in whitelist {sorted(DEBUG_KEY_WHITELIST)}")
+        return
+    payload = DEBUG_KEY_BYTES[key]
+    app = h.server.app
+    idx_int = int(idx)
+
+    def _send():
+        tab = _resolve_tab(app, idx_int)
+        if tab is None or not isinstance(tab, TerminalTab):
+            return False
+        tab.terminal.feed_child(payload)
+        return True
+
+    ok = _via_glib_idle(_send)
+    if not ok:
+        h._send_error(404, f"no terminal tab at idx {idx_int}")
+        return
+    h._send_json(200, {"ok": True, "key": key})
+
+
+def _route_post_toggle_sidebar(h: BTerminalDebugHandler) -> None:
+    app = h.server.app
+
+    def _toggle():
+        app.toggle_sidebar()
+        return app._sidebar_visible
+
+    visible = _via_glib_idle(_toggle)
+    h._send_json(200, {"ok": True, "visible": visible})
+
+
+def _route_post_toggle_git_panel(h: BTerminalDebugHandler) -> None:
+    app = h.server.app
+
+    def _toggle():
+        app.toggle_git_panel()
+        return app._git_visible
+
+    visible = _via_glib_idle(_toggle)
+    h._send_json(200, {"ok": True, "visible": visible})
+
+
+def _route_post_quit(h: BTerminalDebugHandler) -> None:
+    if not h._query_flag("confirm"):
+        h._send_error(400, "destructive action — pass ?confirm=true")
+        return
+    app = h.server.app
+    GLib.idle_add(lambda: (GLib.timeout_add(100, app.destroy), False)[1])
+    h._send_json(200, {"ok": True, "scheduled": True})
+
+
+def _route_get_tab_intro_prompt(h: BTerminalDebugHandler, idx: str) -> None:
+    """Read-only: return the intro prompt that would be injected into Claude
+    Code if it started in this tab right now. No side effects."""
+    app = h.server.app
+    idx_int = int(idx)
+
+    def _build():
+        tab = _resolve_tab(app, idx_int)
+        if tab is None or not isinstance(tab, TerminalTab):
+            return ("not_found", None)
+        return ("ok", _compute_intro_prompt_for_tab(app, tab))
+
+    status, prompt = _via_glib_idle(_build)
+    if status == "not_found":
+        h._send_error(404, f"no terminal tab at idx {idx_int}")
+        return
+    h._send_json(200, {"idx": idx_int, "intro_prompt": prompt})
+
+
+def _route_get_tab_plugins(h: BTerminalDebugHandler, idx: str) -> None:
+    app = h.server.app
+    idx_int = int(idx)
+
+    def _read():
+        tab = _resolve_tab(app, idx_int)
+        if tab is None or not isinstance(tab, TerminalTab):
+            return ("not_found", None)
+        if tab.enabled_plugins is None:
+            return ("ok", None)
+        return ("ok", sorted(tab.enabled_plugins))
+
+    status, value = _via_glib_idle(_read)
+    if status == "not_found":
+        h._send_error(404, f"no terminal tab at idx {idx_int}")
+        return
+    h._send_json(200, {"idx": idx_int, "enabled_plugins": value})
+
+
+def _route_put_tab_plugins(h: BTerminalDebugHandler, idx: str) -> None:
+    body = h._read_json_body()
+    if body is None:
+        return
+    enabled = body.get("enabled")
+    if not isinstance(enabled, list) or not all(isinstance(x, str) for x in enabled):
+        h._send_error(400, "'enabled' must be a list of strings")
+        return
+    new_set = set(enabled)
+    app = h.server.app
+    idx_int = int(idx)
+
+    def _apply():
+        tab = _resolve_tab(app, idx_int)
+        if tab is None or not isinstance(tab, TerminalTab):
+            return ("not_found", None)
+        old_set = tab.enabled_plugins if tab.enabled_plugins is not None else set()
+        to_acquire = new_set - old_set
+        to_release = old_set - new_set
+        # Only sidecars participate in refcount; GTK plugins are global.
+        for name in to_acquire:
+            if name in app.sidecar_manifests:
+                app._sidecar_acquire(name)
+        for name in to_release:
+            if name in app.sidecar_manifests:
+                app._sidecar_release(name)
+        tab.enabled_plugins = new_set
+        return ("ok", {
+            "acquired": sorted(to_acquire & set(app.sidecar_manifests)),
+            "released": sorted(to_release & set(app.sidecar_manifests)),
+        })
+
+    status, info = _via_glib_idle(_apply)
+    if status == "not_found":
+        h._send_error(404, f"no terminal tab at idx {idx_int}")
+        return
+    h._send_json(200, {
+        "ok": True,
+        "idx": idx_int,
+        "enabled_plugins": sorted(new_set),
+        "diff": info,
+    })
+
+
+def _route_post_plugin_enable(h: BTerminalDebugHandler, name: str) -> None:
+    app = h.server.app
+
+    def _do():
+        cfg = {}
+        if os.path.isfile(PLUGINS_CONFIG_FILE):
+            try:
+                with open(PLUGINS_CONFIG_FILE) as fh:
+                    cfg = json.load(fh)
+            except (OSError, json.JSONDecodeError):
+                cfg = {}
+        cfg[name] = True
+        os.makedirs(os.path.dirname(PLUGINS_CONFIG_FILE), exist_ok=True)
+        with open(PLUGINS_CONFIG_FILE, "w") as fh:
+            json.dump(cfg, fh, indent=2)
+        already = name in app._plugins
+        if not already:
+            app._hot_load_plugin(name)
+        if hasattr(app, "plugin_panel"):
+            try:
+                app.plugin_panel.refresh()
+            except Exception:
+                pass
+        return {"already_loaded": already, "loaded_now": name in app._plugins}
+
+    try:
+        result = _via_glib_idle(_do, timeout=10.0)
+    except Exception as exc:  # noqa: BLE001
+        h._send_error(400, f"{type(exc).__name__}: {exc}")
+        return
+    h._send_json(200, {"ok": True, "name": name, **result})
+
+
+def _route_post_plugin_disable(h: BTerminalDebugHandler, name: str) -> None:
+    app = h.server.app
+
+    def _do():
+        cfg = {}
+        if os.path.isfile(PLUGINS_CONFIG_FILE):
+            try:
+                with open(PLUGINS_CONFIG_FILE) as fh:
+                    cfg = json.load(fh)
+            except (OSError, json.JSONDecodeError):
+                cfg = {}
+        cfg[name] = False
+        os.makedirs(os.path.dirname(PLUGINS_CONFIG_FILE), exist_ok=True)
+        with open(PLUGINS_CONFIG_FILE, "w") as fh:
+            json.dump(cfg, fh, indent=2)
+        was_loaded = name in app._plugins
+        if was_loaded:
+            app._hot_unload_plugin(name)
+        if hasattr(app, "plugin_panel"):
+            try:
+                app.plugin_panel.refresh()
+            except Exception:
+                pass
+        return {"was_loaded": was_loaded}
+
+    try:
+        result = _via_glib_idle(_do, timeout=10.0)
+    except Exception as exc:  # noqa: BLE001
+        h._send_error(400, f"{type(exc).__name__}: {exc}")
+        return
+    h._send_json(200, {"ok": True, "name": name, **result})
+
+
+def _route_post_sidecar_start(h: BTerminalDebugHandler, name: str) -> None:
+    app = h.server.app
+    manifest = app.sidecar_manifests.get(name)
+    if manifest is None:
+        h._send_error(404, f"sidecar '{name}' not found")
+        return
+    try:
+        result = app.sidecar_runner.start(name, manifest)
+    except (RuntimeError, FileNotFoundError, OSError) as exc:
+        h._send_error(400, f"{type(exc).__name__}: {exc}")
+        return
+    h._send_json(200, {
+        "ok": True,
+        "name": name,
+        "pid": result["pid"],
+        "already_running": result["already_running"],
+    })
+
+
+def _route_post_sidecar_stop(h: BTerminalDebugHandler, name: str) -> None:
+    app = h.server.app
+    if name not in app.sidecar_manifests:
+        h._send_error(404, f"sidecar '{name}' not found")
+        return
+    result = app.sidecar_runner.stop(name)
+    h._send_json(200, {
+        "ok": True,
+        "name": name,
+        "was_running": result["was_running"],
+    })
+
+
+def _route_get_sidecar_health(h: BTerminalDebugHandler, name: str) -> None:
+    app = h.server.app
+    manifest = app.sidecar_manifests.get(name)
+    if manifest is None:
+        h._send_error(404, f"sidecar '{name}' not found")
+        return
+    if not manifest.healthcheck_url:
+        h._send_json(200, {
+            "ok": False, "url": "", "reason": "no healthcheck_url in manifest",
+        })
+        return
+    if not app.sidecar_runner.is_running(name):
+        h._send_json(200, {
+            "ok": False, "url": manifest.healthcheck_url, "reason": "not running",
+        })
+        return
+    started = time.monotonic()
+    status_code = None
+    ok = False
+    error = None
+    try:
+        with urllib.request.urlopen(manifest.healthcheck_url, timeout=2.0) as resp:
+            status_code = resp.status
+            ok = status_code < 500
+    except urllib.error.HTTPError as exc:
+        status_code = exc.code
+        ok = exc.code < 500
+    except (urllib.error.URLError, OSError) as exc:
+        error = f"{type(exc).__name__}: {exc}"
+    payload = {
+        "ok": ok,
+        "url": manifest.healthcheck_url,
+        "latency_ms": int((time.monotonic() - started) * 1000),
+    }
+    if status_code is not None:
+        payload["status_code"] = status_code
+    if error:
+        payload["error"] = error
+    h._send_json(200, payload)
+
+
+# ─── Sidecar infrastructure (Etap 5) ──────────────────────────────────────────
+
+@dataclass
+class SidecarManifest:
+    """Schema of a sidecar plugin manifest stored in
+    ~/.config/bterminal/sidecars/<name>.json.
+
+    Required: name. Everything else has a sensible default so partial
+    manifests still load.
+    """
+
+    name: str
+    plugin_address: str = ""
+    plugin_dashboard: str = ""
+    healthcheck_url: str = ""
+    run_command: str = ""
+    reset_command: str = ""
+    cwd: str = ""
+    env: dict = field(default_factory=dict)
+    prompt: str = ""
+    title: str = ""
+    description: str = ""
+    default_in_session: bool = True
+    auto_start: bool = False
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "SidecarManifest":
+        """Build from a JSON dict, silently dropping unknown keys so a manifest
+        with extra fields is still loadable."""
+        known = {f.name for f in fields(cls)}
+        kwargs = {k: v for k, v in data.items() if k in known}
+        return cls(**kwargs)
+
+
+class SidecarDiscovery:
+    """Loads SidecarManifest objects from ~/.config/bterminal/sidecars/*.json.
+
+    Skips non-JSON files, malformed JSON, and manifests missing 'name'.
+    """
+
+    def __init__(self, sidecars_dir: str = SIDECARS_DIR) -> None:
+        self._dir = sidecars_dir
+
+    def load_all(self) -> dict[str, "SidecarManifest"]:
+        out: dict[str, SidecarManifest] = {}
+        if not os.path.isdir(self._dir):
+            return out
+        for entry in sorted(os.listdir(self._dir)):
+            if not entry.endswith(".json"):
+                continue
+            path = os.path.join(self._dir, entry)
+            try:
+                with open(path) as fh:
+                    data = json.load(fh)
+            except (OSError, json.JSONDecodeError):
+                continue
+            if not isinstance(data, dict) or not data.get("name"):
+                continue
+            manifest = SidecarManifest.from_dict(data)
+            out[manifest.name] = manifest
+        return out
+
+
+class SidecarRunner:
+    """Owns subprocess.Popen handles for live sidecars, keyed by manifest name.
+
+    start() is idempotent (re-start while running is a no-op). Subprocesses
+    use start_new_session=True so an unexpected BTerminal crash does not
+    immediately reap them — atexit cleanup (Etap 5.h) is the canonical
+    shutdown path.
+    """
+
+    def __init__(self) -> None:
+        self._procs: dict[str, subprocess.Popen] = {}
+
+    def is_running(self, name: str) -> bool:
+        proc = self._procs.get(name)
+        return proc is not None and proc.poll() is None
+
+    def start(self, name: str, manifest: SidecarManifest) -> dict:
+        """Spawn the sidecar if not already running. Returns
+        {already_running: bool, pid: int}.
+        """
+        if self.is_running(name):
+            return {"already_running": True, "pid": self._procs[name].pid}
+        if not manifest.run_command:
+            raise RuntimeError(f"sidecar '{name}' has empty run_command")
+        argv = shlex.split(manifest.run_command)
+        env = {**os.environ, **(manifest.env or {})}
+        cwd = manifest.cwd or None
+        proc = subprocess.Popen(
+            argv,
+            cwd=cwd,
+            env=env,
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+        )
+        self._procs[name] = proc
+        return {"already_running": False, "pid": proc.pid}
+
+    def stop(self, name: str) -> dict:
+        """Terminate the named sidecar. Idempotent — safe to call when not
+        running. Escalates SIGTERM → SIGKILL after 5s.
+        """
+        proc = self._procs.get(name)
+        if proc is None:
+            return {"was_running": False}
+        was_running = proc.poll() is None
+        if was_running:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                try:
+                    proc.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    pass
+        del self._procs[name]
+        return {"was_running": was_running}
+
+    def stop_all(self) -> None:
+        """Best-effort shutdown of every tracked sidecar. Used by atexit."""
+        for name in list(self._procs):
+            try:
+                self.stop(name)
+            except Exception:  # noqa: BLE001 — never raise during shutdown
+                pass
+
+
+class HealthChecker:
+    """Liveness probe for sidecar HTTP endpoints. Stateless — staticmethod."""
+
+    @staticmethod
+    def ping(url: str, timeout: float = 2.0) -> bool:
+        """True if the URL responds with status < 500 within timeout.
+
+        4xx counts as 'up' (the server is answering, it just doesn't like
+        the request). Connection refused / timeout / DNS failure → False.
+        """
+        if not url:
+            return False
+        try:
+            with urllib.request.urlopen(url, timeout=timeout) as resp:
+                return resp.status < 500
+        except urllib.error.HTTPError as exc:
+            return exc.code < 500
+        except (urllib.error.URLError, OSError):
+            return False
+
+
+def _list_available_plugins(app) -> list[dict]:
+    """Unified view of GTK plugins + sidecar manifests for per-tab UI
+    (ClaudeCodeDialog checkbox list, /api endpoints, intro-prompt builder).
+
+    Each entry: {name, title, type:'gtk'|'sidecar', default_in_session,
+    currently_enabled_globally}.
+
+    For GTK plugins, currently_enabled_globally reflects whether the plugin
+    is currently loaded in app._plugins. For sidecars, manifest existence is
+    enough — they are always available to be selected per tab (start happens
+    on demand via refcount).
+    """
+    out: list[dict] = []
+    for name, plugin in app._plugins.items():
+        out.append({
+            "name": name,
+            "title": getattr(plugin, "title", "") or name,
+            "type": "gtk",
+            "default_in_session": getattr(plugin, "default_in_session", True),
+            "currently_enabled_globally": True,
+        })
+    for name, manifest in app.sidecar_manifests.items():
+        out.append({
+            "name": name,
+            "title": manifest.title or name,
+            "type": "sidecar",
+            "default_in_session": manifest.default_in_session,
+            "currently_enabled_globally": True,
+        })
+    out.sort(key=lambda d: (d["type"], d["name"]))
+    return out
+
+
+def _build_sidecar_intro_section(manifest: SidecarManifest) -> str:
+    """Format a sidecar manifest's prompt for injection into the Claude Code
+    intro prompt. Mirrors the style of GTK plugin .get_session_context() —
+    just text, no surrounding scaffolding.
+
+    If the manifest's prompt already starts with a markdown header (## ...)
+    we pass it through; otherwise we prefix one built from manifest.title.
+    """
+    title = manifest.title or manifest.name
+    prompt = (manifest.prompt or "").strip()
+    if not prompt:
+        return f"## {title}\n(no prompt configured)"
+    if prompt.lstrip().startswith("#"):
+        return prompt
+    return f"## {title}\n\n{prompt}"
+
+
+def _compute_intro_prompt_for_tab(app, tab) -> str:
+    """Pure-function variant of the intro-prompt builder used at
+    start_claude_session. Returns the string that would be injected if
+    Claude Code were spawned in this tab right now. No side effects —
+    safe to call from REST endpoints.
+    """
+    config = getattr(tab, "claude_config", None) or {}
+    custom_prompt = config.get("prompt", "")
+    project_dir = config.get("project_dir", "")
+    if project_dir:
+        project_name = _resolve_ctx_project_name(project_dir)
+        prompt = _build_intro_prompt(project_name)
+        if custom_prompt:
+            prompt += "\n\n" + custom_prompt
+    else:
+        prompt = custom_prompt
+
+    enabled = getattr(tab, "enabled_plugins", None)
+
+    # GTK plugins
+    for plugin in app._plugins.values():
+        if enabled is not None and plugin.name not in enabled:
+            continue
+        try:
+            ctx = plugin.get_session_context()
+            if ctx:
+                prompt = (prompt + "\n\n" + ctx) if prompt else ctx
+        except Exception:
+            pass
+
+    # Sidecars
+    if enabled is not None:
+        sidecar_names = set(enabled) & set(app.sidecar_manifests)
+    else:
+        sidecar_names = {
+            n for n, m in app.sidecar_manifests.items() if m.default_in_session
+        }
+    for name in sorted(sidecar_names):
+        manifest = app.sidecar_manifests[name]
+        try:
+            section = _build_sidecar_intro_section(manifest)
+            if section:
+                prompt = (prompt + "\n\n" + section) if prompt else section
+        except Exception:
+            pass
+    return prompt
+
+
+def _start_debug_rest_server(app, token: str) -> BTerminalDebugServer:
+    """Bind 127.0.0.1:7780, register routes, start serve_forever in daemon thread."""
+    server = BTerminalDebugServer(app, token)
+    server._routes_get.extend([
+        (r"/api/health", _route_health),
+        (r"/api/state", _route_state),
+        (r"/api/tabs", _route_tabs),
+        (r"/api/plugins", _route_plugins),
+        (r"/api/sidecars", _route_sidecars),
+        (r"/api/sidecars/(?P<name>[\w.-]+)/health", _route_get_sidecar_health),
+        (r"/api/tabs/(?P<idx>\d+)/plugins", _route_get_tab_plugins),
+        (r"/api/tabs/(?P<idx>\d+)/intro_prompt", _route_get_tab_intro_prompt),
+        (r"/api/window/screenshot", _route_window_screenshot),
+        (r"/api/debug/log", _route_debug_log),
+    ])
+    server._routes_put.extend([
+        (r"/api/tabs/(?P<idx>\d+)/plugins", _route_put_tab_plugins),
+    ])
+    server._routes_post.extend([
+        (r"/api/tabs/local", _route_post_tabs_local),
+        (r"/api/tabs/claude", _route_post_tabs_claude),
+        (r"/api/tabs/(?P<idx>\d+)/close", _route_post_tab_close),
+        (r"/api/tabs/(?P<idx>\d+)/feed", _route_post_tab_feed),
+        (r"/api/tabs/(?P<idx>\d+)/key", _route_post_tab_key),
+        (r"/api/window/toggle_sidebar", _route_post_toggle_sidebar),
+        (r"/api/window/toggle_git_panel", _route_post_toggle_git_panel),
+        (r"/api/quit", _route_post_quit),
+        (r"/api/plugins/(?P<name>[\w.-]+)/enable", _route_post_plugin_enable),
+        (r"/api/plugins/(?P<name>[\w.-]+)/disable", _route_post_plugin_disable),
+        (r"/api/sidecars/(?P<name>[\w.-]+)/start", _route_post_sidecar_start),
+        (r"/api/sidecars/(?P<name>[\w.-]+)/stop", _route_post_sidecar_stop),
+    ])
+    thread = threading.Thread(target=server.serve_forever, daemon=True, name="debug-rest")
+    thread.start()
+    server._thread = thread
+    return server
+
+
+def _stop_debug_rest_server(server) -> None:
+    """Idempotent shutdown."""
+    if server is None:
+        return
+    try:
+        server.shutdown()
+        server.server_close()
+    except Exception:
+        pass
+
+
+def _start_idle_watchdog(server: BTerminalDebugServer) -> None:
+    """Monitor last_request_ts; auto-stop after DEBUG_IDLE_TIMEOUT_SEC of silence."""
+    def _loop():
+        while getattr(server, "_alive", True):
+            time.sleep(DEBUG_IDLE_CHECK_SEC)
+            if time.time() - server.last_request_ts > DEBUG_IDLE_TIMEOUT_SEC:
+                sys.stderr.write(
+                    f"[debug-rest] idle for {DEBUG_IDLE_TIMEOUT_SEC}s — shutting down server\n"
+                )
+                server._alive = False
+                _stop_debug_rest_server(server)
+                if hasattr(server.app, "_debug_server"):
+                    server.app._debug_server = None
+                return
+
+    server._alive = True
+    t = threading.Thread(target=_loop, daemon=True, name="debug-rest-idle")
+    t.start()
 
 _OPTIONS_DEFAULTS = {
     "theme": "dark",
@@ -223,6 +1292,7 @@ KEY_MAP = {
 def _build_css(t):
     """Generate CSS from a Catppuccin theme dict."""
     return f"""
+.debug-rest-bar {{ background-color: #e74c3c; min-height: 2px; }}
 window {{ background-color: {t['base']}; color: {t['text']}; }}
 .sidebar {{ background-color: {t['mantle']}; border-right: 1px solid {t['surface0']}; color: {t['text']}; }}
 .sidebar label {{ color: {t['text']}; }}
@@ -1092,6 +2162,50 @@ class ClaudeCodeDialog(Gtk.Dialog):
         scrolled.add(self.textview)
         box.pack_start(scrolled, True, True, 0)
 
+        # Per-tab plugin selector (Etap 8)
+        box.pack_start(Gtk.Separator(), False, False, 2)
+        lbl_plugins = Gtk.Label(
+            label="Plugins available in this session:", halign=Gtk.Align.START,
+        )
+        box.pack_start(lbl_plugins, False, False, 0)
+
+        self._plugin_checks: dict = {}
+        saved_enabled = None
+        if session and isinstance(session.get("enabled_plugins"), list):
+            saved_enabled = set(session["enabled_plugins"])
+
+        plugins_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        available = _list_available_plugins(parent) if hasattr(parent, "_plugins") else []
+        for entry in available:
+            name = entry["name"]
+            tag = "[GTK]" if entry["type"] == "gtk" else "[sidecar]"
+            label = f"{tag} {entry['title']}"
+            if entry["title"] != name:
+                label += f"  ({name})"
+            chk = Gtk.CheckButton(label=label)
+            if saved_enabled is not None:
+                chk.set_active(name in saved_enabled)
+            else:
+                chk.set_active(
+                    entry["default_in_session"]
+                    and entry["currently_enabled_globally"]
+                )
+            self._plugin_checks[name] = chk
+            plugins_box.pack_start(chk, False, False, 0)
+        if not available:
+            empty_lbl = Gtk.Label(
+                label="(no plugins or sidecar manifests available)",
+                halign=Gtk.Align.START,
+            )
+            empty_lbl.get_style_context().add_class("dim-label")
+            plugins_box.pack_start(empty_lbl, False, False, 0)
+
+        plugins_scroll = Gtk.ScrolledWindow()
+        plugins_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        plugins_scroll.set_min_content_height(120)
+        plugins_scroll.add(plugins_box)
+        box.pack_start(plugins_scroll, False, False, 0)
+
         # Edit mode: fill fields
         if session:
             self.entry_name.set_text(session.get("name", ""))
@@ -1119,6 +2233,9 @@ class ClaudeCodeDialog(Gtk.Dialog):
             "skip_permissions": self.chk_skip_perms.get_active(),
             "prompt": prompt,
             "project_dir": self.entry_project_dir.get_text().strip(),
+            "enabled_plugins": sorted(
+                name for name, chk in self._plugin_checks.items() if chk.get_active()
+            ),
         }
 
     def validate(self):
@@ -2387,6 +3504,11 @@ class TerminalTab(Gtk.Box):
         self._task_session_id = str(uuid.uuid4())
         self._inject_pending = None  # (project, count, refresh_every) when rules inject is due
         self._stats_bar = None
+        # Per-tab plugin gating (Etap 8). None = backwards-compat: every
+        # globally-enabled plugin contributes to this tab's intro prompt and
+        # gets sidecar-acquired. A set means an explicit allow-list (e.g.
+        # the user picked checkboxes in ClaudeCodeDialog).
+        self.enabled_plugins: set[str] | None = None
         if claude_config:
             project_dir = claude_config.get("project_dir", "")
             if project_dir:
@@ -2488,24 +3610,7 @@ class TerminalTab(Gtk.Box):
         if config.get("skip_permissions"):
             flags.append("--dangerously-skip-permissions")
 
-        custom_prompt = config.get("prompt", "")
-        project_dir = config.get("project_dir", "")
-        # Build prompt: always start with fresh intro, then append custom part
-        if project_dir:
-            project_name = _resolve_ctx_project_name(project_dir)
-            prompt = _build_intro_prompt(project_name)
-            if custom_prompt:
-                prompt += "\n\n" + custom_prompt
-        else:
-            prompt = custom_prompt
-        # Inject plugin session context
-        for plugin in self.app._plugins.values():
-            try:
-                ctx = plugin.get_session_context()
-                if ctx:
-                    prompt = (prompt + "\n\n" + ctx) if prompt else ctx
-            except Exception:
-                pass
+        prompt = _compute_intro_prompt_for_tab(self.app, self)
         prompt_arg = ""
         if prompt:
             escaped = prompt.replace("'", "'\\''")
@@ -7236,6 +8341,11 @@ class BTerminalPlugin:
     version = ""
     description = ""
     author = ""
+    # Whether to enable this plugin by default in newly opened Claude Code
+    # tabs. Subclasses can override to False for opt-in plugins (e.g. heavy
+    # ones the user usually does not need). Used by Etap 8 per-tab plugin
+    # selection in ClaudeCodeDialog.
+    default_in_session = True
 
     def activate(self, app):
         return None
@@ -8863,15 +9973,26 @@ class PluginManagerPanel(Gtk.Box):
         config = self._load_config()
         config[mod_name] = enabled
         self._save_config(config)
-        action = "enabled" if enabled else "disabled"
-        dlg = Gtk.MessageDialog(
-            transient_for=self.app, modal=True,
-            message_type=Gtk.MessageType.INFO,
-            buttons=Gtk.ButtonsType.OK,
-            text=f'Plugin "{mod_name}" {action}.\nRestart BTerminal for changes to take effect.',
-        )
-        dlg.run()
-        dlg.destroy()
+
+        # Etap 8: hot toggle — no restart needed.
+        err = None
+        try:
+            if enabled:
+                self.app._hot_load_plugin(mod_name)
+            else:
+                self.app._hot_unload_plugin(mod_name)
+        except Exception as exc:  # noqa: BLE001
+            err = f"{type(exc).__name__}: {exc}"
+
+        if err is not None:
+            dlg = Gtk.MessageDialog(
+                transient_for=self.app, modal=True,
+                message_type=Gtk.MessageType.WARNING,
+                buttons=Gtk.ButtonsType.OK,
+                text=f'Plugin "{mod_name}" toggle failed:\n{err}',
+            )
+            dlg.run()
+            dlg.destroy()
         self.refresh()
 
     # ── Add plugin ──
@@ -9105,6 +10226,12 @@ class BTerminalApp(Gtk.Window):
 
         root_box.pack_start(self._build_menubar(), False, False, 0)
 
+        if DEBUG_REST_ENABLED:
+            debug_bar = Gtk.Box()
+            debug_bar.get_style_context().add_class("debug-rest-bar")
+            debug_bar.set_size_request(-1, 2)
+            root_box.pack_start(debug_bar, False, False, 0)
+
         paned = Gtk.HPaned()
         root_box.pack_start(paned, True, True, 0)
 
@@ -9317,6 +10444,28 @@ class BTerminalApp(Gtk.Window):
         self._load_plugins()
         self.plugin_panel.refresh()
 
+        # ── Sidecar runtime (Etap 5) — discovery only, no auto-start ──
+        self.sidecar_discovery = SidecarDiscovery()
+        self.sidecar_runner = SidecarRunner()
+        self.sidecar_manifests = self.sidecar_discovery.load_all()
+        # Per-tab refcount (Etap 8): start sidecar when first tab claims it,
+        # stop when last tab drops it.
+        self.sidecar_refcounts: dict[str, int] = defaultdict(int)
+        atexit.register(self.sidecar_runner.stop_all)
+
+        # ── Debug REST (off unless --debug-rest / BTERMINAL_DEBUG_REST=1) ──
+        self._debug_token = None
+        self._debug_server = None
+        if DEBUG_REST_ENABLED:
+            self._debug_token = _load_or_create_debug_token()
+            self._debug_server = _start_debug_rest_server(self, self._debug_token)
+            _start_idle_watchdog(self._debug_server)
+            atexit.register(_stop_debug_rest_server, self._debug_server)
+            sys.stderr.write(
+                f"[debug-rest] listening on http://127.0.0.1:{DEBUG_REST_PORT} "
+                f"(token in {DEBUG_TOKEN_FILE})\n"
+            )
+
     def _build_menubar(self):
         menubar = Gtk.MenuBar()
 
@@ -9386,10 +10535,11 @@ class BTerminalApp(Gtk.Window):
 
     def _update_window_title(self):
         """Update window title bar: 'BTerminal — tab_name [n/total]'."""
+        suffix = f" [DEBUG-REST :{DEBUG_REST_PORT}]" if DEBUG_REST_ENABLED else ""
         n = self.notebook.get_n_pages()
         idx = self.notebook.get_current_page()
         if idx < 0 or n == 0:
-            self.set_title(f"{APP_NAME} v{APP_VERSION}")
+            self.set_title(f"{APP_NAME} v{APP_VERSION}{suffix}")
             return
         tab = self.notebook.get_nth_page(idx)
         if isinstance(tab, TerminalTab):
@@ -9397,9 +10547,9 @@ class BTerminalApp(Gtk.Window):
         else:
             name = "Terminal"
         if n > 1:
-            self.set_title(f"{APP_NAME} — {name} [{idx + 1}/{n}]")
+            self.set_title(f"{APP_NAME} — {name} [{idx + 1}/{n}]{suffix}")
         else:
-            self.set_title(f"{APP_NAME} — {name}")
+            self.set_title(f"{APP_NAME} — {name}{suffix}")
 
     def _on_switch_page(self, notebook, page, page_num):
         GLib.idle_add(self._update_window_title)
@@ -9533,6 +10683,18 @@ class BTerminalApp(Gtk.Window):
 
     def open_claude_tab(self, config):
         tab = TerminalTab(self, claude_config=config)
+        # Per-tab plugin gating (Etap 8): if the user picked specific plugins
+        # in ClaudeCodeDialog, persist that choice on the tab. None means
+        # "every globally-enabled plugin contributes" (backwards compat).
+        enabled = config.get("enabled_plugins")
+        if isinstance(enabled, list):
+            tab.enabled_plugins = set(enabled)
+            # Acquire sidecars referenced by this tab. The first tab to
+            # claim a sidecar starts it; the last to release it stops it
+            # (close_tab handles release in Etap 8.k).
+            for name in tab.enabled_plugins:
+                if name in self.sidecar_manifests:
+                    self._sidecar_acquire(name)
         base_name = config.get("name", "Claude Code")
         # Count existing tabs with the same base config name
         count = 0
@@ -9572,6 +10734,14 @@ class BTerminalApp(Gtk.Window):
                 db.close()
             except Exception:
                 pass
+        # Release sidecar refcounts (Etap 8.k). When the last tab using a
+        # sidecar closes, _sidecar_release fires runner.stop and the port
+        # is freed.
+        enabled = getattr(tab, "enabled_plugins", None)
+        if enabled is not None:
+            for name in enabled:
+                if name in self.sidecar_manifests:
+                    self._sidecar_release(name)
         # Collect Claude Code session log on tab close
         _collect_claude_log(tab)
         idx = self.notebook.page_num(tab)
@@ -9827,6 +10997,99 @@ class BTerminalApp(Gtk.Window):
                 print(f"[plugins] Failed to deactivate {plugin.name}: {e}")
         self._plugins.clear()
         self._plugin_shortcuts.clear()
+
+    # ── Hot toggle (Etap 8) ──
+
+    def _hot_load_plugin(self, mod_name):
+        """Load a single plugin from PLUGINS_DIR and register it without restart."""
+        if mod_name in self._plugins:
+            return
+        py_file = os.path.join(PLUGINS_DIR, mod_name + ".py")
+        pkg_init = os.path.join(PLUGINS_DIR, mod_name, "__init__.py")
+        if os.path.isfile(py_file):
+            path = py_file
+        elif os.path.isfile(pkg_init):
+            path = pkg_init
+        else:
+            raise FileNotFoundError(
+                f"plugin '{mod_name}' not found in {PLUGINS_DIR}"
+            )
+        spec = importlib.util.spec_from_file_location(
+            f"bterminal_plugin_{mod_name}", path,
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        plugin = module.create_plugin(self)
+        self._register_plugin(plugin)
+
+    def _hot_unload_plugin(self, mod_name):
+        """Deactivate + remove from sidebar without restart.
+
+        Shortcuts are flat-tracked (no per-plugin id), so we rebuild them
+        from the remaining plugins to drop entries that referenced bound
+        methods of the deactivated instance.
+        """
+        plugin = self._plugins.get(mod_name)
+        if plugin is None:
+            return
+        panel = self.sidebar_stack.get_child_by_name(plugin.name)
+        if panel is not None:
+            self.sidebar_stack.remove(panel)
+        for btn in list(self._sidebar_tab_buttons):
+            if btn.get_label() == plugin.title:
+                self._sidebar_switcher.remove(btn)
+                self._sidebar_tab_buttons.remove(btn)
+                break
+        try:
+            plugin.deactivate()
+        except Exception as exc:  # noqa: BLE001 — never raise on disable
+            print(f"[plugins] deactivate {mod_name} raised: {exc}")
+        del self._plugins[mod_name]
+        # Rebuild shortcuts from remaining loaded plugins
+        self._plugin_shortcuts.clear()
+        for p in self._plugins.values():
+            try:
+                for shortcut in p.get_keyboard_shortcuts():
+                    self._plugin_shortcuts.append(shortcut)
+            except Exception:
+                pass
+
+    # ── Sidecar refcount (Etap 8) ──
+
+    def _sidecar_acquire(self, name):
+        """Increment refcount for sidecar `name`. On 0→1 transition, start it.
+
+        No-op if `name` is not a known manifest (defensive against stale tab
+        state pointing at a manifest that was deleted between sessions).
+        """
+        manifest = self.sidecar_manifests.get(name)
+        if manifest is None:
+            return
+        prev = self.sidecar_refcounts[name]
+        self.sidecar_refcounts[name] = prev + 1
+        if prev == 0:
+            try:
+                self.sidecar_runner.start(name, manifest)
+            except Exception as exc:  # noqa: BLE001
+                # Roll back the refcount so the next acquire can retry the
+                # start. We deliberately swallow the error — the user will
+                # see it next time they hit /api/sidecars/{name}/health.
+                self.sidecar_refcounts[name] = prev
+                print(f"[sidecar] start {name} failed: {exc}")
+
+    def _sidecar_release(self, name):
+        """Decrement refcount. On 1→0 transition, stop the sidecar."""
+        if name not in self.sidecar_refcounts:
+            return
+        prev = self.sidecar_refcounts[name]
+        if prev <= 0:
+            return
+        self.sidecar_refcounts[name] = prev - 1
+        if prev == 1:
+            try:
+                self.sidecar_runner.stop(name)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[sidecar] stop {name} failed: {exc}")
 
     def _on_key_press(self, widget, event):
         mod = event.state & Gtk.accelerator_get_default_mod_mask()
@@ -10351,6 +11614,19 @@ def _update_done(window, spinner_dialog, error):
 
 
 def main():
+    global DEBUG_REST_ENABLED
+
+    parser = argparse.ArgumentParser(prog="bterminal", add_help=True)
+    parser.add_argument(
+        "--debug-rest",
+        action="store_true",
+        help="Enable loopback debug REST API on :7780 (token in ~/.config/bterminal/debug_token).",
+    )
+    args, _unknown = parser.parse_known_args()
+    DEBUG_REST_ENABLED = bool(
+        args.debug_rest or os.environ.get("BTERMINAL_DEBUG_REST") == "1"
+    )
+
     GLib.set_prgname("bterminal")
     GLib.set_application_name("BTerminal")
 

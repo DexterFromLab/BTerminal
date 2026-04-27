@@ -1,0 +1,15 @@
+{
+  "name": "taskboard",
+  "title": "Taskboard",
+  "description": "Jira-like task management with graph-based workflows for AI agent teams.",
+  "plugin_address": "http://127.0.0.1:8768/api",
+  "plugin_dashboard": "http://127.0.0.1:8768/",
+  "healthcheck_url": "http://127.0.0.1:8768/api/health",
+  "run_command": "python3 -m plugins.taskboard.run",
+  "reset_command": "pkill -f 'plugins.taskboard.run' || true",
+  "cwd": "/home/bartek/workspace/agent_controller",
+  "env": {},
+  "default_in_session": false,
+  "auto_start": false,
+  "prompt": "## taskboard — Task Management with Workflow Graphs\n\nBase URL: http://127.0.0.1:8768/api\nAll responses are plain text.\n\n### Your workflow\n1. Check your tasks: GET /api/my-tasks?agent=YOUR_ID\n2. Start a task: POST /api/ticket/<tid>/node/<nid>/start {\"agent\":\"YOUR_ID\"}\n3. Complete checklist items: POST /api/ticket/<tid>/node/<nid>/check/<idx> {\"agent\":\"YOUR_ID\"}\n4. Complete the node: POST /api/ticket/<tid>/node/<nid>/complete {\"agent\":\"YOUR_ID\"}\n5. For decision nodes: POST /api/ticket/<tid>/node/<nid>/decide {\"agent\":\"YOUR_ID\",\"decision\":\"yes|no\"}\n6. Add worklog notes: POST /api/ticket/<tid>/worklog {\"agent\":\"YOUR_ID\",\"content\":\"...\"}\n\n### Endpoints\n\nGET  /api/health — returns 'ok'\nGET  /api/my-tasks?agent=ID — your ready/active tasks across all tickets\nGET  /api/tickets — list all tickets (?status=active&type=bug&priority=high)\nGET  /api/ticket/<id> — ticket detail with current position\nGET  /api/ticket/<id>/graph — full graph with node statuses\nGET  /api/ticket/<id>/worklog — worklog entries\nGET  /api/templates — list workflow templates\nGET  /api/template/<id> — template detail with nodes and edges\nGET  /api/roles — agent-to-role mappings\nGET  /api/process-issues — process issues (?status=open)\n\nPOST /api/ticket/<tid>/node/<nid>/start {\"agent\":\"ID\"}\nPOST /api/ticket/<tid>/node/<nid>/check/<idx> {\"agent\":\"ID\"}\nPOST /api/ticket/<tid>/node/<nid>/complete {\"agent\":\"ID\"}\nPOST /api/ticket/<tid>/node/<nid>/decide {\"agent\":\"ID\",\"decision\":\"CHOICE\"}\nPOST /api/ticket/<tid>/node/<nid>/skip {\"agent\":\"ID\",\"reason\":\"...\"}\nPOST /api/ticket/<tid>/node/<nid>/escalate-respond {\"agent\":\"operator\",\"response\":\"...\"}\nPOST /api/ticket/<tid>/worklog {\"agent\":\"ID\",\"content\":\"...\"}\nPOST /api/ticket/create {\"template_id\":\"...\",\"title\":\"...\",\"priority\":\"high\",\"created_by\":\"ID\"}\nPOST /api/process-issue {\"issue_type\":\"process_gap\",\"title\":\"...\",\"description\":\"...\",\"reported_by\":\"ID\"}\nPOST /api/role/assign {\"agent_id\":\"ID\",\"role\":\"coder\"}\n\n### Conventions\n- Check /api/my-tasks periodically to see if you have work\n- Always complete ALL checklist items before completing a node\n- Skipping a node logs a VIOLATION — only do this with team consensus\n- Use worklog to document your progress and findings\n- Report process issues if instructions are unclear or workflow has gaps"
+}

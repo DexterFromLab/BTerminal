@@ -1,0 +1,85 @@
+{
+  "$comment": "Scenarios are sequences of actions from actions.json that walk the application through interesting paths. Each scenario is a separate pytest case. The runner takes a screenshot at every node marked snapshot:true and verifies state matches expectations after each step.",
+
+  "scenarios": [
+    {
+      "name": "tab_lifecycle",
+      "description": "Open a local tab, write to it, close it. Smallest meaningful round-trip.",
+      "steps": [
+        {"action": "get_state",                  "snapshot": true},
+        {"action": "open_local_tab",             "snapshot": true},
+        {"action": "feed_text_to_last_tab",      "snapshot": false},
+        {"action": "send_enter_to_last_tab",     "snapshot": true},
+        {"action": "close_last_tab",             "snapshot": true}
+      ]
+    },
+    {
+      "name": "view_toggles",
+      "description": "Sidebar + git panel each toggle and return.",
+      "steps": [
+        {"action": "get_window_screenshot",      "snapshot": true},
+        {"action": "toggle_sidebar",             "snapshot": true},
+        {"action": "toggle_sidebar",             "snapshot": true},
+        {"action": "toggle_git_panel",           "snapshot": true},
+        {"action": "toggle_git_panel",           "snapshot": true}
+      ]
+    },
+    {
+      "name": "gtk_plugin_hot_toggle",
+      "description": "Disable + re-enable the seeded test_panel GTK plugin without restart.",
+      "steps": [
+        {"action": "get_plugins",                "snapshot": false},
+        {"action": "get_window_screenshot",      "snapshot": true},
+        {"action": "disable_test_panel",         "snapshot": true},
+        {"action": "enable_test_panel",          "snapshot": true}
+      ]
+    },
+    {
+      "name": "sidecar_lifecycle_direct",
+      "description": "Direct sidecar start/stop via /api/sidecars/{name}/{action} (no tab refcount path).",
+      "steps": [
+        {"action": "get_test_sleeper_health_when_stopped"},
+        {"action": "start_test_sleeper",         "snapshot": true},
+        {"action": "stop_test_sleeper",          "snapshot": true},
+        {"action": "get_test_sleeper_health_when_stopped"}
+      ]
+    },
+    {
+      "name": "sidecar_via_tab_refcount",
+      "description": "Per-tab plugin assignment drives sidecar lifecycle. Refcount 0→1 starts, 1→0 stops.",
+      "steps": [
+        {"action": "open_local_tab",             "snapshot": true},
+        {"action": "put_last_tab_plugins_acquire_sleeper", "snapshot": true},
+        {"action": "put_last_tab_plugins_release_all",     "snapshot": false},
+        {"action": "close_last_tab",             "snapshot": true}
+      ]
+    },
+    {
+      "name": "intro_prompt_per_tab",
+      "description": "Two tabs, one with sleeper enabled, one without. Intro prompts diverge.",
+      "steps": [
+        {"action": "open_local_tab"},
+        {"action": "put_last_tab_plugins_acquire_sleeper"},
+        {"action": "get_last_tab_intro_prompt", "expect_contains": "TestSleeper"},
+        {"action": "open_local_tab"},
+        {"action": "put_last_tab_plugins_release_all"},
+        {"action": "get_last_tab_intro_prompt", "expect_not_contains": "TestSleeper"},
+        {"action": "close_last_tab"},
+        {"action": "close_last_tab"}
+      ]
+    },
+    {
+      "name": "guard_rails",
+      "description": "Negative-path: every guard endpoint refuses correctly.",
+      "steps": [
+        {"action": "open_local_tab"},
+        {"action": "feed_oversized_rejected"},
+        {"action": "key_not_in_whitelist_rejected"},
+        {"action": "quit_without_confirm_rejected"},
+        {"action": "unauthorized_health_returns_401"},
+        {"action": "unknown_route_404"},
+        {"action": "close_last_tab"}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,226 @@
+{
+  "$comment": "Catalogue of atomic, REST-driven actions on BTerminal --debug-rest. Each action is a state transition: precondition (when it makes sense), the request, expected status, and effect (what changes in the abstract state model). Used by tests/test_action_graph.py to walk scenarios from scenarios.json.",
+
+  "state_model": {
+    "$comment": "The abstract state the runner tracks. Updated after every action via 'effect'. Used to assert preconditions of subsequent actions.",
+    "fields": {
+      "tabs_count":         "int  — number of TerminalTab pages",
+      "sidebar_visible":    "bool — sidebar pane on/off",
+      "git_panel_visible":  "bool — git panel pane on/off",
+      "plugins_loaded":     "set[str] — GTK plugin names currently in app._plugins",
+      "sidecars_running":   "set[str] — sidecar names with subprocess alive",
+      "tab_plugins":        "dict[idx,set|null] — per-tab enabled_plugins; null = backwards-compat"
+    }
+  },
+
+  "actions": [
+    {
+      "id": "get_health",
+      "category": "read",
+      "request": {"method": "GET", "path": "/api/health"},
+      "expect_status": 200,
+      "expect_field": "ok",
+      "effect": null
+    },
+    {
+      "id": "get_state",
+      "category": "read",
+      "request": {"method": "GET", "path": "/api/state"},
+      "expect_status": 200,
+      "effect": null
+    },
+    {
+      "id": "get_tabs",
+      "category": "read",
+      "request": {"method": "GET", "path": "/api/tabs"},
+      "expect_status": 200,
+      "effect": null
+    },
+    {
+      "id": "get_plugins",
+      "category": "read",
+      "request": {"method": "GET", "path": "/api/plugins"},
+      "expect_status": 200,
+      "effect": null
+    },
+    {
+      "id": "get_sidecars",
+      "category": "read",
+      "request": {"method": "GET", "path": "/api/sidecars"},
+      "expect_status": 200,
+      "effect": null
+    },
+    {
+      "id": "get_window_screenshot",
+      "category": "read",
+      "request": {"method": "GET", "path": "/api/window/screenshot"},
+      "expect_status": 200,
+      "expect_field": "path",
+      "effect": null
+    },
+    {
+      "id": "get_debug_log",
+      "category": "read",
+      "request": {"method": "GET", "path": "/api/debug/log"},
+      "expect_status": 200,
+      "effect": null
+    },
+
+    {
+      "id": "open_local_tab",
+      "category": "tab_lifecycle",
+      "request": {"method": "POST", "path": "/api/tabs/local"},
+      "expect_status": 200,
+      "expect_field": "idx",
+      "effect": "tabs_count += 1"
+    },
+    {
+      "id": "close_last_tab",
+      "category": "tab_lifecycle",
+      "precondition": "tabs_count > 0",
+      "request": {"method": "POST", "path": "/api/tabs/{tabs_count-1}/close"},
+      "expect_status": 200,
+      "$comment_effect": "Closing a tab also releases that tab's enabled_plugins refcounts. We don't track per-tab refcounts in the model, so the conservative heuristic is: if the closing tab was the last consumer (refcount 1→0), the sidecar stops. Since the explorer doesn't reliably know per-tab assignments after PUT, we drop test_sleeper from running on every close (will be re-set by next invariant sync if still alive on server).",
+      "effect": "tabs_count -= 1; sidecars_running -= {'test_sleeper'}"
+    },
+    {
+      "id": "feed_text_to_last_tab",
+      "category": "tab_io",
+      "precondition": "tabs_count > 0",
+      "request": {"method": "POST", "path": "/api/tabs/{tabs_count-1}/feed", "json": {"text": "echo from-graph\n"}},
+      "expect_status": 200,
+      "effect": null
+    },
+    {
+      "id": "send_enter_to_last_tab",
+      "category": "tab_io",
+      "precondition": "tabs_count > 0",
+      "request": {"method": "POST", "path": "/api/tabs/{tabs_count-1}/key", "json": {"key": "enter"}},
+      "expect_status": 200,
+      "effect": null
+    },
+    {
+      "id": "feed_oversized_rejected",
+      "category": "guard",
+      "precondition": "tabs_count > 0",
+      "request": {"method": "POST", "path": "/api/tabs/{tabs_count-1}/feed", "json_factory": "oversized_text"},
+      "expect_status": 413,
+      "effect": null
+    },
+    {
+      "id": "key_not_in_whitelist_rejected",
+      "category": "guard",
+      "precondition": "tabs_count > 0",
+      "request": {"method": "POST", "path": "/api/tabs/{tabs_count-1}/key", "json": {"key": "ctrl-z"}},
+      "expect_status": 400,
+      "effect": null
+    },
+
+    {
+      "id": "toggle_sidebar",
+      "category": "view",
+      "request": {"method": "POST", "path": "/api/window/toggle_sidebar"},
+      "expect_status": 200,
+      "effect": "sidebar_visible = not sidebar_visible"
+    },
+    {
+      "id": "toggle_git_panel",
+      "category": "view",
+      "request": {"method": "POST", "path": "/api/window/toggle_git_panel"},
+      "expect_status": 200,
+      "effect": "git_panel_visible = not git_panel_visible"
+    },
+
+    {
+      "id": "disable_test_panel",
+      "category": "plugin_lifecycle",
+      "precondition": "'test_panel' in plugins_loaded",
+      "request": {"method": "POST", "path": "/api/plugins/test_panel/disable"},
+      "expect_status": 200,
+      "effect": "plugins_loaded -= {'test_panel'}"
+    },
+    {
+      "id": "enable_test_panel",
+      "category": "plugin_lifecycle",
+      "precondition": "'test_panel' not in plugins_loaded",
+      "request": {"method": "POST", "path": "/api/plugins/test_panel/enable"},
+      "expect_status": 200,
+      "effect": "plugins_loaded |= {'test_panel'}"
+    },
+
+    {
+      "id": "start_test_sleeper",
+      "category": "sidecar_lifecycle",
+      "precondition": "'test_sleeper' not in sidecars_running",
+      "request": {"method": "POST", "path": "/api/sidecars/test_sleeper/start"},
+      "expect_status": 200,
+      "effect": "sidecars_running |= {'test_sleeper'}"
+    },
+    {
+      "id": "stop_test_sleeper",
+      "category": "sidecar_lifecycle",
+      "precondition": "'test_sleeper' in sidecars_running",
+      "request": {"method": "POST", "path": "/api/sidecars/test_sleeper/stop"},
+      "expect_status": 200,
+      "effect": "sidecars_running -= {'test_sleeper'}"
+    },
+    {
+      "id": "get_test_sleeper_health_when_stopped",
+      "category": "sidecar_health",
+      "precondition": "'test_sleeper' not in sidecars_running",
+      "request": {"method": "GET", "path": "/api/sidecars/test_sleeper/health"},
+      "expect_status": 200,
+      "expect_json": {"ok": false, "reason": "not running"},
+      "effect": null
+    },
+
+    {
+      "id": "put_last_tab_plugins_acquire_sleeper",
+      "category": "tab_plugins",
+      "precondition": "tabs_count > 0",
+      "request": {"method": "PUT", "path": "/api/tabs/{tabs_count-1}/plugins", "json": {"enabled": ["test_sleeper"]}},
+      "expect_status": 200,
+      "effect": "tab_plugins[tabs_count-1] = {'test_sleeper'}; sidecars_running |= {'test_sleeper'}"
+    },
+    {
+      "id": "put_last_tab_plugins_release_all",
+      "category": "tab_plugins",
+      "precondition": "tabs_count > 0",
+      "request": {"method": "PUT", "path": "/api/tabs/{tabs_count-1}/plugins", "json": {"enabled": []}},
+      "expect_status": 200,
+      "$comment_effect": "Same caveat as close_last_tab — releasing the last consumer drops the sidecar. The conservative heuristic applies to the seeded test_sleeper.",
+      "effect": "tab_plugins[tabs_count-1] = set(); sidecars_running -= {'test_sleeper'}"
+    },
+    {
+      "id": "get_last_tab_intro_prompt",
+      "category": "intro",
+      "precondition": "tabs_count > 0",
+      "request": {"method": "GET", "path": "/api/tabs/{tabs_count-1}/intro_prompt"},
+      "expect_status": 200,
+      "expect_field": "intro_prompt",
+      "effect": null
+    },
+
+    {
+      "id": "quit_without_confirm_rejected",
+      "category": "guard",
+      "request": {"method": "POST", "path": "/api/quit"},
+      "expect_status": 400,
+      "effect": null
+    },
+    {
+      "id": "unauthorized_health_returns_401",
+      "category": "guard",
+      "request": {"method": "GET", "path": "/api/health", "no_auth": true},
+      "expect_status": 401,
+      "effect": null
+    },
+    {
+      "id": "unknown_route_404",
+      "category": "guard",
+      "request": {"method": "GET", "path": "/api/this-does-not-exist"},
+      "expect_status": 404,
+      "effect": null
+    }
+  ]
+}
