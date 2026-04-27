@@ -80,7 +80,8 @@
       "precondition": "tabs_count > 0",
       "request": {"method": "POST", "path": "/api/tabs/{tabs_count-1}/close"},
       "expect_status": 200,
-      "effect": "tabs_count -= 1"
+      "$comment_effect": "Closing a tab also releases that tab's enabled_plugins refcounts. We don't track per-tab refcounts in the model, so the conservative heuristic is: if the closing tab was the last consumer (refcount 1→0), the sidecar stops. Since the explorer doesn't reliably know per-tab assignments after PUT, we drop test_sleeper from running on every close (will be re-set by next invariant sync if still alive on server).",
+      "effect": "tabs_count -= 1; sidecars_running -= {'test_sleeper'}"
     },
     {
       "id": "feed_text_to_last_tab",
@@ -187,7 +188,8 @@
       "precondition": "tabs_count > 0",
       "request": {"method": "PUT", "path": "/api/tabs/{tabs_count-1}/plugins", "json": {"enabled": []}},
       "expect_status": 200,
-      "effect": "tab_plugins[tabs_count-1] = set()"
+      "$comment_effect": "Same caveat as close_last_tab — releasing the last consumer drops the sidecar. The conservative heuristic applies to the seeded test_sleeper.",
+      "effect": "tab_plugins[tabs_count-1] = set(); sidecars_running -= {'test_sleeper'}"
     },
     {
       "id": "get_last_tab_intro_prompt",
