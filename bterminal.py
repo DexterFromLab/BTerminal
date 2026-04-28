@@ -518,6 +518,73 @@ def _route_post_tab_feed(h: BTerminalDebugHandler, idx: str) -> None:
     h._send_json(200, {"ok": True, "bytes": len(payload)})
 
 
+def _route_post_tab_simulate_prompt(h: BTerminalDebugHandler, idx: str) -> None:
+    """Debug helper: simulate a Claude-Code prompt (Enter) without going
+    through X11 / VTE. Increments the tab's stats_bar prompt counter and
+    runs the same _maybe_inject_rules pass that the real Enter handler
+    does. Returns the resulting state so tests can assert that
+    _inject_pending was set when count crosses inject_every.
+    """
+    app = h.server.app
+    idx_int = int(idx)
+
+    def _do():
+        tab = _resolve_tab(app, idx_int)
+        if tab is None or not isinstance(tab, TerminalTab):
+            return ("not_found", None)
+        if tab._stats_bar is None or tab.claude_config is None:
+            return ("not_claude_tab", None)
+        tab._stats_bar.increment_prompt()
+        tab._maybe_inject_rules()
+        pending = tab._inject_pending
+        return ("ok", {
+            "prompt_count": tab._stats_bar._prompt_count,
+            "inject_pending": list(pending) if pending else None,
+        })
+
+    status, info = _via_glib_idle(_do)
+    if status == "not_found":
+        h._send_error(404, f"no terminal tab at idx {idx_int}")
+        return
+    if status == "not_claude_tab":
+        h._send_error(400, f"tab {idx_int} is not a Claude Code tab (no _stats_bar)")
+        return
+    h._send_json(200, {"ok": True, **info})
+
+
+def _route_post_tab_force_idle(h: BTerminalDebugHandler, idx: str) -> None:
+    """Debug helper: trigger _on_task_idle_timeout immediately rather
+    than waiting 10s of real silence. Flushes any pending rules
+    injection. Returns whether something was actually injected.
+    """
+    app = h.server.app
+    idx_int = int(idx)
+
+    def _do():
+        tab = _resolve_tab(app, idx_int)
+        if tab is None or not isinstance(tab, TerminalTab):
+            return ("not_found", None)
+        had_pending = tab._inject_pending is not None
+        # Cancel any real timer so we don't double-fire.
+        if tab._task_idle_timer:
+            try:
+                GLib.source_remove(tab._task_idle_timer)
+            except Exception:
+                pass
+            tab._task_idle_timer = None
+        tab._on_task_idle_timeout()
+        return ("ok", {
+            "had_pending": had_pending,
+            "still_pending": tab._inject_pending is not None,
+        })
+
+    status, info = _via_glib_idle(_do, timeout=15.0)
+    if status == "not_found":
+        h._send_error(404, f"no terminal tab at idx {idx_int}")
+        return
+    h._send_json(200, {"ok": True, **info})
+
+
 def _route_post_tab_key(h: BTerminalDebugHandler, idx: str) -> None:
     body = h._read_json_body()
     if body is None:
@@ -1070,6 +1137,8 @@ def _start_debug_rest_server(app, token: str) -> BTerminalDebugServer:
         (r"/api/tabs/(?P<idx>\d+)/close", _route_post_tab_close),
         (r"/api/tabs/(?P<idx>\d+)/feed", _route_post_tab_feed),
         (r"/api/tabs/(?P<idx>\d+)/key", _route_post_tab_key),
+        (r"/api/tabs/(?P<idx>\d+)/simulate_prompt", _route_post_tab_simulate_prompt),
+        (r"/api/tabs/(?P<idx>\d+)/force_idle", _route_post_tab_force_idle),
         (r"/api/window/toggle_sidebar", _route_post_toggle_sidebar),
         (r"/api/window/toggle_git_panel", _route_post_toggle_git_panel),
         (r"/api/quit", _route_post_quit),
@@ -8577,6 +8646,20 @@ class MemoryPanel(Gtk.Box):
 
         self.show_all()
         GLib.idle_add(self._load_projects)
+        # Auto-refresh whenever the Memory tab becomes visible. Without this
+        # the panel only reads rules + rules_config on init / project change,
+        # so any edit done from the `ctx rules` CLI (or another window)
+        # leaves the spinners and rules list showing stale values.
+        self.connect("map", lambda *_: self._refresh_for_current_project())
+
+    def _refresh_for_current_project(self):
+        """Re-read rules + rules_config + logs for the active project.
+        Called from map-event so the panel reflects DB truth on every show.
+        """
+        if self._get_project():
+            self._refresh_rules()
+            self._refresh_config()
+            self._refresh_logs()
 
     # ── Helpers ──────────────────────────────────────────────────────────────
 
