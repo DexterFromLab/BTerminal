@@ -611,6 +611,35 @@ def _route_post_tab_key(h: BTerminalDebugHandler, idx: str) -> None:
     h._send_json(200, {"ok": True, "key": key})
 
 
+def _route_post_sidebar_show(h: BTerminalDebugHandler) -> None:
+    """Switch the sidebar's active stack child by name. Lets tests
+    deterministically open Memory/Plugins/etc. without hunting for the
+    right pixel to xdotool-click.
+    """
+    body = h._read_json_body()
+    if body is None:
+        return
+    name = body.get("name", "")
+    if not isinstance(name, str) or not name:
+        h._send_error(400, "'name' required (string)")
+        return
+    app = h.server.app
+
+    def _switch():
+        if not app._sidebar_visible:
+            app.toggle_sidebar()
+        if app.sidebar_stack.get_child_by_name(name) is None:
+            return ("not_found", None)
+        app.sidebar_stack.set_visible_child_name(name)
+        return ("ok", app.sidebar_stack.get_visible_child_name())
+
+    status, current = _via_glib_idle(_switch)
+    if status == "not_found":
+        h._send_error(404, f"sidebar child '{name}' not found")
+        return
+    h._send_json(200, {"ok": True, "active": current})
+
+
 def _route_post_toggle_sidebar(h: BTerminalDebugHandler) -> None:
     app = h.server.app
 
@@ -1140,6 +1169,7 @@ def _start_debug_rest_server(app, token: str) -> BTerminalDebugServer:
         (r"/api/tabs/(?P<idx>\d+)/simulate_prompt", _route_post_tab_simulate_prompt),
         (r"/api/tabs/(?P<idx>\d+)/force_idle", _route_post_tab_force_idle),
         (r"/api/window/toggle_sidebar", _route_post_toggle_sidebar),
+        (r"/api/window/sidebar/show", _route_post_sidebar_show),
         (r"/api/window/toggle_git_panel", _route_post_toggle_git_panel),
         (r"/api/quit", _route_post_quit),
         (r"/api/plugins/(?P<name>[\w.-]+)/enable", _route_post_plugin_enable),
