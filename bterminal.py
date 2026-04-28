@@ -11695,6 +11695,22 @@ def _update_done(window, spinner_dialog, error):
 def main():
     global DEBUG_REST_ENABLED
 
+    # When BTerminal is launched from a desktop entry / file manager,
+    # the inherited PATH typically excludes ~/.local/bin and
+    # ~/.npm-global/bin, so subprocess.run(["ctx", ...]) (and tasks /
+    # consult / memory_wizard / claude) raises FileNotFoundError —
+    # surfaced as "Nie ma takiego pliku" in dialogs. Prepend the user
+    # paths unconditionally; harmless if already present.
+    _user_bins = [
+        os.path.expanduser("~/.local/bin"),
+        os.path.expanduser("~/.npm-global/bin"),
+    ]
+    _path_parts = os.environ.get("PATH", "").split(os.pathsep)
+    for _bin in reversed(_user_bins):
+        if _bin not in _path_parts:
+            _path_parts.insert(0, _bin)
+    os.environ["PATH"] = os.pathsep.join(_path_parts)
+
     parser = argparse.ArgumentParser(prog="bterminal", add_help=True)
     parser.add_argument(
         "--debug-rest",
