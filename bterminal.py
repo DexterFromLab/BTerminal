@@ -3871,9 +3871,17 @@ class TerminalTab(Gtk.Box):
                 f.write(f"{datetime.datetime.now()}: pending set project={project} count={count}\n")
 
     def _do_inject_rules(self, project, count, refresh_every):
-        """Send rules block (and optionally CTX refresh) into the terminal.
+        """Inject the project's rules block (and, on refresh boundaries, a
+        separate ctx refresh block) into the terminal.
 
-        Called when Claude is idle, so the message arrives at the free prompt.
+        Header / global rules / tools-help are NOT included here — they are
+        already part of the session intro prompt at start_claude_session and
+        re-injecting them on every interval would bury the actual rules in
+        ~2500 chars of repeated boilerplate. The injected block is now just
+        what `ctx rules inject <project>` returns. If a ctx refresh is also
+        due (count % refresh_every == 0) it is sent as a SECOND, clearly
+        labelled message after a short delay so Claude treats the two as
+        distinct reminders.
         """
         self._inject_pending = None
         try:
@@ -3885,42 +3893,48 @@ class TerminalTab(Gtk.Box):
         except Exception:
             project_block = ""
 
-        global_rules = _read_global_rules()
-
-        if not project_block and not global_rules:
+        if not project_block:
             return
-
-        readme_path = Path(__file__).parent / "README.md"
-        readme_hint = f" README: {readme_path}" if readme_path.exists() else ""
-        header = (f"Przypomnienie: pracujesz w środowisku BTerminal "
-                  f"(ctx, consult, tasks, memory_wizard, skills).{readme_hint}")
-
-        parts = [header]
-        if global_rules:
-            parts.append("--- Reguły globalne (BTerminal defaults) ---\n" +
-                         "\n".join(f"- {r}" for r in global_rules))
-        if project_block:
-            parts.append(project_block)
-        parts.append("--- Narzędzia ---\n\n" + _tools_help(project))
-        block = "\n\n".join(parts)
-
-        if count % refresh_every == 0:
-            try:
-                ctx_result = subprocess.run(
-                    ["ctx", "get", project, "--shared"],
-                    capture_output=True, text=True, timeout=5,
-                )
-                ctx_block = ctx_result.stdout.strip()
-                if ctx_block:
-                    block = ctx_block + "\n\n" + block
-            except Exception:
-                pass
 
         import datetime
         with open("/tmp/bterminal_inject.log", "a") as f:
-            f.write(f"{datetime.datetime.now()}: injecting {len(block)} chars for {project}\n")
-        self.terminal.feed_child(block.encode())
+            f.write(f"{datetime.datetime.now()}: injecting {len(project_block)} chars (rules) for {project}\n")
+        self.terminal.feed_child(project_block.encode())
         GLib.timeout_add(100, lambda: self.terminal.feed_child(b"\r") or False)
+
+        if count % refresh_every == 0:
+            # Schedule the ctx refresh separately — 800ms later so Claude
+            # finishes processing the rules-only message first.
+            GLib.timeout_add(800, self._do_inject_ctx_refresh, project)
+
+    def _do_inject_ctx_refresh(self, project):
+        """Send only the ctx context refresh block. Separate concern from
+        rules so the user's intent ('every N prompts remind me of rules')
+        is not conflated with 'every M prompts re-load project context'.
+        """
+        try:
+            ctx_result = subprocess.run(
+                ["ctx", "get", project, "--shared"],
+                capture_output=True, text=True, timeout=5,
+            )
+            ctx_block = ctx_result.stdout.strip()
+        except Exception:
+            ctx_block = ""
+
+        if not ctx_block:
+            return False
+
+        labelled = (
+            f"=== odświeżenie kontekstu projektu [{project}] ===\n\n"
+            f"{ctx_block}"
+        )
+
+        import datetime
+        with open("/tmp/bterminal_inject.log", "a") as f:
+            f.write(f"{datetime.datetime.now()}: injecting {len(labelled)} chars (ctx refresh) for {project}\n")
+        self.terminal.feed_child(labelled.encode())
+        GLib.timeout_add(100, lambda: self.terminal.feed_child(b"\r") or False)
+        return False  # don't repeat (used as GLib.timeout_add callback)
 
     def _on_button_press(self, terminal, event):
         if event.button == 3:  # right click
