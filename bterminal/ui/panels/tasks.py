@@ -87,6 +87,10 @@ class TaskListPanel(Gtk.Box):
     def __init__(self, app):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.app = app
+        # Guard: True while we mutate project_combo programmatically
+        # (refresh, tab-switch sync). Suppresses the user-intent branch in
+        # _on_project_changed so we don't overwrite tab._task_project.
+        self._suspend_changed = False
 
         # ── Project selector ──
         proj_box = Gtk.Box(spacing=4)
@@ -238,6 +242,25 @@ class TaskListPanel(Gtk.Box):
     def _on_project_changed(self):
         self._load_tasks()
         self._load_autorun_state()
+        # Per-tab binding: a user-driven dropdown change pins the chosen
+        # project to the currently active tab. This decouples per-tab task
+        # tracking from claude_config.project_dir (which only seeds the
+        # default at tab creation). Programmatic combo updates (refresh,
+        # _sync_task_panel_project, set_active_tab) wrap themselves in
+        # _suspend_changed.
+        if self._suspend_changed:
+            return
+        project = self._get_selected_project()
+        if not project:
+            return
+        nb = self.app.notebook
+        idx = nb.get_current_page()
+        if idx < 0:
+            return
+        tab = nb.get_nth_page(idx)
+        from bterminal import TerminalTab  # lazy: TerminalTab still in bterminal.py
+        if isinstance(tab, TerminalTab):
+            tab._task_project = project
 
     def _update_auto_label(self, active):
         if active:
@@ -271,33 +294,41 @@ class TaskListPanel(Gtk.Box):
         model = self.project_combo.get_model()
         if not model:
             return
-        for i, row in enumerate(model):
-            if row[0] == project:
-                self.project_combo.set_active(i)
-                return
+        self._suspend_changed = True
+        try:
+            for i, row in enumerate(model):
+                if row[0] == project:
+                    self.project_combo.set_active(i)
+                    return
+        finally:
+            self._suspend_changed = False
         try:
             self._db_mtime = os.path.getmtime(CTX_DB)
         except OSError:
             pass
 
     def _load_projects(self):
-        current = self._get_selected_project()
-        self.project_combo.remove_all()
-        if not os.path.exists(CTX_DB):
-            return
-        db = sqlite3.connect(CTX_DB)
-        db.row_factory = sqlite3.Row
-        projects = db.execute(
-            "SELECT name FROM sessions ORDER BY name"
-        ).fetchall()
-        db.close()
-        active_idx = 0
-        for i, p in enumerate(projects):
-            self.project_combo.append_text(p["name"])
-            if p["name"] == current:
-                active_idx = i
-        if projects:
-            self.project_combo.set_active(active_idx)
+        self._suspend_changed = True
+        try:
+            current = self._get_selected_project()
+            self.project_combo.remove_all()
+            if not os.path.exists(CTX_DB):
+                return
+            db = sqlite3.connect(CTX_DB)
+            db.row_factory = sqlite3.Row
+            projects = db.execute(
+                "SELECT name FROM sessions ORDER BY name"
+            ).fetchall()
+            db.close()
+            active_idx = 0
+            for i, p in enumerate(projects):
+                self.project_combo.append_text(p["name"])
+                if p["name"] == current:
+                    active_idx = i
+            if projects:
+                self.project_combo.set_active(active_idx)
+        finally:
+            self._suspend_changed = False
 
     def _load_tasks(self):
         # Preserve scroll position and selection

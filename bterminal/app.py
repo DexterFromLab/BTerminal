@@ -522,17 +522,26 @@ class BTerminalApp(Gtk.Window):
             self._show_git_btn.hide()
 
     def _sync_task_panel_project(self, project_name):
-        """Set Task panel's project combo to match the active tab's project."""
+        """Set Task panel's project combo to match the active tab's project.
+
+        Wraps the programmatic combo.set_active() in _suspend_changed so the
+        GTK 'changed' signal does not write back into tab._task_project
+        (which would clobber the per-tab value with the value we synced FROM
+        another tab)."""
         if not hasattr(self, "task_panel"):
             return
         combo = self.task_panel.project_combo
         model = combo.get_model()
         if not model:
             return
-        for i, row in enumerate(model):
-            if row[0] == project_name:
-                combo.set_active(i)
-                break
+        self.task_panel._suspend_changed = True
+        try:
+            for i, row in enumerate(model):
+                if row[0] == project_name:
+                    combo.set_active(i)
+                    break
+        finally:
+            self.task_panel._suspend_changed = False
 
     def _build_tab_label(self, text, tab_widget):
         """Build a tab label with a close button.
