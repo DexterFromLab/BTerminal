@@ -1,0 +1,11 @@
+{
+  "_doc": "Minimal scenario for E2E smoke — mock Claude responds to common patterns",
+  "responses": [
+    {"trigger": "(?i)^hello", "reply": "Hello! How can I help?"},
+    {"trigger": "(?i)^hi", "reply": "Hi there!"},
+    {"trigger": "(?i)\\bping\\b", "reply": "pong"},
+    {"trigger": "\\[AUTO-TRIGGER\\]", "reply": "Acknowledged. Working on the task.", "delay_ms": 50}
+  ],
+  "default_reply": "I see: '{input}' — generic response.",
+  "exit_on": "^/quit$"
+}

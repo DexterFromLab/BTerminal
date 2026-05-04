@@ -44,7 +44,7 @@ def test_idle_watchdog_stops_server():
         "BTERMINAL_DEBUG_IDLE_CHECK": "1",
     }
     proc = subprocess.Popen(
-        ["xvfb-run", "-a", sys.executable, "bterminal.py", "--debug-rest"],
+        ["xvfb-run", "-a", sys.executable, "-m", "bterminal", "--debug-rest"],
         cwd=str(REPO_ROOT),
         env=env,
         stdout=subprocess.DEVNULL,

@@ -141,7 +141,7 @@ class Explorer:
         if bt_pid is None:
             self.anomalies.append(Anomaly(
                 step_n, last_action_id, "process_dead",
-                "no python3 bterminal.py process found in /proc",
+                "no `python -m bterminal --debug-rest` process found in /proc",
                 state_before=m.snapshot(),
             ))
             return
@@ -183,7 +183,7 @@ class Explorer:
                     cmdline = open(f"/proc/{pid_str}/cmdline").read()
                 except OSError:
                     continue
-                if "bterminal.py" in cmdline and "--debug-rest" in cmdline:
+                if ("bterminal" in cmdline) and "--debug-rest" in cmdline:
                     return int(pid_str)
         except OSError:
             pass

@@ -9,6 +9,7 @@ POST /api/quit?confirm=true (fallback: SIGTERM, then SIGKILL).
 
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -27,7 +28,8 @@ REPO_ROOT = Path(__file__).parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-DEBUG_REST_BASE = "http://127.0.0.1:7780"
+_TEST_PORT = int(os.environ.get("BTERMINAL_TEST_REST_PORT", "7790"))
+DEBUG_REST_BASE = f"http://127.0.0.1:{_TEST_PORT}"
 HEALTH_TIMEOUT_SEC = 10.0
 HEALTH_POLL_INTERVAL = 0.3
 QUIT_TIMEOUT_SEC = 2.0
@@ -43,6 +45,7 @@ class BTerminalClient:
     token: str
     http_client: httpx.Client
     home: str
+    stderr_log: str = ""    # path to captured stderr log (set by fixture)
 
 
 def _wait_for_server(deadline_ts: float) -> bool:
@@ -62,6 +65,151 @@ def _wait_for_server(deadline_ts: float) -> bool:
             pass
         time.sleep(HEALTH_POLL_INTERVAL)
     return False
+
+
+class StderrWatcher:
+    """Cursor-based stderr watcher dla BTerminal subprocess.
+
+    Każdy `check()` weryfikuje że BRAK NOWYCH error patterns w stderr od
+    ostatniego check'u. Złapie NameError / AttributeError / TypeError /
+    Traceback które inaczej giną w GTK signal callbackach.
+
+    Ignoruje znane benigne komunikaty (Gtk-WARNING, color, gdk-pixbuf).
+    """
+
+    BAD_PATTERNS = (
+        "Traceback (most recent call last):",
+        "NameError:", "AttributeError:", "TypeError:", "ImportError:",
+        "ModuleNotFoundError:", "KeyError:", "ValueError:",
+    )
+
+    def __init__(self, log_path: str):
+        self.path = log_path
+        # Start from END of file — ignore everything that happened during
+        # BT boot (we want to catch errors per-action, not pre-existing).
+        self._cursor = self._size()
+
+    def _size(self) -> int:
+        try:
+            return os.path.getsize(self.path)
+        except OSError:
+            return 0
+
+    def check(self, action: str = ""):
+        """Assert no NEW error patterns since last check (or fixture start).
+
+        `action` is included in failure message dla łatwego pinpointu
+        który REST call wywołał problem.
+        """
+        size = self._size()
+        if size <= self._cursor:
+            return
+        try:
+            with open(self.path, "rb") as f:
+                f.seek(self._cursor)
+                new = f.read().decode("utf-8", errors="replace")
+            self._cursor = size
+        except OSError as exc:
+            pytest.fail(f"cannot read stderr log {self.path}: {exc}")
+            return
+
+        bad_lines = []
+        for line in new.splitlines():
+            if any(p in line for p in self.BAD_PATTERNS):
+                bad_lines.append(line)
+
+        if bad_lines:
+            pytest.fail(
+                f"BTerminal stderr errors after action '{action}':\n"
+                + "\n".join(f"  {l}" for l in bad_lines[:10])
+                + (f"\n  ... +{len(bad_lines)-10} more" if len(bad_lines) > 10 else "")
+            )
+
+
+@pytest.fixture
+def bt_stderr_watcher(bterminal_process):
+    """Function-scoped watcher na BTerminal subprocess stderr.
+
+    Usage:
+        def test_open_claude_tab(bterminal_process, bt_stderr_watcher):
+            resp = bterminal_process.http_client.post("/api/tabs/claude", ...)
+            assert resp.status_code == 200
+            bt_stderr_watcher.check("open_claude_tab")  # asercja clean stderr
+    """
+    return StderrWatcher(bterminal_process.stderr_log)
+
+
+class FeedCapture:
+    """Wrapper na `GET /api/debug/feed_log` — łatwy interfejs dla testów.
+
+    Usage:
+        def test_intro(bterminal_process, vte_capture):
+            # ... open Claude tab ...
+            events = vte_capture.events_for("intro_prompt")
+            assert any("## Rules" in e.text for e in events)
+    """
+
+    def __init__(self, http_client):
+        self._http = http_client
+        self._since = 0.0  # timestamp pivot — only events after this
+
+    def reset(self):
+        """Mark current time as new pivot — subsequent events_for() returns
+        only events recorded AFTER this call."""
+        import time as _time
+        self._since = _time.time()
+
+    def events_for(self, label=None, since=None):
+        """Fetch captured feed events. Optionally filter by label.
+
+        Returns list of FeedEvent (dataclass-like dict): {ts, label, tab_idx,
+        text}. `text` is bytes_b64 decoded as UTF-8 (replace errors).
+        """
+        import base64
+        params = {"since": since if since is not None else self._since}
+        if label:
+            params["label"] = label
+        resp = self._http.get("/api/debug/feed_log", params=params)
+        resp.raise_for_status()
+        events = resp.json()["events"]
+        # Decode bytes for convenience
+        for e in events:
+            e["text"] = base64.b64decode(e["bytes_b64"]).decode("utf-8", errors="replace")
+        return events
+
+    def wait_for(self, label, timeout=10.0, poll=0.2):
+        """Block until ≥1 event with given label appears, or timeout.
+        Returns the first matching event."""
+        import time as _time
+        deadline = _time.monotonic() + timeout
+        while _time.monotonic() < deadline:
+            events = self.events_for(label=label)
+            if events:
+                return events[0]
+            _time.sleep(poll)
+        raise TimeoutError(
+            f"No '{label}' feed event captured within {timeout}s"
+        )
+
+
+@pytest.fixture
+def vte_capture(bterminal_process):
+    """Function-scoped fixture for capturing bytes BTerminal sends to AI CLI.
+
+    Each test starts with a fresh `since` pivot so previous test's events
+    don't leak. Uses cooperative capture via `record_feed()` calls inside
+    BTerminal at sites of interest:
+      - intro_prompt — fed to spawn'd subprocess
+      - auto_trigger — task auto-trigger [AUTO-TRIGGER] message
+      - rules_inject — periodic rules re-injection block
+      - ctx_refresh — ctx refresh follow-up (after rules)
+
+    Foundation for E2E tests asserting WHAT BTerminal said to the CLI
+    (provider-agnostic).
+    """
+    capture = FeedCapture(bterminal_process.http_client)
+    capture.reset()
+    return capture
 
 
 @pytest.fixture(scope="session")
@@ -115,13 +263,23 @@ def bterminal_process():
         "        return b\n\n"
         "def create_plugin(app): return TestPanel()\n"
     )
-    env = {**os.environ, "HOME": home}
+    env = {**os.environ, "HOME": home,
+           "BTERMINAL_DEBUG_REST_PORT": str(_TEST_PORT)}
+    # Capture stderr to file — runtime errors w GTK callbacks (NameError z
+    # refactoringów, AttributeError z brakujących imports, etc.) idą do
+    # stderr i bez tego ginęłyby w DEVNULL. bt_stderr_watcher fixture +
+    # smoke battery testują clean log po każdej akcji.
+    stderr_log_path = Path(home) / "bterminal-stderr.log"
+    stderr_handle = open(stderr_log_path, "w")
     proc = subprocess.Popen(
-        ["xvfb-run", "-a", sys.executable, "bterminal.py", "--debug-rest"],
+        ["xvfb-run", "-a", sys.executable, "-m", "bterminal", "--debug-rest"],
         cwd=str(REPO_ROOT),
         env=env,
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stderr=stderr_handle,
+        # xvfb-run wraps Xvfb + Python — bez nowej grupy procesów
+        # SIGTERM nie propaguje się na child Pythona, leaving zombies.
+        start_new_session=True,
     )
     client: httpx.Client | None = None
     try:
@@ -148,6 +306,7 @@ def bterminal_process():
             token=token,
             http_client=client,
             home=home,
+            stderr_log=str(stderr_log_path),
         )
     finally:
         if client is not None:
@@ -163,9 +322,27 @@ def bterminal_process():
             except Exception:  # noqa: BLE001
                 pass
         if proc.poll() is None:
-            proc.terminate()
+            # Kill całą grupę procesów (xvfb-run + Xvfb + python -m bterminal),
+            # nie tylko wrapper. proc.terminate() wysyła SIGTERM tylko do
+            # xvfb-run shellscript który nie zawsze łapie sygnał i nie
+            # propaguje go do Python child.
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                proc.terminate()
             try:
                 proc.wait(timeout=TERMINATE_TIMEOUT_SEC)
             except subprocess.TimeoutExpired:
-                proc.kill()
+                try:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    proc.kill()
+                try:
+                    proc.wait(timeout=2.0)
+                except subprocess.TimeoutExpired:
+                    pass
+        try:
+            stderr_handle.close()
+        except Exception:  # noqa: BLE001
+            pass
         shutil.rmtree(home, ignore_errors=True)
