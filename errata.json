@@ -1,5 +1,23 @@
 [
   {
+    "date": "2026-05-04",
+    "message": "BTerminal v1.2.0 — refaktoryzacja monolitu bterminal.py (11758 linii) do pakietu Python bterminal/ (~30 modułów). Entry point: python -m bterminal. Pełna regresja testowa: 207 testów, ~26s lokalnie. Funkcjonalnie bez zmian dla użytkownika — to refactor architektoniczny otwierający drogę pod provider abstraction (Copilot/Aider) i lepszą testowalność.",
+    "changes": [
+      "refactor: bterminal.py (11758 L) → bterminal/ pakiet z hierarchią ctx/, ui/{dialogs,panels} (~30 modułów)",
+      "refactor: CLI tools (ctx, consult, tasks, claude_log, memory_wizard) i runners testów → tools/",
+      "feat(install): rsync bterminal/ recursively + bterminal-launcher shell wrapper (python3 -m bterminal)",
+      "test: 207 testów (135 unit / ~40 component pod xvfb / ~30 e2e / 3 slow), ~26s pełna regresja",
+      "test: vte_capture fixture + bt_stderr_watcher (catch NameError w GLib callbackach) + mock_ai_cli harness",
+      "docs: REQUIREMENTS.md (66 R<N>), test-coverage-matrix.md, refactor-modular-architecture.md, refactor-test-plan.md",
+      "fix(tasks-panel): per-tab task project binding poprawnie reaguje na user-driven dropdown change (port z master)",
+      "fix(tasks): cmd_done DELETUJE wiersz z task_claims — claims table nie rośnie już per ukończony task",
+      "fix(R3a): SessionPasswordCache — hasła trzymane in-memory only, filtering save(), migration log z legacy",
+      "fix(R1): strict argparse parse_args (exit 2 unrecognized), drop BTERMINAL_DEBUG_REST env, self-heal corrupt options.json",
+      "fix(intro-prompt): lazy import _build_intro_prompt eliminuje NameError przy double-click open",
+      "fix(path): main() prepend ~/.local/bin i ~/.npm-global/bin do PATH (desktop entry launch)"
+    ]
+  },
+  {
     "date": "2026-04-24",
     "message": "BTerminal v1.1.8 — zaktualizowane README. Dokumentacja odzwierciedla zmiany od v1.1.1: Tribunal, instalator z rollbackiem, auto-instalacja zależności, belka postępu aktualizacji.",
     "changes": [

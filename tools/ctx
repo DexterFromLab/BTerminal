@@ -17,6 +17,7 @@ DB_PATH = Path.home() / ".claude-context" / "context.db"
 
 
 def get_db():
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(str(DB_PATH))
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA journal_mode=WAL")

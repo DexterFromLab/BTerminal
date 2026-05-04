@@ -36,7 +36,9 @@ info() { printf "    %s\n" "$*"; }
 # ─── Rollback ──────────────────────────────────────────────────────────────
 
 BACKUP_DIR=""
-BTERMINAL_FILES=(bterminal.py ctx consult tasks claude_log memory_wizard)
+# CLI tools (flat at INSTALL_DIR root); the bterminal/ Python package is
+# copied separately as a directory tree (see install loop below).
+BTERMINAL_FILES=(ctx consult tasks claude_log memory_wizard)
 
 _on_error() {
     local code=$?
@@ -267,22 +269,50 @@ check_gtk "VTE 2.91"     "gir1.2-vte-2.91"  "import gi; gi.require_version('Vte'
 echo "[5/7] Installing BTerminal files..."
 
 # Backup current installation so ERR trap can restore it on failure
-if [[ -f "$INSTALL_DIR/bterminal.py" ]]; then
+if [[ -d "$INSTALL_DIR/bterminal" || -f "$INSTALL_DIR/bterminal.py" ]]; then
     BACKUP_DIR="$(mktemp -d /tmp/bterminal-backup-XXXXXX)"
     for f in "${BTERMINAL_FILES[@]}"; do
         [[ -f "$INSTALL_DIR/$f" ]] && cp -f "$INSTALL_DIR/$f" "$BACKUP_DIR/$f" 2>/dev/null || true
     done
+    [[ -d "$INSTALL_DIR/bterminal" ]] && cp -r "$INSTALL_DIR/bterminal" "$BACKUP_DIR/bterminal" 2>/dev/null || true
+    [[ -f "$INSTALL_DIR/bterminal.py" ]] && cp -f "$INSTALL_DIR/bterminal.py" "$BACKUP_DIR/" 2>/dev/null || true
     info "Backup: $BACKUP_DIR"
 fi
 
 mkdir -p "$INSTALL_DIR" "$BIN_DIR" "$CONFIG_DIR" "$CTX_DIR" "$ICON_DIR"
 
-for f in bterminal.py ctx consult tasks claude_log memory_wizard; do
-    cp "$SCRIPT_DIR/$f" "$INSTALL_DIR/$f"
+# Drop the legacy flat shim if present from a previous install
+rm -f "$INSTALL_DIR/bterminal.py"
+
+# Copy CLI tools (flat at INSTALL_DIR)
+for f in "${BTERMINAL_FILES[@]}"; do
+    cp "$SCRIPT_DIR/tools/$f" "$INSTALL_DIR/$f"
 done
+
+# Copy the bterminal/ Python package (recursively, refresh on reinstall).
+# rsync zamiast cp -r: --exclude pomija __pycache__ z dev maszyny żeby
+# stare bytecode nie trzymały stale references po refactoringu.
+rm -rf "$INSTALL_DIR/bterminal"
+if command -v rsync &>/dev/null; then
+    rsync -a --exclude='__pycache__' --exclude='*.pyc' \
+        "$SCRIPT_DIR/bterminal/" "$INSTALL_DIR/bterminal/"
+else
+    cp -r "$SCRIPT_DIR/bterminal" "$INSTALL_DIR/bterminal"
+    find "$INSTALL_DIR/bterminal" -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+fi
+
+# Launcher script — `~/.local/bin/bterminal` runs `python3 -m bterminal`
+# from INSTALL_DIR so the package is on sys.path.
+cat > "$INSTALL_DIR/bterminal-launcher" << EOF
+#!/bin/bash
+cd "$INSTALL_DIR"
+exec python3 -m bterminal "\$@"
+EOF
+chmod +x "$INSTALL_DIR/bterminal-launcher"
+
 cp "$SCRIPT_DIR/bterminal.svg" "$ICON_DIR/bterminal.svg"
 gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor/" 2>/dev/null || true
-chmod +x "$INSTALL_DIR/bterminal.py" "$INSTALL_DIR/ctx" "$INSTALL_DIR/consult" \
+chmod +x "$INSTALL_DIR/ctx" "$INSTALL_DIR/consult" \
          "$INSTALL_DIR/tasks" "$INSTALL_DIR/claude_log" "$INSTALL_DIR/memory_wizard"
 
 # Live symlinks from repo (git pull → immediate effect, no reinstall needed)
@@ -361,7 +391,7 @@ echo "[6/7] Creating symlinks..."
 
 for tool in bterminal ctx consult tasks claude_log memory_wizard; do
     src="$INSTALL_DIR/$tool"
-    [[ "$tool" == "bterminal" ]] && src="$INSTALL_DIR/bterminal.py"
+    [[ "$tool" == "bterminal" ]] && src="$INSTALL_DIR/bterminal-launcher"
     ln -sf "$src" "$BIN_DIR/$tool"
 done
 ok "Symlinks in $BIN_DIR"

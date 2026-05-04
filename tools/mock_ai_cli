@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+"""Mock AI CLI — provider-agnostic scripted state machine for E2E tests.
+
+Replaces a real AI CLI binary (claude/copilot/aider) during testing.
+Reads scenario JSON from MOCK_AI_CLI_SCENARIO env var or first CLI arg.
+Loops on stdin: matches each line against scenario rules and writes
+scripted response to stdout. Logs every event to MOCK_AI_CLI_LOG.
+
+Scenario format:
+  {
+    "responses": [
+      {"trigger": "<regex>", "reply": "<text>", "delay_ms": 100},
+      ...
+    ],
+    "default_reply": "<text>",     // optional, when no rule matches
+    "exit_on": "<regex>"           // optional, exit cleanly on match
+  }
+
+Usage:
+  MOCK_AI_CLI_SCENARIO=/path/to/scenario.json mock_ai_cli [args...]
+  MOCK_AI_CLI_LOG=/tmp/mock.log mock_ai_cli /path/to/scenario.json
+
+The mock ignores BTerminal-specific flags like --resume,
+--dangerously-skip-permissions and any positional intro prompt arg
+(prints it to log and continues).
+"""
+
+import json
+import os
+import re
+import sys
+import time
+
+LOG_PATH = os.environ.get(
+    "MOCK_AI_CLI_LOG",
+    f"/tmp/mock_ai_cli_{os.getpid()}.log",
+)
+
+
+def _log(label, payload):
+    try:
+        with open(LOG_PATH, "a") as f:
+            ts = time.time()
+            text = payload if isinstance(payload, str) else repr(payload)
+            f.write(f"[{ts:.3f}] {label}: {text}\n")
+    except OSError:
+        pass
+
+
+def _load_scenario():
+    """Locate scenario JSON: env var first, then argv[1] if file."""
+    path = os.environ.get("MOCK_AI_CLI_SCENARIO")
+    if not path and len(sys.argv) > 1 and os.path.isfile(sys.argv[1]):
+        path = sys.argv[1]
+    if not path:
+        # Default: echo each input
+        return {"default_reply": "ECHO: {input}"}
+    try:
+        with open(path) as fh:
+            return json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        _log("scenario_error", str(exc))
+        return {"default_reply": f"[mock_ai_cli error loading scenario: {exc}]"}
+
+
+def _match_response(scenario, line):
+    for rule in scenario.get("responses", []):
+        try:
+            if re.search(rule["trigger"], line):
+                return rule
+        except re.error:
+            continue
+    return None
+
+
+def main():
+    scenario = _load_scenario()
+    _log("startup", f"argv={sys.argv} env_scenario={os.environ.get('MOCK_AI_CLI_SCENARIO')}")
+    _log("scenario_loaded", json.dumps(scenario)[:500])
+
+    # If first positional arg is intro prompt (not a file), log it.
+    # BTerminal passes it as `claude --resume 'long prompt text...'`.
+    for arg in sys.argv[1:]:
+        if arg in ("--resume", "--dangerously-skip-permissions"):
+            continue
+        if os.path.isfile(arg):
+            continue  # the scenario JSON path
+        _log("intro_prompt_arg", arg)
+        break
+
+    # Print a startup message so user sees mock is alive
+    print("MOCK_AI_CLI ready. Type messages, exit with Ctrl-D.", flush=True)
+
+    exit_pattern = scenario.get("exit_on")
+    default_reply = scenario.get("default_reply", "[no rule matched]")
+
+    try:
+        for line in sys.stdin:
+            line = line.rstrip("\n")
+            _log("stdin", line)
+            if exit_pattern and re.search(exit_pattern, line):
+                _log("exit_on_match", line)
+                break
+            rule = _match_response(scenario, line)
+            if rule:
+                delay = rule.get("delay_ms", 0) / 1000.0
+                if delay:
+                    time.sleep(delay)
+                reply = rule["reply"].format(input=line)
+                _log("reply", reply)
+                print(reply, flush=True)
+            else:
+                reply = default_reply.format(input=line)
+                _log("default_reply", reply)
+                print(reply, flush=True)
+    except KeyboardInterrupt:
+        _log("interrupt", "")
+    _log("shutdown", "")
+
+
+if __name__ == "__main__":
+    main()

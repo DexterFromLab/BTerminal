@@ -2,7 +2,7 @@
 
 A GTK 3 terminal emulator built for developers who work with SSH servers and Claude Code. Combines session management, macro automation, a persistent context database, multi-model AI consultation, task orchestration, git awareness, a skills library and a global rules system in a single window. Ships with Catppuccin Mocha (dark) and Latte (light) themes.
 
-**Current release: v1.1.7**
+**Current release: v1.2.0**
 
 ![BTerminal](screenshot.png)
 
@@ -219,7 +219,7 @@ The installer reads `defaults/dependencies.json` and enforces version requiremen
 2. Install or update Claude Code CLI via npm; create a stable symlink at `~/.local/bin/claude`
 3. Install system tools: `git`, `ssh`, `meld`, `pandoc`, LaTeX tools (`pdflatex`, `latexmk`, `poppler-utils`) — all installed automatically via apt if missing
 4. Install GTK bindings: `python3-gi`, `gir1.2-gtk-3.0`, `gir1.2-vte-2.91`
-5. Copy `bterminal.py`, `ctx`, `consult`, `tasks`, `claude_log`, `memory_wizard` to `~/.local/share/bterminal/`
+5. Copy the `bterminal/` Python package (recursively) and CLI tools (`ctx`, `consult`, `tasks`, `claude_log`, `memory_wizard` from `tools/`) to `~/.local/share/bterminal/`, and create a `bterminal-launcher` shell script that runs `python3 -m bterminal`
 6. Create live symlinks for `defaults/`, `README.md`, `VERSION` — `git pull` takes effect immediately, no reinstall needed
 7. Install new bundled skills to `~/.claude/commands/` (never overwrites existing files)
 8. Create symlinks in `~/.local/bin/`
@@ -268,12 +268,129 @@ Files in `~/.config/bterminal/`:
 | `consult.json` | OpenRouter API key, models and tribunal presets |
 | `install_errors.json` | Last installer run: errors and warnings |
 | `plugins.json` | Plugin enable/disable state |
+| `debug_token` | Auth token for `--debug-rest` REST API (auto-generated) |
 
 Context database: `~/.claude-context/context.db`
 
 Global rules: `~/.local/share/bterminal/defaults/global_rules.txt` (symlink → repo)
 
 Extensions: `~/.local/share/bterminal/extensions/`
+
+## Architecture
+
+Entry point: `python -m bterminal` (launcher: `~/.local/bin/bterminal` →
+`bterminal-launcher` → `python3 -m bterminal`).
+
+```
+bterminal/                     ← Python package (~30 modules)
+├── __init__.py                ← public API re-exports + helper injection
+├── __main__.py                ← argparse + Gtk.Application bootstrap
+├── app.py                     ← BTerminalApp orchestrator, ShrinkableBin
+├── config.py                  ← paths, options, Catppuccin palette, CSS
+├── models.py                  ← JsonListManager, SessionManager,
+│                                ClaudeSessionManager, ConsultManager,
+│                                SessionPasswordCache
+├── debug_rest.py              ← loopback REST API (--debug-rest), 26 routes
+├── plugin_runtime.py          ← BTerminalPlugin ABC (in-process contract)
+├── sidecar_runtime.py         ← SidecarManifest, Discovery, Runner, HealthChecker
+├── updater.py                 ← auto-update + errata + rollback
+├── helpers.py                 ← intro prompt, clipboard, image attachments
+├── ctx/
+│   ├── helpers.py             ← project-name resolution, ctx CLI checks
+│   ├── dialogs.py             ← CtxSetupWizard, CtxEditDialog
+│   └── import_export.py       ← export/import dialogs
+└── ui/
+    ├── stats.py               ← SessionStatsBar (Claude-only)
+    ├── sidebar.py             ← SessionSidebar
+    ├── terminal_tab.py        ← TerminalTab + spawn_claude/spawn_ssh
+    ├── dialogs/
+    │   ├── sessions.py        ← SessionDialog, MacroDialog
+    │   ├── claude_code.py     ← ClaudeCodeDialog + _build_intro_prompt
+    │   └── options.py         ← OptionsDialog
+    └── panels/                ← 8 sidebar panels: consult, ctx_manager,
+                                  files, git, memory, plugin_manager,
+                                  skills, tasks
+
+tools/                         ← standalone CLI scripts (installed flat to
+│                                ~/.local/share/bterminal/, symlinked to
+│                                ~/.local/bin/)
+├── ctx, consult, tasks, claude_log, memory_wizard
+├── mock_ai_cli                ← test harness (provider-agnostic state machine)
+├── test_all.sh                ← local test runner (unit/component/e2e/slow)
+├── verify_e2e.sh              ← bash smoke test against running BTerminal
+└── visual_demo.py             ← live UI demo (xdotool + screenshots)
+
+docs/                          ← REQUIREMENTS, refactor docs, test coverage,
+                                  plugin spec, exploration findings
+```
+
+See [`docs/refactor-modular-architecture.md`](docs/refactor-modular-architecture.md),
+[`docs/refactor-test-plan.md`](docs/refactor-test-plan.md), and
+[`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) for the full design + 66 R\<N\>
+requirements with acceptance criteria.
+
+## Testing
+
+The full suite runs **locally**, without a VM. 207 tests, ~26 s wall-clock
+on the dev machine.
+
+```bash
+./tools/test_all.sh             # fast (~16 s, 205 tests, skips slow)
+./tools/test_all.sh --quick     # unit only (~0.3 s, 135 tests, no xvfb)
+./tools/test_all.sh --slow      # full incl. exploration (~26 s, 207 tests)
+./tools/test_all.sh --layer e2e # tests/e2e/ only (smoke battery + CLI tools)
+./tools/test_all.sh --watch     # auto-rerun on changes (needs pytest-watch)
+```
+
+Local requirements:
+
+- `python3 + pytest + httpx + Pillow` (`pip install pytest httpx Pillow`)
+- `xvfb` for component / e2e layers (`apt install xvfb`)
+- GTK 3 + VTE 2.91 (`apt install gir1.2-vte-2.91 gir1.2-gtk-3.0`)
+
+### Test layers
+
+| Layer | Count | Time | What it covers |
+|-------|-------|------|----------------|
+| **Unit** | 135 | 0.3 s | pure functions: `config`, `models`, `ctx.helpers`, plugin contracts, updater, password cache, legacy shim, entry-point |
+| **Component** | ~40 | 5 s | REST integration — BTerminal subprocess under xvfb, REST endpoints, plugin lifecycle, sidecar manifests, audit log |
+| **E2E** | ~30 | 10 s | full flows: smoke battery (16 panels/actions), `feed_capture` foundation, intro-prompt structure, CLI tools (ctx / tasks / consult / memory_wizard / claude_log), per-tab plugin gating |
+| **Slow** | 3 | 10 s | random-walk exploration (1000 steps), idle timeout, btmsg sidecar |
+
+The **`vte_capture`** fixture (in `tests/conftest.py`) records the bytes
+BTerminal sends to the AI CLI (intro prompt, auto-trigger, rules injection,
+ctx refresh) via `record_feed()` instrumentation + the
+`/api/debug/feed_log` REST endpoint. **`bt_stderr_watcher`** is a
+cursor-based stderr tail that catches `NameError` / `AttributeError` /
+`TypeError` raised inside GTK signal callbacks — failures that would
+otherwise be silently swallowed by GLib.
+
+The **`mock_ai_cli`** harness in `tools/` replaces Claude with a scripted
+provider-agnostic state machine, driven by JSON scenarios in
+`tests/scenarios/`. This is what makes Claude Code flow tests reproducible
+without a live API.
+
+### Live UI demo (real display required)
+
+```bash
+# Machine with an X display (or VM with DISPLAY=:0):
+./tools/visual_demo.py
+```
+
+Cycles through sidebar tabs, opens a Claude tab, types text via `xdotool`,
+triggers rules injection, and writes screenshots to `/tmp/demo_*.png`. This
+is a **live demo, not an automated test** — use it when you want to *see*
+the flow end-to-end.
+
+### Smoke check against a running instance
+
+If BTerminal is already running with `--debug-rest`:
+
+```bash
+./tools/verify_e2e.sh
+```
+
+Requires the auth token at `~/.config/bterminal/debug_token`.
 
 ## License
 
