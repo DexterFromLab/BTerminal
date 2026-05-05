@@ -26,6 +26,8 @@ def test_options_roundtrip(tmp_path, monkeypatch):
         "font": "FiraCode 12",
         "shell": "/usr/bin/zsh",
         "check_updates_on_start": False,
+        "language": "pl",
+        "tell_ai_language": False,
     }
     config._save_options(payload)
     assert json.loads(f.read_text()) == payload

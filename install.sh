@@ -290,8 +290,8 @@ for f in "${BTERMINAL_FILES[@]}"; do
 done
 
 # Copy the bterminal/ Python package (recursively, refresh on reinstall).
-# rsync zamiast cp -r: --exclude pomija __pycache__ z dev maszyny żeby
-# stare bytecode nie trzymały stale references po refactoringu.
+# rsync rather than cp -r: --exclude skips __pycache__ from the dev
+# machine so stale bytecode doesn't hold references after a refactor.
 rm -rf "$INSTALL_DIR/bterminal"
 if command -v rsync &>/dev/null; then
     rsync -a --exclude='__pycache__' --exclude='*.pyc' \
@@ -315,11 +315,34 @@ gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor/" 2>/dev/null || t
 chmod +x "$INSTALL_DIR/ctx" "$INSTALL_DIR/consult" \
          "$INSTALL_DIR/tasks" "$INSTALL_DIR/claude_log" "$INSTALL_DIR/memory_wizard"
 
-# Live symlinks from repo (git pull → immediate effect, no reinstall needed)
-ln -sfn "$SCRIPT_DIR/defaults" "$INSTALL_DIR/defaults"
-ln -sf  "$SCRIPT_DIR/README.md" "$INSTALL_DIR/README.md"
-ln -sf  "$SCRIPT_DIR/VERSION"   "$INSTALL_DIR/VERSION"
+# Live symlinks from repo (git pull → immediate effect, no reinstall needed).
+# License files live under defaults/license/ (LICENSE.en.md, LICENSE.pl.md...);
+# the LICENSE.md at repo root is a symlink to LICENSE.en.md for GitHub display.
+ln -sfn "$SCRIPT_DIR/defaults"   "$INSTALL_DIR/defaults"
+ln -sf  "$SCRIPT_DIR/README.md"  "$INSTALL_DIR/README.md"
+ln -sf  "$SCRIPT_DIR/VERSION"    "$INSTALL_DIR/VERSION"
 info "Live symlinks: defaults/ README.md VERSION"
+
+# i18n: compile .po -> .mo for every locale, then expose via symlink.
+# .mo are not committed (see .gitignore), so we always build them here.
+# Missing gettext is non-fatal — runtime falls back to identity (English).
+if compgen -G "$SCRIPT_DIR/locale/*/LC_MESSAGES/*.po" > /dev/null; then
+    if command -v msgfmt &>/dev/null; then
+        compiled=0
+        for po in "$SCRIPT_DIR"/locale/*/LC_MESSAGES/*.po; do
+            mo="${po%.po}.mo"
+            if msgfmt --check --output-file="$mo" "$po" 2>/dev/null; then
+                compiled=$((compiled + 1))
+            else
+                warn "msgfmt failed for $po"
+            fi
+        done
+        info "Compiled $compiled translation catalog(s)"
+    else
+        warn "gettext (msgfmt) not installed — UI will run in English only. Install with: apt install gettext"
+    fi
+fi
+ln -sfn "$SCRIPT_DIR/locale" "$INSTALL_DIR/locale"
 
 echo "$SCRIPT_DIR" > "$CONFIG_DIR/repo_path"
 info "Repo path: $SCRIPT_DIR"

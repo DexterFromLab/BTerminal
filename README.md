@@ -198,6 +198,31 @@ Toggle between Catppuccin Mocha (dark) and Latte (light) with the sun/moon butto
 
 Launching `bterminal` while another instance is already running opens a new independent window instead of focusing the existing one.
 
+### Languages
+
+The UI ships in 13 languages, switchable live from **Options → Language**
+without restarting:
+
+> 🇬🇧 English &nbsp; 🇵🇱 Polski &nbsp; 🇩🇪 Deutsch &nbsp; 🇪🇸 Español &nbsp;
+> 🇫🇷 Français &nbsp; 🇮🇹 Italiano &nbsp; 🇵🇹 Português &nbsp; 🇷🇺 Русский &nbsp;
+> 🇺🇦 Українська &nbsp; 🇨🇿 Čeština &nbsp; 🇨🇳 中文 &nbsp; 🇯🇵 日本語 &nbsp; 🇰🇷 한국어
+
+Default is **Auto-detect** (resolves from `LANGUAGE` / `LANG` env vars
+with `en` fallback). Plural forms are language-correct: Slavic languages
+(Polish, Russian, Ukrainian, Czech) get the proper 3-form (singular /
+few / many), Romance and Germanic languages get 2-form, CJK languages
+get 1-form.
+
+The license dialog and update prompts also follow the active language —
+each `defaults/license/LICENSE.<lang>.md` is a full translation, not a
+placeholder. Switching language re-prompts for license acceptance once
+per language (since the file's hash differs).
+
+A toggle "Tell the AI agent which language I speak" (default ON) appends
+a one-line hint to the Claude Code session intro prompt so the agent
+responds in the user's language. The AI prompt itself stays English by
+policy — only the hint identifies the user's preferred language.
+
 ## Requirements
 
 - **Python 3.10+** with PyGObject, GTK 3 and VTE 2.91 bindings
@@ -269,6 +294,16 @@ Files in `~/.config/bterminal/`:
 | `install_errors.json` | Last installer run: errors and warnings |
 | `plugins.json` | Plugin enable/disable state |
 | `debug_token` | Auth token for `--debug-rest` REST API (auto-generated) |
+| `options.json` | Theme, font, shell, **language**, **tell_ai_language**, **license_accepted_hash**, **license_accepted_at** |
+
+`options.json` keys related to i18n / license:
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `language` | `null` | UI locale code (`en`, `pl`, `de`, ...) or `null` for **Auto-detect** (LANGUAGE / LANG env). Set via Options dialog. |
+| `tell_ai_language` | `true` | When ON and language ≠ `en`, appends a one-line user-language hint to AI session intro prompts. |
+| `license_accepted_hash` | _(unset)_ | SHA-256 of the LICENSE the user accepted. Hash mismatch (license updated, language switched) triggers re-prompt on next launch. |
+| `license_accepted_at` | _(unset)_ | ISO-8601 timestamp of acceptance. |
 
 Context database: `~/.claude-context/context.db`
 
@@ -392,6 +427,154 @@ If BTerminal is already running with `--debug-rest`:
 
 Requires the auth token at `~/.config/bterminal/debug_token`.
 
+## Translating BTerminal
+
+The UI is wired through GNU gettext. Source-of-truth translation files live
+in `locale/<lang>/LC_MESSAGES/bterminal.po`; the runtime loads compiled
+`.mo` files (built automatically by `install.sh` and gitignored).
+
+### Currently shipped languages
+
+| Code | Native | English | Plural forms |
+|------|--------|---------|--------------|
+| `en` | English   | English    | 2-form (canonical msgid) |
+| `pl` | Polski    | Polish     | 3-form (singular / few / many) |
+| `de` | Deutsch   | German     | 2-form |
+| `es` | Español   | Spanish    | 2-form |
+| `fr` | Français  | French     | 2-form |
+| `it` | Italiano  | Italian    | 2-form |
+| `pt` | Português | Portuguese | 2-form |
+| `ru` | Русский   | Russian    | 3-form |
+| `uk` | Українська| Ukrainian  | 3-form |
+| `cs` | Čeština   | Czech      | 3-form |
+| `zh` | 中文      | Chinese    | 1-form (invariant) |
+| `ja` | 日本語    | Japanese   | 1-form |
+| `ko` | 한국어    | Korean     | 1-form |
+
+Each language ships:
+- `locale/<code>/LC_MESSAGES/bterminal.po` — UI catalog (~75 strings)
+- `defaults/license/LICENSE.<code>.md` — full legal translation
+
+### Add or update a translation
+
+```bash
+./tools/i18n.sh extract        # rebuild locale/bterminal.pot from source
+./tools/i18n.sh update         # propagate new/changed msgids into all .po
+# ...edit each locale/<code>/LC_MESSAGES/bterminal.po (Poedit recommended)...
+./tools/i18n.sh compile        # build .mo files for runtime
+./tools/i18n.sh stats          # show translated / fuzzy / untranslated counts
+```
+
+For batch updates across all languages, edit `tools/_fill_translations.py`
+(per-language Python dicts mapping msgid → msgstr) and run it — useful
+when adding a new UI string and you want to fill all 12 translations
+in one pass.
+
+After editing, run the test suite — `tools/check_i18n.py` catches any
+new Polish strings that were added without a `_()` / `N_()` wrapper, and
+`tests/test_translations.py` parametrises every language for catalog
+completeness, plural-form correctness, and license attribution:
+
+```bash
+./tools/test_all.sh --quick    # 314 tests, ~0.7s
+```
+
+### Add a new language
+
+```bash
+./tools/i18n.sh new sv_SE      # creates locale/sv/LC_MESSAGES/bterminal.po
+# ...translate the .po file (or add a SV dict to tools/_fill_translations.py)...
+./tools/i18n.sh compile
+```
+
+To make the new language selectable in **Options → Language**, add a
+tuple to `SUPPORTED_LANGUAGES` in `bterminal/i18n.py`:
+
+```python
+SUPPORTED_LANGUAGES = (
+    ("en", "English", "English"),
+    ("pl", "Polski",  "Polish"),
+    ...
+    ("sv", "Svenska", "Swedish"),   # new
+)
+```
+
+The third field is the **English name** of the language — it is what we
+tell the AI agent when "Tell the AI agent which language I speak" is
+enabled (the AI prompt itself stays English by policy).
+
+CJK languages need a manual fix to the `Plural-Forms` header right after
+`msginit` (it leaves `nplurals=INTEGER`):
+
+```bash
+sed -i 's|nplurals=INTEGER; plural=EXPRESSION;|nplurals=1; plural=0;|' \
+    locale/<short>/LC_MESSAGES/bterminal.po
+```
+
+### Live language refresh
+
+Switching the dropdown and clicking **Save** in Options re-installs the
+gettext catalog and walks a registry of registered widgets to re-apply
+their msgids in place — no restart needed. The mechanism lives in
+`bterminal/i18n.py`:
+
+- `register_translatable(widget, msgid, refresh)` — track a widget for
+  later refresh; auto-cleaned via Gtk's `destroy` signal.
+- `tr(widget, method, msgid)` — set + register in one call (the
+  conventional helper).
+- `tr_fmt(widget, method, template, **placeholders)` — same with
+  `.format()` re-applied on every refresh.
+- `refresh_translatables()` — fired after `init_locale()` to re-translate
+  every live widget.
+
+Set `BTERMINAL_I18N_DEBUG=1` to log every widget refresh to stderr —
+useful when wiring a new UI surface.
+
+### Translate the LICENSE
+
+The license dialog displays a per-language file:
+
+```
+defaults/license/LICENSE.en.md   ← canonical (the EN dialog shows this)
+defaults/license/LICENSE.pl.md   ← Polish
+defaults/license/LICENSE.<code>.md   ← per-language translation
+```
+
+The license module falls back to `LICENSE.en.md` when no per-language
+file exists, so adding a UI translation without a license translation
+is safe — the user simply sees the English license.
+
+When you change a `LICENSE.<lang>.md`, its SHA-256 changes and every
+user on that locale will be re-prompted on next launch (this is also
+why switching language re-prompts: different file = different hash).
+
+### What is NOT translated (by policy)
+
+- **AI intro prompt** and all "auto" prompts injected into Claude / Codex
+  sessions — always English (the LLM speaks English natively; the
+  user-language hint is appended only when "Tell the AI..." is on).
+- **Installer output** (`install.sh`, `tools/i18n.sh`, ...) — always English.
+- **`README.md`**, **`errata.json`** — always English.
+- **Source comments and docstrings** — contributor's choice.
+
+The audit script (`tools/check_i18n.py`) does not flag PL in installer /
+docs / comments — only in user-facing UI strings inside `bterminal/`.
+
 ## License
 
-MIT
+Copyright (c) 2024-2026 **Bartosz Czarnota** &lt;<bartoszczarnota1@gmail.com>&gt;
+
+BTerminal is provided under a custom license requiring **attribution**.
+The full terms are in [LICENSE.md](LICENSE.md). In short: you may use,
+modify, and redistribute the Software, but every copy and derivative
+work must reproduce the original authorship information (author name,
+contact email, project name) in the LICENSE file, an "About"-style UI
+surface, and the primary documentation.
+
+The application enforces license acceptance:
+
+- on **first launch** after a fresh installation,
+- **before each update** the user must accept the license again before
+  the new version is installed.
+
+Declining the dialog exits the application or aborts the update.

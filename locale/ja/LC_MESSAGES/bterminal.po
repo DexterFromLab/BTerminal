@@ -1,0 +1,345 @@
+# Japanese translations for bterminal package.
+# Copyright (C) 2026 Bartosz Czarnota
+# This file is distributed under the same license as the bterminal package.
+# Automatically generated, 2026.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version:  bterminal\n"
+"Report-Msgid-Bugs-To: bartoszczarnota1@gmail.com\n"
+"POT-Creation-Date: 2026-05-05 13:51+0200\n"
+"PO-Revision-Date: 2026-05-05 13:39+0200\n"
+"Last-Translator: Automatically generated\n"
+"Language: ja\n"
+"Language-Team: none\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.10.3\n"
+
+#: bterminal/license.py:109
+#, python-brace-format
+msgid "BTerminal — License Agreement ({context})"
+msgstr "BTerminal — ライセンス契約 ({context})"
+
+#: bterminal/license.py:117
+msgid "Decline and exit"
+msgstr "拒否して終了"
+
+#: bterminal/license.py:118
+msgid "Accept"
+msgstr "同意する"
+
+#: bterminal/license.py:131
+msgid "Please read the license agreement below."
+msgstr "下記のライセンス契約をお読みください。"
+
+#: bterminal/license.py:132
+msgid "You must accept these terms to use BTerminal."
+msgstr "BTerminal を使用するにはこれらの条項に同意する必要があります。"
+
+#: bterminal/license.py:156
+msgid "I have read and accept the license terms."
+msgstr "ライセンス条項を読み、同意します。"
+
+#: bterminal/license.py:187
+msgid "First run"
+msgstr "初回起動"
+
+#: bterminal/license.py:202
+msgid "Update"
+msgstr "アップデート"
+
+#: bterminal/updater.py:57
+msgid "No repository"
+msgstr "リポジトリなし"
+
+#: bterminal/updater.py:60
+msgid "Cannot check for updates — repository directory not found."
+msgstr "アップデートを確認できません — リポジトリディレクトリが見つかりません。"
+
+#: bterminal/updater.py:107
+msgid "Checking for updates"
+msgstr "アップデートを確認中"
+
+#: bterminal/updater.py:122 bterminal/updater.py:146
+#, python-brace-format
+msgid "Connecting to server... ({seconds}s)"
+msgstr "サーバーに接続中…({seconds}秒)"
+
+#: bterminal/ui/dialogs/options.py:154 bterminal/updater.py:131
+msgid "Cancel"
+msgstr "キャンセル"
+
+#: bterminal/updater.py:142
+msgid "Cannot check for updates — timed out."
+msgstr "確認できません — タイムアウトしました。"
+
+#: bterminal/updater.py:143 bterminal/updater.py:160 bterminal/updater.py:165
+#: bterminal/updater.py:339
+msgid "Close"
+msgstr "閉じる"
+
+#: bterminal/updater.py:159
+msgid "BTerminal is up to date. No new updates."
+msgstr "BTerminal は最新です。新しいアップデートはありません。"
+
+#: bterminal/updater.py:164
+msgid "Cannot check for updates."
+msgstr "アップデートを確認できません。"
+
+#: bterminal/updater.py:221
+msgid "New BTerminal version"
+msgstr "新しい BTerminal バージョン"
+
+#: bterminal/updater.py:241
+msgid "A new version of BTerminal is available"
+msgstr "BTerminal の新バージョンが利用可能です"
+
+#: bterminal/updater.py:271
+msgid "Show errata"
+msgstr "更新履歴を表示"
+
+#: bterminal/updater.py:272
+msgid "Not now"
+msgstr "後で"
+
+#: bterminal/updater.py:273
+msgid "Update and restart"
+msgstr "アップデートして再起動"
+
+#: bterminal/updater.py:334
+msgid "BTerminal errata"
+msgstr "BTerminal 更新履歴"
+
+#: bterminal/updater.py:349
+msgid "No errata entries."
+msgstr "更新履歴はありません。"
+
+#: bterminal/updater.py:399
+msgid "BTerminal update"
+msgstr "BTerminal アップデート"
+
+#: bterminal/updater.py:408
+msgid "Update in progress…"
+msgstr "アップデート中…"
+
+#: bterminal/updater.py:488
+msgid ""
+"The new version of BTerminal could not be installed.\n"
+"\n"
+"The previous version was restored automatically — BTerminal continues to work normally."
+msgstr ""
+"BTerminal の新しいバージョンをインストールできませんでした。\n"
+"\n"
+"以前のバージョンが自動的に復元されました — BTerminal は通常通り動作します。"
+
+#: bterminal/updater.py:494
+#, python-brace-format
+msgid ""
+"Installation failed and no previous version is available to restore.\n"
+"\n"
+"Details:\n"
+"{details}"
+msgstr ""
+"インストールに失敗し、復元可能な以前のバージョンがありません。\n"
+"\n"
+"詳細:\n"
+"{details}"
+
+#: bterminal/ui/sidebar.py:75
+#, python-brace-format
+msgid "{app} Sessions"
+msgstr "{app} セッション"
+
+#: bterminal/ui/panels/git.py:373
+#, python-brace-format
+msgid "{n} file"
+msgid_plural "{n} files"
+msgstr[0] "{n} ファイル"
+
+#: bterminal/ui/panels/git.py:382
+msgid "Working tree clean"
+msgstr "ワーキングツリーは綺麗"
+
+#: bterminal/ui/dialogs/options.py:40
+msgid "Appearance"
+msgstr "外観"
+
+#: bterminal/ui/dialogs/options.py:45
+msgid "Theme:"
+msgstr "テーマ:"
+
+#: bterminal/ui/dialogs/options.py:47
+msgid "Dark (Mocha)"
+msgstr "ダーク (Mocha)"
+
+#: bterminal/ui/dialogs/options.py:48
+msgid "Light (Latte)"
+msgstr "ライト (Latte)"
+
+#: bterminal/ui/dialogs/options.py:53
+msgid "Terminal font:"
+msgstr "ターミナルフォント:"
+
+#: bterminal/ui/dialogs/options.py:65
+msgid "Terminal"
+msgstr "ターミナル"
+
+#: bterminal/ui/dialogs/options.py:70
+msgid "Default shell:"
+msgstr "デフォルトシェル:"
+
+#: bterminal/ui/dialogs/options.py:73
+#, python-brace-format
+msgid "default ({shell})"
+msgstr "デフォルト ({shell})"
+
+#: bterminal/ui/dialogs/options.py:84
+msgid "General"
+msgstr "一般"
+
+#: bterminal/ui/dialogs/options.py:90
+msgid "Check for updates at startup:"
+msgstr "起動時にアップデートを確認:"
+
+#: bterminal/ui/dialogs/options.py:104
+msgid "Language"
+msgstr "言語"
+
+#: bterminal/ui/dialogs/options.py:110
+msgid "Interface language:"
+msgstr "インターフェース言語:"
+
+#: bterminal/ui/dialogs/options.py:115
+msgid "Auto-detect"
+msgstr "自動検出"
+
+#: bterminal/ui/dialogs/options.py:130
+msgid "Restart BTerminal to apply language change."
+msgstr "言語の変更を適用するには BTerminal を再起動してください。"
+
+#: bterminal/ui/dialogs/options.py:145
+msgid "Tell the AI agent which language I speak"
+msgstr "AI エージェントに使用言語を伝える"
+
+#: bterminal/ui/dialogs/options.py:155
+msgid "Save"
+msgstr "保存"
+
+#: bterminal/ctx/dialogs.py:163
+msgid "Project context has not been collected yet. Gather context as you work and save important findings: ctx set <project> <key> <value>"
+msgstr "プロジェクトコンテキストはまだ収集されていません。作業しながらコンテキストを収集し、重要な発見を保存してください: ctx set <project> <key> <value>"
+
+#: bterminal/app.py:189 bterminal/app.py:221 bterminal/app.py:462
+msgid "Sessions"
+msgstr "セッション"
+
+#: bterminal/app.py:192 bterminal/app.py:221 bterminal/app.py:463
+msgid "Ctx"
+msgstr "Ctx"
+
+#: bterminal/app.py:195 bterminal/app.py:222 bterminal/app.py:464
+msgid "Consult"
+msgstr "Consult"
+
+#: bterminal/app.py:198 bterminal/app.py:222 bterminal/app.py:465
+msgid "Tasks"
+msgstr "タスク"
+
+#: bterminal/app.py:201 bterminal/app.py:223
+msgid "Memory"
+msgstr "メモリ"
+
+#: bterminal/app.py:204 bterminal/app.py:223
+msgid "Skills"
+msgstr "Skills"
+
+#: bterminal/app.py:207 bterminal/app.py:224
+msgid "Files"
+msgstr "ファイル"
+
+#: bterminal/app.py:210 bterminal/app.py:224 bterminal/app.py:466
+msgid "Plugins"
+msgstr "プラグイン"
+
+#: bterminal/app.py:242
+msgid "Hide sidebar (Ctrl+B)"
+msgstr "サイドバーを隠す (Ctrl+B)"
+
+#: bterminal/app.py:319
+msgid "Show sidebar (Ctrl+B)"
+msgstr "サイドバーを表示 (Ctrl+B)"
+
+#: bterminal/app.py:329
+msgid "Toggle light/dark theme"
+msgstr "ライト/ダークテーマを切替"
+
+#: bterminal/app.py:335
+msgid "Show Git panel (Ctrl+G)"
+msgstr "Git パネルを表示 (Ctrl+G)"
+
+#: bterminal/app.py:384
+#, python-brace-format
+msgid ""
+"The file ~/.config/bterminal/options.json was corrupted — default settings have been restored.\n"
+"\n"
+"Cause: {exc_type}: {exc}"
+msgstr ""
+"ファイル ~/.config/bterminal/options.json が破損していました — デフォルト設定が復元されました。\n"
+"\n"
+"原因: {exc_type}: {exc}"
+
+#: bterminal/app.py:446
+msgid "New local tab"
+msgstr "新しいローカルタブ"
+
+#: bterminal/app.py:447
+msgid "New SSH session…"
+msgstr "新しい SSH セッション…"
+
+#: bterminal/app.py:448
+msgid "New Claude Code session…"
+msgstr "新しい Claude Code セッション…"
+
+#: bterminal/app.py:450
+msgid "Options…"
+msgstr "オプション…"
+
+#: bterminal/app.py:452
+msgid "Quit"
+msgstr "終了"
+
+#: bterminal/app.py:453
+msgid "File"
+msgstr "ファイル"
+
+#: bterminal/app.py:457
+msgid "Toggle sidebar (Ctrl+B)"
+msgstr "サイドバーを切替 (Ctrl+B)"
+
+#: bterminal/app.py:458
+msgid "Toggle Git panel (Ctrl+G)"
+msgstr "Git パネルを切替 (Ctrl+G)"
+
+#: bterminal/app.py:459
+msgid "Toggle theme ☀/🌙"
+msgstr "テーマを切替 ☀/🌙"
+
+#: bterminal/app.py:475
+msgid "View"
+msgstr "表示"
+
+#: bterminal/app.py:479
+msgid "Check for updates"
+msgstr "アップデートを確認"
+
+#: bterminal/app.py:480
+msgid "Errata…"
+msgstr "更新履歴…"
+
+#: bterminal/app.py:482
+msgid "Tools"
+msgstr "ツール"
+

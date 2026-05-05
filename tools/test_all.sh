@@ -1,9 +1,9 @@
 #!/bin/bash
-# test_all.sh — uniwersalny runner wszystkich automatycznych testów BTerminala.
+# test_all.sh — universal runner for all automated BTerminal tests.
 #
 # Wymaga lokalnie:
 #   - python3 + pytest + httpx + Pillow (pip install -r requirements-dev.txt)
-#   - xvfb (apt install xvfb)         # virtual X display dla GTK testów
+#   - xvfb (apt install xvfb)         # virtual X display for GTK tests
 #   - Vte 2.91 + GTK3 (apt install gir1.2-vte-2.91 gir1.2-gtk-3.0)
 #
 # Tryby:
@@ -17,7 +17,7 @@
 #   1. Unit (50)         — czyste funkcje, bez GTK/subprocess        ~0.2s
 #   2. Component (~50)   — REST integration via subprocess + xvfb    ~5s
 #   3. E2E (~30)         — full flow: vte_capture, smoke battery     ~10s
-#   4. Slow (3)          — exploration random walk 1000 kroków       ~10s
+#   4. Slow (3)          — exploration random walk 1000 steps       ~10s
 #   ──────────────────────────────────────────────────────────────────
 #   Total fast (1+2+3):  ~16s
 #   Total full (1+2+3+4): ~26s
@@ -37,7 +37,7 @@ if ! command -v xvfb-run &>/dev/null; then
 fi
 
 if ! python3 -c "import pytest, httpx, PIL" 2>/dev/null; then
-    echo "✗ python deps brakują — pip install pytest httpx Pillow"
+    echo "✗ python deps missing — pip install pytest httpx Pillow"
     exit 1
 fi
 
@@ -58,15 +58,20 @@ case "$MODE" in
         python3 -m pytest --tb=short
         ;;
     --quick)
-        echo "▶ Quick — tylko unit (no subprocess)"
+        echo "▶ Quick — unit only (no subprocess) + i18n audit"
         python3 -m pytest tests/test_config.py tests/test_models.py \
             tests/test_ctx_helpers.py tests/test_plugin_contracts.py \
             tests/test_updater.py tests/test_session_password_cache.py \
-            tests/test_app.py tests/test_legacy_shim.py -v
+            tests/test_app.py tests/test_legacy_shim.py \
+            tests/test_license.py tests/test_i18n.py \
+            tests/test_translations.py -v
+        echo
+        echo "▶ i18n audit (hardcoded PL strings outside _())"
+        ./tools/check_i18n.py
         ;;
     --watch)
         if ! command -v ptw &>/dev/null; then
-            echo "✗ pytest-watch brakuje — pip install pytest-watch"
+            echo "✗ pytest-watch missing — pip install pytest-watch"
             exit 1
         fi
         ptw -- -m "not slow" --tb=short

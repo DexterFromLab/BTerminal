@@ -369,14 +369,17 @@ class GitPanel(Gtk.Box):
 
         n = len(files)
         if n:
+            from bterminal.i18n import ngettext
+            file_word = ngettext("{n} file", "{n} files", n).format(n=n)
             self._changes_summary.set_markup(
-                f"{n} file{'s' if n != 1 else ''}  "
+                f"{file_word}  "
                 f"<span foreground='{c_grn}'><b>+{total_add}</b></span>  "
                 f"<span foreground='{c_red}'><b>-{total_del}</b></span>"
             )
         else:
+            from bterminal.i18n import _
             self._changes_summary.set_markup(
-                f"<span foreground='{c_grn}'>✓ Working tree clean</span>")
+                f"<span foreground='{c_grn}'>✓ " + _("Working tree clean") + "</span>")
 
     # ANSI color code → Catppuccin palette mapping for git log
     @staticmethod

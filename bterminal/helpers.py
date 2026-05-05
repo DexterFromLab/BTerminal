@@ -279,33 +279,33 @@ def _tools_help(project_name):
     and tasks (CLI task manager with auto-trigger).
     """
     return (
-        f"Kontekst zarządzasz przez: ctx --help\n"
-        f"Ważne odkrycia zapisuj: ctx set {project_name} <key> <value>\n"
-        f"Dołączanie do istniejącego: ctx append {project_name} <key> <value>\n"
-        f'Przed zakończeniem sesji: ctx summary {project_name} "<co zrobiono>"\n'
+        f"Manage context via: ctx --help\n"
+        f"Save important findings: ctx set {project_name} <key> <value>\n"
+        f"Append to an existing entry: ctx append {project_name} <key> <value>\n"
+        f'Before ending the session: ctx summary {project_name} "<what was done>"\n'
         f"\n"
-        f"Konsultacje z zewnętrznymi modelami AI: consult \"pytanie\"\n"
-        f"Konkretny model: consult -m <model_id> \"pytanie\" — ZAWSZE najpierw sprawdź dostępne modele: consult models\n"
-        f"Nazwy modeli to PEŁNE ID z prefixem providera, np. 'google/gemini-2.5-pro', 'openai/gpt-5-codex', 'deepseek/deepseek-r1' — NIE skracaj.\n"
-        f"Dołączanie pliku jako kontekst: consult -f plik.py \"pytanie\"\n"
-        f"Tribunal — debata wielu modeli AI: consult debate \"problem\"\n"
-        f"  Domyślne role: --analyst claude-code/opus --arbiter claude-code/opus\n"
-        f"  Advocate i Critic dobieraj wg potrzeb spośród: openai/gpt-5-codex, deepseek/deepseek-r1, google/gemini-2.5-pro\n"
-        f'  Przykład: consult debate "problem" --analyst claude-code/opus --advocate openai/gpt-5-codex --critic deepseek/deepseek-r1 --arbiter claude-code/opus\n'
+        f'Consult external AI models: consult "question"\n'
+        f'Specific model: consult -m <model_id> "question" — ALWAYS check available models first: consult models\n'
+        f"Model names are FULL IDs with provider prefix, e.g. 'google/gemini-2.5-pro', 'openai/gpt-5-codex', 'deepseek/deepseek-r1' — DO NOT abbreviate.\n"
+        f'Attach a file as context: consult -f file.py "question"\n'
+        f'Tribunal — multi-model AI debate: consult debate "problem"\n'
+        f"  Default roles: --analyst claude-code/opus --arbiter claude-code/opus\n"
+        f"  Pick Advocate and Critic as needed from: openai/gpt-5-codex, deepseek/deepseek-r1, google/gemini-2.5-pro\n"
+        f'  Example: consult debate "problem" --analyst claude-code/opus --advocate openai/gpt-5-codex --critic deepseek/deepseek-r1 --arbiter claude-code/opus\n'
         f"\n"
-        f"Dostępne narzędzie 'tasks' — ZEWNĘTRZNY CLI tool uruchamiany w Bash (NIE wbudowany TaskCreate/TaskList).\n"
-        f"NIE pobieraj ani nie wykonuj zadań z listy samodzielnie.\n"
-        f"Jeśli system auto-trigger wyśle Ci polecenie z listą zadań — wtedy wykonuj.\n"
-        f"Po każdym wykonanym zadaniu MUSISZ oznaczyć je jako done: tasks done {project_name} <task_id>\n"
-        f"Pomoc: tasks --help\n"
+        f"Available 'tasks' tool — EXTERNAL CLI run via Bash (NOT the built-in TaskCreate/TaskList).\n"
+        f"DO NOT fetch or execute tasks from the list on your own.\n"
+        f"If the auto-trigger system sends you a command with a task list — then execute.\n"
+        f"After every completed task you MUST mark it done: tasks done {project_name} <task_id>\n"
+        f"Help: tasks --help\n"
         f"\n"
-        f"Memory Wizard — konfiguracja reguł na podstawie logów sesji:\n"
-        f"  Dry-run (przejrzyj propozycje, zastosuj ręcznie wybrane):\n"
+        f"Memory Wizard — configure rules based on session logs:\n"
+        f"  Dry-run (review proposals, apply selected ones manually):\n"
         f"    memory_wizard {project_name} --project-dir <dir> --dry-run\n"
-        f"  Interaktywny (potwierdź każdą propozycję):\n"
+        f"  Interactive (confirm each proposal):\n"
         f"    memory_wizard {project_name} --project-dir <dir>\n"
-        f"  Uruchom gdy użytkownik poprawia Cię wielokrotnie w ten sam sposób,\n"
-        f"  lub po dłuższej sesji aby utrwalić wzorce w regułach."
+        f"  Run it when the user corrects you the same way multiple times,\n"
+        f"  or after a long session to bake patterns into rules."
     )
 
 

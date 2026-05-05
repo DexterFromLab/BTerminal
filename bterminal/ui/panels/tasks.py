@@ -466,11 +466,11 @@ class TaskListPanel(Gtk.Box):
                 if not task:
                     break
                 message = (
-                    f"[AUTO-TRIGGER] Twoje przypisane zadanie: {task['task_id']} — {task['description']}\n"
-                    f"Sprawdź pełną listę: tasks context {project} --session {tab._task_session_id}\n"
-                    f"MUSISZ oznaczyć po wykonaniu: tasks done {project} {task['task_id']} (w Bash). "
-                    f"Pętla auto-trigger kończy się DOPIERO gdy WSZYSTKIE zadania są zamknięte (done). "
-                    f"Jeśli nie oznaczysz — ta wiadomość będzie się powtarzać."
+                    f"[AUTO-TRIGGER] Your assigned task: {task['task_id']} — {task['description']}\n"
+                    f"Check the full list: tasks context {project} --session {tab._task_session_id}\n"
+                    f"You MUST mark it after completion: tasks done {project} {task['task_id']} (in Bash). "
+                    f"The auto-trigger loop only ends when ALL tasks are closed (done). "
+                    f"If you do not mark it — this message will keep repeating."
                 )
                 _t = tab.terminal
                 _t.feed_child(message.encode())

@@ -113,6 +113,8 @@ class TerminalTab(Gtk.Box):
         self._task_project = None
         self._task_session_id = str(uuid.uuid4())
         self._inject_pending = None  # (project, count, refresh_every) when rules inject is due
+        self._inject_pending_ts = 0.0  # monotonic ts when pending was set (for hard-cap force-fire)
+        self._last_content_change = 0.0  # monotonic ts of last VTE contents-changed event
         self._stats_bar = None
         # Per-tab plugin gating (Etap 8). None = backwards-compat: every
         # globally-enabled plugin contributes to this tab's intro prompt and
@@ -196,18 +198,18 @@ class TerminalTab(Gtk.Box):
         if not claude_path:
             work_dir = config.get("project_dir") or os.environ.get("HOME", "/")
             msg = (
-                'printf "\\n\\033[1;31m━━━ Claude Code nie został znaleziony ━━━\\033[0m\\n\\n"\n'
-                'printf "Sprawdzone lokalizacje:\\n"\n'
+                'printf "\\n\\033[1;31m━━━ Claude Code not found ━━━\\033[0m\\n\\n"\n'
+                'printf "Locations checked:\\n"\n'
                 'printf "  ~/.local/bin/claude\\n"\n'
                 'printf "  ~/.npm-global/bin/claude\\n"\n'
                 'printf "  /usr/local/bin/claude\\n"\n'
                 'printf "  /usr/bin/claude\\n"\n'
                 'printf "  /opt/homebrew/bin/claude\\n"\n'
                 'printf "  ~/.nvm/versions/node/*/bin/claude\\n\\n"\n'
-                'printf "Aby naprawić:\\n"\n'
-                'printf "  1. Uruchom instalator ponownie: ./install.sh\\n"\n'
-                'printf "  2. Lub zainstaluj ręcznie: npm install -g @anthropic-ai/claude-code\\n"\n'
-                'printf "  3. Upewnij się, że ~/.npm-global/bin jest w PATH (~/.bashrc)\\n\\n"\n'
+                'printf "To fix:\\n"\n'
+                'printf "  1. Re-run the installer: ./install.sh\\n"\n'
+                'printf "  2. Or install manually: npm install -g @anthropic-ai/claude-code\\n"\n'
+                'printf "  3. Make sure ~/.npm-global/bin is in PATH (~/.bashrc)\\n\\n"\n'
                 'exec bash\n'
             )
             self.terminal.spawn_async(
@@ -246,7 +248,7 @@ class TerminalTab(Gtk.Box):
         if config.get("sudo"):
             script = (
                 'while true; do\n'
-                '  read -rsp "Podaj hasło sudo: " SUDO_PW\n'
+                '  read -rsp "Enter sudo password: " SUDO_PW\n'
                 '  echo\n'
                 '  ASKPASS=$(mktemp /tmp/claude-askpass.XXXXXX)\n'
                 '  chmod 700 "$ASKPASS"\n'
@@ -258,7 +260,7 @@ class TerminalTab(Gtk.Box):
                 '  fi\n'
                 '  rm -f "$ASKPASS"\n'
                 '  unset SUDO_PW\n'
-                '  echo "Błędne hasło. Spróbuj ponownie."\n'
+                '  echo "Incorrect password. Please try again."\n'
                 'done\n'
                 'trap \'rm -f "$ASKPASS"\' EXIT\n'
                 f'{claude_path} {flags_str}{prompt_arg}\n'
@@ -391,7 +393,21 @@ class TerminalTab(Gtk.Box):
             pass
 
         if count > 0 and (count == inject_every or count % inject_every == 0):
+            # Preserve refresh boundary: if a pending injection already exists,
+            # don't overwrite it. The earliest pending wins so a refresh
+            # boundary (count % refresh_every == 0) can't be lost by a
+            # subsequent prompt that lands on a non-refresh boundary.
+            if self._inject_pending is not None:
+                return
             self._inject_pending = (project, count, refresh_every)
+            self._inject_pending_ts = time.monotonic()
+            # Ensure poll loop is running (if VTE happens to be quiet right now,
+            # contents-changed won't fire to start it).
+            if self._task_idle_timer is None:
+                self._last_content_change = time.monotonic()
+                self._task_idle_timer = GLib.timeout_add_seconds(
+                    self._IDLE_POLL_SEC, self._idle_check_tick
+                )
             import datetime
             with open("/tmp/bterminal_inject.log", "a") as f:
                 f.write(f"{datetime.datetime.now()}: pending set project={project} count={count}\n")
@@ -453,7 +469,7 @@ class TerminalTab(Gtk.Box):
             return False
 
         labelled = (
-            f"=== odświeżenie kontekstu projektu [{project}] ===\n\n"
+            f"=== project context refresh [{project}] ===\n\n"
             f"{ctx_block}"
         )
 
@@ -521,13 +537,52 @@ class TerminalTab(Gtk.Box):
             else:
                 self.app.update_tab_title(self, title)
 
+    # Adaptive idle thresholds — see _idle_check_tick docstring for rationale.
+    _IDLE_QUIET_SEC = 2.0
+    _IDLE_HARD_CAP_SEC = 60.0
+    _IDLE_POLL_SEC = 1
+
     def _on_contents_changed_tasks(self, terminal):
-        """Reset idle timer on every terminal content change (Claude tabs only)."""
-        if self._task_idle_timer:
-            GLib.source_remove(self._task_idle_timer)
-        self._task_idle_timer = GLib.timeout_add_seconds(
-            10, self._on_task_idle_timeout
-        )
+        """Record monotonic ts of last VTE content change.
+
+        Previously this re-armed a fixed 10s GLib timer on every byte from
+        the AI CLI. Spinner ticks (~1Hz) and streaming response chunks
+        (every few ms) reset the timer continuously — so 10s of full
+        silence was rarely reached during an active conversation, and
+        pending injections waited minutes for a long pause.
+
+        New approach: just timestamp the change and let `_idle_check_tick`
+        (polled every 1s) decide when to fire. Polling starts lazily —
+        only when there's actually something pending or task autorun
+        is armed.
+        """
+        self._last_content_change = time.monotonic()
+        if self._task_idle_timer is None and (self._inject_pending or self._task_project):
+            self._task_idle_timer = GLib.timeout_add_seconds(
+                self._IDLE_POLL_SEC, self._idle_check_tick
+            )
+
+    def _idle_check_tick(self):
+        """Polled every 1s while pending / autorun is armed.
+
+        Fires `_on_task_idle_timeout` when EITHER:
+          - >= 2s since last content change (Claude likely awaiting input)
+          - >= 60s since pending was set (hard cap — force-fire even if VTE
+            is still streaming, e.g. a never-ending agent loop)
+
+        Returns True to keep polling, False to stop.
+        """
+        now = time.monotonic()
+        quiet_for = now - self._last_content_change
+        pending_age = (now - self._inject_pending_ts) if self._inject_pending else 0.0
+
+        should_fire = quiet_for >= self._IDLE_QUIET_SEC or pending_age >= self._IDLE_HARD_CAP_SEC
+        if not should_fire:
+            return True
+
+        self._task_idle_timer = None
+        self._on_task_idle_timeout()
+        return False
 
     def _on_task_idle_timeout(self):
         """Called when Claude has been idle for 10 seconds — check for pending tasks and rule injections."""
@@ -575,11 +630,11 @@ class TerminalTab(Gtk.Box):
 
             # Trigger: feed task instruction with specific claimed task
             message = (
-                f"[AUTO-TRIGGER] Twoje przypisane zadanie: {task['task_id']} — {task['description']}\n"
-                f"Sprawdź pełną listę: tasks context {self._task_project} --session {self._task_session_id}\n"
-                f"MUSISZ oznaczyć po wykonaniu: tasks done {self._task_project} {task['task_id']} (w Bash). "
-                f"Pętla auto-trigger kończy się DOPIERO gdy WSZYSTKIE zadania są zamknięte (done). "
-                f"Jeśli nie oznaczysz — ta wiadomość będzie się powtarzać."
+                f"[AUTO-TRIGGER] Your assigned task: {task['task_id']} — {task['description']}\n"
+                f"Check the full list: tasks context {self._task_project} --session {self._task_session_id}\n"
+                f"You MUST mark it after completion: tasks done {self._task_project} {task['task_id']} (in Bash). "
+                f"The auto-trigger loop only ends when ALL tasks are closed (done). "
+                f"If you do not mark it — this message will keep repeating."
             )
             terminal = self.terminal
             from bterminal.debug_rest import record_feed

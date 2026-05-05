@@ -1,125 +1,125 @@
 [
   {
     "date": "2026-05-04",
-    "message": "BTerminal v1.2.0 — refaktoryzacja monolitu bterminal.py (11758 linii) do pakietu Python bterminal/ (~30 modułów). Entry point: python -m bterminal. Pełna regresja testowa: 207 testów, ~26s lokalnie. Funkcjonalnie bez zmian dla użytkownika — to refactor architektoniczny otwierający drogę pod provider abstraction (Copilot/Aider) i lepszą testowalność.",
+    "message": "BTerminal v1.2.0 — refactor of the bterminal.py monolith (11758 lines) into a Python package bterminal/ (~30 modules). Entry point is now `python -m bterminal`. Full regression test suite: 207 tests, ~26s locally. No functional changes for the user — this is an architectural refactor that opens the door for provider abstraction (Copilot/Aider) and easier testability.",
     "changes": [
-      "refactor: bterminal.py (11758 L) → bterminal/ pakiet z hierarchią ctx/, ui/{dialogs,panels} (~30 modułów)",
-      "refactor: CLI tools (ctx, consult, tasks, claude_log, memory_wizard) i runners testów → tools/",
+      "refactor: bterminal.py (11758 L) -> bterminal/ package with hierarchy ctx/, ui/{dialogs,panels} (~30 modules)",
+      "refactor: CLI tools (ctx, consult, tasks, claude_log, memory_wizard) and test runners moved to tools/",
       "feat(install): rsync bterminal/ recursively + bterminal-launcher shell wrapper (python3 -m bterminal)",
-      "test: 207 testów (135 unit / ~40 component pod xvfb / ~30 e2e / 3 slow), ~26s pełna regresja",
-      "test: vte_capture fixture + bt_stderr_watcher (catch NameError w GLib callbackach) + mock_ai_cli harness",
+      "test: 207 tests (135 unit / ~40 component under xvfb / ~30 e2e / 3 slow), ~26s full regression",
+      "test: vte_capture fixture + bt_stderr_watcher (catches NameError in GLib callbacks) + mock_ai_cli harness",
       "docs: REQUIREMENTS.md (66 R<N>), test-coverage-matrix.md, refactor-modular-architecture.md, refactor-test-plan.md",
-      "fix(tasks-panel): per-tab task project binding poprawnie reaguje na user-driven dropdown change (port z master)",
-      "fix(tasks): cmd_done DELETUJE wiersz z task_claims — claims table nie rośnie już per ukończony task",
-      "fix(R3a): SessionPasswordCache — hasła trzymane in-memory only, filtering save(), migration log z legacy",
-      "fix(R1): strict argparse parse_args (exit 2 unrecognized), drop BTERMINAL_DEBUG_REST env, self-heal corrupt options.json",
-      "fix(intro-prompt): lazy import _build_intro_prompt eliminuje NameError przy double-click open",
-      "fix(path): main() prepend ~/.local/bin i ~/.npm-global/bin do PATH (desktop entry launch)"
+      "fix(tasks-panel): per-tab task project binding now correctly responds to user-driven dropdown change (port from master)",
+      "fix(tasks): cmd_done DELETEs the row from task_claims — claims table no longer grows per completed task",
+      "fix(R3a): SessionPasswordCache — passwords kept in-memory only, filtering save(), migration log from legacy",
+      "fix(R1): strict argparse parse_args (exit 2 on unrecognized), drop BTERMINAL_DEBUG_REST env, self-heal corrupt options.json",
+      "fix(intro-prompt): lazy import of _build_intro_prompt eliminates NameError on double-click open",
+      "fix(path): main() prepends ~/.local/bin and ~/.npm-global/bin to PATH (desktop entry launch)"
     ]
   },
   {
     "date": "2026-04-24",
-    "message": "BTerminal v1.1.8 — zaktualizowane README. Dokumentacja odzwierciedla zmiany od v1.1.1: Tribunal, instalator z rollbackiem, auto-instalacja zależności, belka postępu aktualizacji.",
+    "message": "BTerminal v1.1.8 — README updated. Documentation now reflects all changes since v1.1.1: Tribunal, installer with rollback, automatic dependency installation, update progress bar.",
     "changes": [
-      "docs: README zaktualizowany do v1.1.7 — Tribunal, rollback, auto-deps, update dialog"
+      "docs: README updated to v1.1.7 — Tribunal, rollback, auto-deps, update dialog"
     ]
   },
   {
     "date": "2026-04-24",
-    "message": "BTerminal v1.1.7 — okno aktualizacji pokazuje teraz belkę postępu i bieżący krok instalacji. Widać co robi instalator zamiast pustego spinnera.",
+    "message": "BTerminal v1.1.7 — the update window now shows a progress bar and the current install step. You can see what the installer is doing instead of an empty spinner.",
     "changes": [
-      "feat: belka postępu (pulse) w oknie aktualizacji",
-      "feat: live log — ostatnia linia stdout install.sh wyświetlana na bieżąco"
+      "feat: progress bar (pulse) in the update dialog",
+      "feat: live log — last stdout line of install.sh shown in real time"
     ]
   },
   {
     "date": "2026-04-24",
-    "message": "BTerminal v1.1.6 — okno aktualizacji ma teraz stały rozmiar i scrollbar. Nie wychodzi już poza ekran przy długiej erracie.",
+    "message": "BTerminal v1.1.6 — the update dialog now has a fixed size and a scrollbar. It no longer overflows the screen on long errata.",
     "changes": [
-      "fix: dialog 'Dostępna nowa wersja' — stały rozmiar 520×380px + scrollbar"
+      "fix: 'New version available' dialog — fixed size 520x380px + scrollbar"
     ]
   },
   {
     "date": "2026-04-24",
-    "message": "BTerminal v1.1.5 — bezpieczny instalator z rollbackiem. Jeśli instalacja się nie powiedzie, poprzednia wersja zostaje automatycznie przywrócona. BTerminal powinien nadal działać po nieudanej aktualizacji.",
+    "message": "BTerminal v1.1.5 — safe installer with rollback. If installation fails, the previous version is automatically restored. BTerminal should keep working after a failed update.",
     "changes": [
-      "feat: rollback instalatora — backup przed [5/7], przywrócenie przy błędzie (trap ERR)",
-      "feat: komunikat o przywróceniu poprzedniej wersji zamiast cichego crashu"
+      "feat: installer rollback — backup before [5/7], restore on error (trap ERR)",
+      "feat: user-friendly message about restored previous version instead of silent crash"
     ]
   },
   {
     "date": "2026-04-24",
-    "message": "BTerminal v1.1.4 — naprawa instalatora. Plik claude_log był pominięty w repozytorium — fresh install przerywał się z błędem. Narzędzia meld, pandoc i LaTeX są teraz instalowane automatycznie.",
+    "message": "BTerminal v1.1.4 — installer fix. The claude_log file was missing from the repository — fresh install aborted with an error. The meld, pandoc and LaTeX tools are now installed automatically.",
     "changes": [
-      "fix: claude_log dodany do repozytorium — brak powodował crash przy fresh install",
-      "fix: meld, pdflatex, latexmk, poppler-utils, pandoc instalowane automatycznie przez apt (nie tylko ostrzeżenie)"
+      "fix: claude_log added to the repository — its absence caused crashes on fresh install",
+      "fix: meld, pdflatex, latexmk, poppler-utils, pandoc installed automatically via apt (not just warned about)"
     ]
   },
   {
     "date": "2026-04-24",
-    "message": "BTerminal v1.1.3 — katalog claude_log/ tworzony automatycznie przy starcie sesji Claude Code. Logi są widoczne w panelu Files od razu po otwarciu projektu.",
+    "message": "BTerminal v1.1.3 — the claude_log/ directory is now created automatically when a Claude Code session starts. Logs are visible in the Files panel as soon as the project is opened.",
     "changes": [
-      "fix: claude_log/ tworzony przy starcie taba Claude Code — nie dopiero po zamknięciu"
+      "fix: claude_log/ created when the Claude Code tab opens — no longer waits until close"
     ]
   },
   {
     "date": "2026-04-24",
-    "message": "BTerminal v1.1.2 — poprawka reguł i narzędzia Consult. Analyst i Arbiter w Tribunal są teraz zawsze zablokowane na claude-code/opus. Reguła o sprawdzaniu modeli zawężona — dotyczy tylko wyboru modelu przez -m.",
+    "message": "BTerminal v1.1.2 — rules and Consult tool fix. Analyst and Arbiter in Tribunal are now always locked to claude-code/opus. The 'always check models' rule has been narrowed — it only applies to model selection via -m.",
     "changes": [
-      "fix: Tribunal — Analyst i Arbiter zablokowane na claude-code/opus w GUI i CLI (jedyny model z dostępem do plików projektu)",
-      "fix: global_rules.txt — reguła o modelach consult zawężona: dotyczy tylko `consult -m`, nie każdego użycia",
-      "fix: CLAUDE.md — zaktualizowana dokumentacja Tribunal (flagi --analyst/--arbiter usunięte z CLI)"
+      "fix: Tribunal — Analyst and Arbiter locked to claude-code/opus in both GUI and CLI (the only model with project file access)",
+      "fix: global_rules.txt — the consult-models rule narrowed: applies only to `consult -m`, not every use",
+      "fix: CLAUDE.md — Tribunal docs updated (--analyst/--arbiter flags removed from CLI)"
     ]
   },
   {
     "date": "2026-04-24",
-    "message": "BTerminal v1.1.1 — latex-document-skill instaluje się teraz automatycznie i jest przypięty do konkretnego commita. Aktualizacja jest obsługiwana przez install.sh — nie trzeba nic robić ręcznie.",
+    "message": "BTerminal v1.1.1 — latex-document-skill is now installed automatically and pinned to a specific commit. Updates are handled by install.sh — no manual steps needed.",
     "changes": [
-      "fix: latex-document-skill pinned do commita z dependencies.json — user zawsze dostaje zweryfikowaną wersję",
-      "fix: install.sh automatycznie klonuje i aktualizuje extension przy każdej instalacji",
-      "fix: zależności LaTeX (pdflatex, latexmk, poppler-utils, pandoc) instalowane automatycznie"
+      "fix: latex-document-skill pinned to the commit from dependencies.json — users always get a verified version",
+      "fix: install.sh automatically clones and updates the extension on every install",
+      "fix: LaTeX dependencies (pdflatex, latexmk, poppler-utils, pandoc) installed automatically"
     ]
   },
   {
     "date": "2026-04-24",
-    "message": "BTerminal v1.1.0 — panel Files. Nowa zakładka w sidebarze pokazuje pliki projektu jak w IntelliJ: drzewo z katalogami, podgląd diff w meld z wyborem commita, menu kontekstowe z kopiowaniem ścieżek i otwieraniem w dowolnym programie. Zalecane: uruchom install.sh aby zaktualizować.",
+    "message": "BTerminal v1.1.0 — Files panel. A new sidebar tab shows project files like in IntelliJ: directory tree, diff preview in meld with commit selection, context menu with path copying and 'Open With' for any program. Recommended: run install.sh to update.",
     "changes": [
-      "feat: panel Files — drzewo plików aktywnego projektu w sidebarze",
-      "feat: dropdown do wyboru projektu — lista zapisanych sesji Claude Code, domyślnie aktywna zakładka",
-      "feat: auto-wykrywanie git root — jeśli sesja wskazuje na podkatalog (np. docs/), panel pokaże cały projekt",
-      "feat: diff w meld — dwuklik otwiera dialog z dropdownem 10 ostatnich commitów i polem na własny hash/branch",
-      "feat: menu kontekstowe — Copy Path, Copy Relative Path, Copy Name, Paste Path to Terminal",
-      "feat: Open With ▸ — podmenu z Default App, VS Code, Zed, gedit, kate, Custom…",
-      "feat: meld dodany do instalatora (opcjonalna zależność)"
+      "feat: Files panel — project file tree of the active project in the sidebar",
+      "feat: project dropdown — list of saved Claude Code sessions, defaults to the active tab",
+      "feat: auto git-root detection — if the session points to a subdirectory (e.g. docs/), the panel walks up to the project root",
+      "feat: meld diff — double-click opens a dialog with a dropdown of the last 10 commits and a free-form ref input",
+      "feat: context menu — Copy Path, Copy Relative Path, Copy Name, Paste Path to Terminal",
+      "feat: Open With > — submenu with Default App, VS Code, Zed, gedit, kate, Custom...",
+      "feat: meld added to the installer (optional dependency)"
     ]
   },
   {
     "date": "2026-04-24",
-    "message": "BTerminal v1.0.0 — pierwsze oficjalne wydanie. Dodano system globalnych reguł, panel Skills, rozszerzenia (latex-document-skill), nowy instalator z weryfikacją zależności, wersjonowanie oraz skill /check-deps. Zalecane: uruchom install.sh aby zaktualizować instalację i pobrać nowe skille.",
+    "message": "BTerminal v1.0.0 — first official release. Adds the global rules system, Skills panel, extensions (latex-document-skill), a new installer with dependency verification, versioning, and the /check-deps skill. Recommended: run install.sh to update your installation and pull the new skills.",
     "changes": [
-      "feat: wersjonowanie v1.0.0 — plik VERSION, tytuł okna pokazuje wersję",
-      "feat: globalny plik reguł defaults/global_rules.txt — wstrzykiwany do każdej sesji, aktualizuje się z git pull",
-      "feat: panel Skills w sidebarze — lista zainstalowanych skillów Claude Code, oznaczenie 📦 dla bundled",
-      "feat: bundled skille (reflect.md, check-deps.md) — instalowane do ~/.claude/commands/ przy instalacji",
-      "feat: /check-deps — skill sprawdzający wersje zależności BTerminal z defaults/dependencies.json",
-      "feat: /reflect — skill zatrzymujący agenta i uruchamiający analizę reguł przez memory_wizard --dry-run",
-      "feat: system rozszerzeń — extensions w dependencies.json, latex-document-skill jako pierwsza oficjalna extension",
-      "feat: install.sh v2 — manifest-driven, sprawdza i aktualizuje wszystkie zależności, zapisuje install_errors.json",
-      "feat: defaults/dependencies.json — pełny manifest zależności (runtime, GTK, system tools, claude_code, APIs, extensions)",
-      "feat: nagłówek środowiska BTerminal w intro prompt i periodic inject (ze ścieżką do README.md)",
-      "feat: symlinki live — defaults/, README.md, VERSION linkowane z repo (git pull = natychmiastowy efekt)",
-      "fix: naprawiono błąd instalacji przy świeżym systemie (brak katalogu ~/.local/bin przed instalacją Claude Code)"
+      "feat: versioning v1.0.0 — VERSION file, window title shows the version",
+      "feat: global rules file defaults/global_rules.txt — injected into every session, updates with git pull",
+      "feat: Skills panel in the sidebar — list of installed Claude Code skills, marker for bundled skills",
+      "feat: bundled skills (reflect.md, check-deps.md) — installed to ~/.claude/commands/ on install",
+      "feat: /check-deps — skill that checks BTerminal dependency versions against defaults/dependencies.json",
+      "feat: /reflect — skill that stops the agent and runs rule analysis via memory_wizard --dry-run",
+      "feat: extensions system — extensions in dependencies.json, latex-document-skill as the first official extension",
+      "feat: install.sh v2 — manifest-driven, checks and updates all dependencies, writes install_errors.json",
+      "feat: defaults/dependencies.json — full dependency manifest (runtime, GTK, system tools, claude_code, APIs, extensions)",
+      "feat: BTerminal environment header in intro prompt and periodic injection (with README.md path)",
+      "feat: live symlinks — defaults/, README.md, VERSION linked from the repo (git pull = immediate effect)",
+      "fix: installation error on fresh systems (missing ~/.local/bin before Claude Code install)"
     ]
   },
   {
     "date": "2026-04-23",
-    "message": "Scalono branch feat/claude-usage-limits. Pasek statystyk kart Claude Code wyświetla teraz limity planu (5h/7d) pobierane bezpośrednio z Anthropic API przez OAuth. Naprawiono race condition w auto-trigger, sortowanie zadań i ikonkę na starszym Mincie.",
+    "message": "Merged branch feat/claude-usage-limits. The Claude Code stats bar now shows plan limits (5h/7d) fetched directly from the Anthropic API via OAuth. Fixed a race condition in auto-trigger, task sorting, and the icon on older Mint.",
     "changes": [
-      "feat: limity planu Claude (5h/7d) w pasku statystyk — procent wykorzystania i czas do resetu",
-      "fix: opóźnienie Enter o 100ms po wiadomości auto-trigger (zapobiega race condition)",
-      "fix: sortowanie aktywnych zadań rosnąco (1, 1.a, 1.b, 2...)",
-      "fix: rozmiar fontu zakładek sidebarau 11px → 13px",
-      "fix: ikonka BTerminal na starszym Linux Mint (gtk-update-icon-cache po instalacji)"
+      "feat: Claude plan limits (5h/7d) in the stats bar — utilization percentage and time to reset",
+      "fix: 100ms delay before Enter after auto-trigger message (prevents race condition)",
+      "fix: open tasks sorted ascending (1, 1.a, 1.b, 2, ...)",
+      "fix: sidebar tab font size 11px -> 13px",
+      "fix: BTerminal icon on older Linux Mint (gtk-update-icon-cache after install)"
     ]
   }
 ]

@@ -624,6 +624,7 @@ class MemoryPanel(Gtk.Box):
         project = self._get_project()
         if project:
             self._refresh_rules()
+            self._refresh_config()
             self._refresh_logs()
 
 

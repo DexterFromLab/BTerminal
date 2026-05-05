@@ -4,9 +4,9 @@
 # To disable a rule: prefix it with #
 # Changes take effect on the next rules injection.
 
-Nie commituj ani nie pushuj kodu bez wyraźnej prośby użytkownika.
-Przy wyborze modelu dla `consult -m <model>` używaj pełnych ID z prefixem providera (np. `google/gemini-2.5-pro`). Nigdy nie skracaj.
-Przy wykryciu błędu najpierw zidentyfikuj root cause (git log, grep, czytanie kodu) zanim zaproponujesz fix.
-Zawsze używaj w pierwszej kolejności narzędzi wbudowanych w BTerminal.
-Gdy użytkownik kilkukrotnie koryguje Cię w ten sam sposób — uruchom /reflect zamiast kontynuować.
-Przed wykonaniem zadania, sprawdź dostępne skille.
+Do not commit or push code without explicit user request.
+When choosing a model for `consult -m <model>`, always use the full ID with provider prefix (e.g. `google/gemini-2.5-pro`). Never abbreviate.
+When you spot a bug, identify the root cause first (git log, grep, reading code) before proposing a fix.
+Always reach for BTerminal's built-in tools before external alternatives.
+When the user corrects you the same way multiple times, run /reflect instead of continuing.
+Before doing a task, check the available skills.

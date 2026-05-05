@@ -62,6 +62,7 @@ from bterminal.config import (
     show_error_dialog,
     show_info_dialog,
 )
+from bterminal.i18n import _, N_, tr, register_translatable
 from bterminal.ctx.helpers import (
     _collect_claude_log,
     _resolve_ctx_project_name,
@@ -174,29 +175,39 @@ class BTerminalApp(Gtk.Window):
             Gtk.StackTransitionType.SLIDE_LEFT_RIGHT
         )
 
+        # Stack child titles (used by GtkStack accessibility / fallback
+        # switcher). Registered for live refresh — Gtk.Stack stores per-child
+        # 'title' as a child-property, refreshed via child_set_property().
+        def _add_panel(child, name, msgid):
+            self.sidebar_stack.add_titled(child, name, _(msgid))
+            register_translatable(
+                self.sidebar_stack, msgid,
+                lambda stack, t, c=child: stack.child_set_property(c, "title", t),
+            )
+
         self.sidebar = SessionSidebar(self)
-        self.sidebar_stack.add_titled(self.sidebar, "sessions", "Sessions")
+        _add_panel(self.sidebar, "sessions", N_("Sessions"))
 
         self.ctx_panel = CtxManagerPanel(self)
-        self.sidebar_stack.add_titled(self.ctx_panel, "ctx", "Ctx")
+        _add_panel(self.ctx_panel, "ctx", N_("Ctx"))
 
         self.consult_panel = ConsultPanel(self)
-        self.sidebar_stack.add_titled(self.consult_panel, "consult", "Consult")
+        _add_panel(self.consult_panel, "consult", N_("Consult"))
 
         self.task_panel = TaskListPanel(self)
-        self.sidebar_stack.add_titled(self.task_panel, "tasks", "Tasks")
+        _add_panel(self.task_panel, "tasks", N_("Tasks"))
 
         self.memory_panel = MemoryPanel(self)
-        self.sidebar_stack.add_titled(self.memory_panel, "memory", "Memory")
+        _add_panel(self.memory_panel, "memory", N_("Memory"))
 
         self.skills_panel = SkillsPanel(self)
-        self.sidebar_stack.add_titled(self.skills_panel, "skills", "Skills")
+        _add_panel(self.skills_panel, "skills", N_("Skills"))
 
         self.files_panel = FilesPanel(self)
-        self.sidebar_stack.add_titled(self.files_panel, "files", "Files")
+        _add_panel(self.files_panel, "files", N_("Files"))
 
         self.plugin_panel = PluginManagerPanel(self)
-        self.sidebar_stack.add_titled(self.plugin_panel, "plugins", "Plugins")
+        _add_panel(self.plugin_panel, "plugins", N_("Plugins"))
 
         # Two-row compact tab switcher: row1 = main tabs, row2 = extra + toggle
         switcher = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -205,35 +216,30 @@ class BTerminalApp(Gtk.Window):
         row1 = Gtk.Box(spacing=0)
         row2 = Gtk.Box(spacing=0)
 
-        _tab_defs_row1 = [("sessions", "Sessions"), ("ctx", "Ctx"),
-                          ("consult", "Consult"), ("tasks", "Tasks")]
-        _tab_defs_row2 = [("memory", "Memory"), ("skills", "Skills"), ("files", "Files"), ("plugins", "Plugins")]
+        # Tab definitions: (name, msgid). Labels are built+registered for
+        # live refresh via tr() so language change updates them in place.
+        _tab_defs_row1 = [("sessions", N_("Sessions")), ("ctx", N_("Ctx")),
+                          ("consult", N_("Consult")), ("tasks", N_("Tasks"))]
+        _tab_defs_row2 = [("memory", N_("Memory")), ("skills", N_("Skills")),
+                          ("files", N_("Files")), ("plugins", N_("Plugins"))]
 
         self._sidebar_tab_buttons = []
-        for name, title in _tab_defs_row1:
-            btn = Gtk.Button(label=title)
+        for name, msgid in _tab_defs_row1 + _tab_defs_row2:
+            btn = Gtk.Button()
+            tr(btn, "set_label", msgid)
             btn.get_style_context().add_class("sidebar-tab")
             child = btn.get_child()
             if isinstance(child, Gtk.Label):
                 child.set_ellipsize(Pango.EllipsizeMode.END)
-            btn.connect("clicked", lambda _, n=name: self.sidebar_stack.set_visible_child_name(n))
-            row1.pack_start(btn, True, True, 0)
-            self._sidebar_tab_buttons.append(btn)
-
-        for name, title in _tab_defs_row2:
-            btn = Gtk.Button(label=title)
-            btn.get_style_context().add_class("sidebar-tab")
-            child = btn.get_child()
-            if isinstance(child, Gtk.Label):
-                child.set_ellipsize(Pango.EllipsizeMode.END)
-            btn.connect("clicked", lambda _, n=name: self.sidebar_stack.set_visible_child_name(n))
-            row2.pack_start(btn, True, True, 0)
+            btn.connect("clicked", lambda _w, n=name: self.sidebar_stack.set_visible_child_name(n))
+            target_row = row1 if (name, msgid) in _tab_defs_row1 else row2
+            target_row.pack_start(btn, True, True, 0)
             self._sidebar_tab_buttons.append(btn)
 
         # Toggle button at end of row2
         self._sidebar_toggle_btn = Gtk.Button(label="◀")
         self._sidebar_toggle_btn.get_style_context().add_class("sidebar-tab")
-        self._sidebar_toggle_btn.set_tooltip_text("Hide sidebar (Ctrl+B)")
+        tr(self._sidebar_toggle_btn, "set_tooltip_text", "Hide sidebar (Ctrl+B)")
         self._sidebar_toggle_btn.connect("clicked", lambda _: self.toggle_sidebar())
         row2.pack_end(self._sidebar_toggle_btn, False, False, 0)
 
@@ -310,7 +316,7 @@ class BTerminalApp(Gtk.Window):
         # Show-sidebar button (visible only when sidebar is hidden)
         self._show_sidebar_btn = Gtk.Button(label="▶")
         self._show_sidebar_btn.get_style_context().add_class("sidebar-btn")
-        self._show_sidebar_btn.set_tooltip_text("Show sidebar (Ctrl+B)")
+        tr(self._show_sidebar_btn, "set_tooltip_text", "Show sidebar (Ctrl+B)")
         self._show_sidebar_btn.set_no_show_all(True)
         self._show_sidebar_btn.connect("clicked", lambda _: self.toggle_sidebar())
         self.notebook.set_action_widget(self._show_sidebar_btn, Gtk.PackType.START)
@@ -320,13 +326,13 @@ class BTerminalApp(Gtk.Window):
 
         self._theme_btn = Gtk.Button(label="☀" if _current_theme == "dark" else "☾")
         self._theme_btn.get_style_context().add_class("theme-toggle")
-        self._theme_btn.set_tooltip_text("Toggle light/dark theme")
+        tr(self._theme_btn, "set_tooltip_text", "Toggle light/dark theme")
         self._theme_btn.connect("clicked", lambda _: self._toggle_theme())
         end_box.pack_start(self._theme_btn, False, False, 0)
 
         self._show_git_btn = Gtk.Button(label="Git ◀")
         self._show_git_btn.get_style_context().add_class("sidebar-btn")
-        self._show_git_btn.set_tooltip_text("Show Git panel (Ctrl+G)")
+        tr(self._show_git_btn, "set_tooltip_text", "Show Git panel (Ctrl+G)")
         self._show_git_btn.set_no_show_all(True)
         self._show_git_btn.connect("clicked", lambda _: self.toggle_git_panel())
         end_box.pack_start(self._show_git_btn, False, False, 0)
@@ -374,12 +380,16 @@ class BTerminalApp(Gtk.Window):
         if _config._options_load_error is not None:
             show_error_dialog(
                 self,
-                f"Plik ~/.config/bterminal/options.json był uszkodzony — "
-                f"przywrócono ustawienia domyślne.\n\n"
-                f"Przyczyna: {type(_config._options_load_error).__name__}: "
-                f"{_config._options_load_error}",
+                _(
+                    "The file ~/.config/bterminal/options.json was corrupted — "
+                    "default settings have been restored.\n\n"
+                    "Cause: {exc_type}: {exc}"
+                ).format(
+                    exc_type=type(_config._options_load_error).__name__,
+                    exc=_config._options_load_error,
+                ),
             )
-            _config._options_load_error = None  # nie pokazuj ponownie
+            _config._options_load_error = None  # don't show again
 
         self._plugins = {}
         self._plugin_shortcuts = []
@@ -411,57 +421,65 @@ class BTerminalApp(Gtk.Window):
     def _build_menubar(self):
         menubar = Gtk.MenuBar()
 
-        def _item(label, callback, shortcut=None):
-            it = Gtk.MenuItem(label=label)
+        def _item(msgid, callback, shortcut=None):
+            """Build a translatable menu item. msgid is registered for
+            live refresh so the label updates on locale change."""
+            it = Gtk.MenuItem()
+            tr(it, "set_label", msgid)
             if shortcut:
                 it.set_accel_path(shortcut)
-            it.connect("activate", lambda _: callback())
+            it.connect("activate", lambda _w: callback())
             return it
 
         def _sep():
             return Gtk.SeparatorMenuItem()
 
+        def _root(msgid, submenu):
+            """Build a translatable top-level menubar entry."""
+            it = Gtk.MenuItem()
+            tr(it, "set_label", msgid)
+            it.set_submenu(submenu)
+            return it
+
         # ── File ──────────────────────────────────────────────────────────────
         file_menu = Gtk.Menu()
-        file_menu.append(_item("Nowa karta lokalna", self.add_local_tab))
-        file_menu.append(_item("Nowa sesja SSH…", lambda: self.sidebar._on_add(None)))
-        file_menu.append(_item("Nowa sesja Claude Code…", lambda: self.sidebar._on_add_claude()))
+        file_menu.append(_item(N_("New local tab"), self.add_local_tab))
+        file_menu.append(_item(N_("New SSH session…"), lambda: self.sidebar._on_add(None)))
+        file_menu.append(_item(N_("New Claude Code session…"), lambda: self.sidebar._on_add_claude()))
         file_menu.append(_sep())
-        file_menu.append(_item("Opcje…", lambda: OptionsDialog(self).run_and_apply()))
+        file_menu.append(_item(N_("Options…"), lambda: OptionsDialog(self).run_and_apply()))
         file_menu.append(_sep())
-        file_menu.append(_item("Zamknij aplikację", self.destroy))
-        file_root = Gtk.MenuItem(label="File")
-        file_root.set_submenu(file_menu)
-        menubar.append(file_root)
+        file_menu.append(_item(N_("Quit"), self.destroy))
+        menubar.append(_root(N_("File"), file_menu))
 
         # ── View ──────────────────────────────────────────────────────────────
         view_menu = Gtk.Menu()
-        view_menu.append(_item("Przełącz sidebar (Ctrl+B)", self.toggle_sidebar))
-        view_menu.append(_item("Przełącz panel Git (Ctrl+G)", self.toggle_git_panel))
-        view_menu.append(_item("Przełącz motyw ☀/🌙", self._toggle_theme))
+        view_menu.append(_item(N_("Toggle sidebar (Ctrl+B)"), self.toggle_sidebar))
+        view_menu.append(_item(N_("Toggle Git panel (Ctrl+G)"), self.toggle_git_panel))
+        view_menu.append(_item(N_("Toggle theme ☀/🌙"), self._toggle_theme))
         view_menu.append(_sep())
-        for panel_name, panel_title in [
-            ("sessions", "Sessions"),
-            ("ctx",      "Ctx"),
-            ("consult",  "Consult"),
-            ("tasks",    "Tasks"),
-            ("plugins",  "Plugins"),
+        for panel_name, panel_msgid in [
+            ("sessions", N_("Sessions")),
+            ("ctx",      N_("Ctx")),
+            ("consult",  N_("Consult")),
+            ("tasks",    N_("Tasks")),
+            ("plugins",  N_("Plugins")),
         ]:
-            it = Gtk.MenuItem(label=panel_title)
-            it.connect("activate", lambda _, n=panel_name: (
+            it = Gtk.MenuItem()
+            tr(it, "set_label", panel_msgid)
+            it.connect("activate", lambda _w, n=panel_name: (
                 self.sidebar_stack.set_visible_child_name(n),
                 self._sidebar_visible or self.toggle_sidebar(),
             ))
             view_menu.append(it)
-        view_root = Gtk.MenuItem(label="View")
-        view_root.set_submenu(view_menu)
-        menubar.append(view_root)
+        menubar.append(_root(N_("View"), view_menu))
 
         # ── Tools ─────────────────────────────────────────────────────────────
         tools_menu = Gtk.Menu()
-        tools_menu.append(_item("Sprawdź aktualizacje", lambda: _check_for_updates(self, manual=True)))
-        tools_menu.append(_item("Errata…", lambda: _show_errata_dialog(self, _load_local_errata())))
-        tools_root = Gtk.MenuItem(label="Tools")
+        tools_menu.append(_item(N_("Check for updates"), lambda: _check_for_updates(self, manual=True)))
+        tools_menu.append(_item(N_("Errata…"), lambda: _show_errata_dialog(self, _load_local_errata())))
+        tools_root = Gtk.MenuItem()
+        tr(tools_root, "set_label", N_("Tools"))
         tools_root.set_submenu(tools_menu)
         menubar.append(tools_root)
 

@@ -20,6 +20,7 @@ from gi.repository import Gdk, GdkPixbuf, GLib, Gtk, Pango
 import shutil
 import uuid
 
+from bterminal.i18n import _, register_translatable
 from bterminal.config import (
     APP_NAME,
     CATPPUCCIN,
@@ -67,8 +68,14 @@ class SessionSidebar(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.app = app
 
-        # Header
-        header = Gtk.Label(label=f"  {APP_NAME} Sessions")
+        # Header — registered for live refresh so language change updates it.
+        # The leading whitespace is presentation-only and stays out of msgid.
+        header = Gtk.Label()
+        def _set_header(w):
+            w.set_label("  " + _("{app} Sessions").format(app=APP_NAME))
+        _set_header(header)
+        register_translatable(header, "{app} Sessions",
+                              lambda w, _t: _set_header(w))
         header.set_halign(Gtk.Align.FILL)
         header.set_xalign(0)
         header.get_style_context().add_class("sidebar-header")

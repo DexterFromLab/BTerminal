@@ -42,19 +42,19 @@ Read the output carefully. The wizard may propose rules unrelated to your STOP o
 Structure your message as follows:
 
 ---
-**STOP — co zauważyłem:**
+**STOP — what I noticed:**
 [Your one-sentence observation from step 1, and brief context of what happened]
 
-**Moja propozycja reguły:**
+**My proposed rule:**
 ```
 ctx rules add <project> "<rule preventing this from recurring>"
 ```
 
-**Wizard dodatkowo zaproponował** (ocena):
+**The wizard additionally proposed** (assessment):
 - ✓ `[rule text]` — [why you think it's relevant to this session]
 - ✗ `[rule text]` — [why you think it's not urgent now]
 
-Czy mam dodać zaznaczone reguły?
+Should I add the marked rules?
 ---
 
 Be objective about wizard proposals. Only present wizard rules that you genuinely believe are relevant to THIS session. Skip generic or low-value proposals.
@@ -69,7 +69,7 @@ ctx rules add <project> "rule text"
 ```
 
 Confirm what was added:
-> "Dodałem N reguł. Będą aktywne od następnego wstrzyknięcia."
+> "Added N rules. They will be active from the next injection."
 
 ### 6. If no wizard proposals worth presenting
 

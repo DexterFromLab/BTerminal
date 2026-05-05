@@ -32,6 +32,7 @@ from bterminal.config import (
     show_info_dialog,
 )
 from bterminal.ctx.helpers import _resolve_ctx_project_name, _smart_project_name
+from bterminal.i18n import current_language, language_english_name
 
 
 def _build_intro_prompt(project_name):
@@ -46,19 +47,34 @@ def _build_intro_prompt(project_name):
 
     readme_path = Path(__file__).parent / "README.md"
     readme_hint = f" README: {readme_path}" if readme_path.exists() else ""
-    header = f"Pracujesz w środowisku BTerminal — terminal SSH/Claude z wbudowanymi narzędziami (ctx, consult, tasks, memory_wizard, skills).{readme_hint}"
+    header = f"You are working inside BTerminal — an SSH/Claude terminal with built-in tools (ctx, consult, tasks, memory_wizard, skills).{readme_hint}"
 
     if ctx_output:
-        base = f"{header}\n\nKontekst projektu ({project_name}):\n{ctx_output}\n\n--- Narzędzia ---\n\n{tools}"
+        base = f"{header}\n\nProject context ({project_name}):\n{ctx_output}\n\n--- Tools ---\n\n{tools}"
     else:
-        base = f"{header}\n\nNazwa projektu w ctx/tasks: {project_name}\n\n--- Narzędzia ---\n\n{tools}"
+        base = f"{header}\n\nProject name in ctx/tasks: {project_name}\n\n--- Tools ---\n\n{tools}"
 
     if global_rules:
-        base += "\n\n--- Reguły globalne (BTerminal defaults) ---\n" + \
+        base += "\n\n--- Global rules (BTerminal defaults) ---\n" + \
                 "\n".join(f"- {r}" for r in global_rules)
 
     if rules_block:
         base += f"\n\n{rules_block}"
+
+    # AI language hint (F5.c). Appended only when the user opted in
+    # AND their UI language is something other than English. The hint
+    # itself is always in English — it is part of the AI prompt, which
+    # per project policy is locale-agnostic.
+    if _OPTIONS.get("tell_ai_language", True):
+        ui_lang = current_language()
+        if ui_lang and ui_lang != "en":
+            lang_name = language_english_name(ui_lang)
+            base += (
+                f"\n\n--- User language ---\n"
+                f"The user prefers to communicate in {lang_name}. "
+                f"Respond in that language unless the user switches."
+            )
+
     return base
 
 
@@ -155,8 +171,8 @@ class ClaudeCodeDialog(Gtk.Dialog):
         )
         box.pack_start(lbl_plugins, False, False, 0)
         lbl_plugins_hint = Gtk.Label(
-            label="Odznacz pluginy które nie mają być wstrzykiwane do intro promptu tej sesji. "
-                  "Zapisuje się per projekt — kolejne otwarcie tej sesji respektuje wybór.",
+            label="Untick plugins that should not be injected into this session's intro prompt. "
+                  "Saved per project — reopening this session respects the choice.",
             halign=Gtk.Align.START,
             xalign=0,
             wrap=True,

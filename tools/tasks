@@ -43,6 +43,14 @@ def init_db():
             project TEXT PRIMARY KEY,
             autorun INTEGER DEFAULT 0
         );
+
+        CREATE TABLE IF NOT EXISTS task_claims (
+            project TEXT NOT NULL,
+            task_id TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            claimed_at TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (project, task_id, session_id)
+        );
     """)
     db.close()
 

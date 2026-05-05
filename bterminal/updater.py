@@ -26,7 +26,9 @@ gi.require_version("Gdk", "3.0")
 from gi.repository import Gdk, GLib, Gtk, Pango
 
 
-from bterminal.config import REPO_DIR
+from bterminal.config import REPO_DIR, show_error_dialog
+from bterminal.i18n import _
+from bterminal.license import _require_license_for_update
 
 
 def _load_local_errata():
@@ -52,10 +54,10 @@ def _check_for_updates(window, manual=False):
                 transient_for=window, modal=True,
                 message_type=Gtk.MessageType.WARNING,
                 buttons=Gtk.ButtonsType.OK,
-                text="Brak repozytorium",
+                text=_("No repository"),
             )
             dlg.format_secondary_text(
-                "Nie można sprawdzić aktualizacji — katalog repozytorium nie został znaleziony."
+                _("Cannot check for updates — repository directory not found.")
             )
             dlg.run()
             dlg.destroy()
@@ -102,7 +104,7 @@ def _check_for_updates(window, manual=False):
 def _manual_update_check(window):
     """Show a live progress dialog with countdown, then display result inline."""
     dialog = Gtk.Dialog(
-        title="Sprawdzanie aktualizacji",
+        title=_("Checking for updates"),
         transient_for=window,
         modal=True,
     )
@@ -116,7 +118,9 @@ def _manual_update_check(window):
     spinner.start()
     row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
     row.pack_start(spinner, False, False, 0)
-    status_lbl = Gtk.Label(label=f"Łączenie z serwerem... ({_UPDATE_TIMEOUT}s)")
+    status_lbl = Gtk.Label(
+        label=_("Connecting to server... ({seconds}s)").format(seconds=_UPDATE_TIMEOUT)
+    )
     status_lbl.set_xalign(0)
     row.pack_start(status_lbl, True, True, 0)
     vbox.pack_start(row, False, False, 0)
@@ -124,7 +128,7 @@ def _manual_update_check(window):
     content.pack_start(vbox, True, True, 0)
     content.show_all()
 
-    btn_close = dialog.add_button("Anuluj", Gtk.ResponseType.CANCEL)
+    btn_close = dialog.add_button(_("Cancel"), Gtk.ResponseType.CANCEL)
 
     state = {"done": False, "remaining": _UPDATE_TIMEOUT, "result": None}
 
@@ -135,10 +139,12 @@ def _manual_update_check(window):
         if state["remaining"] <= 0:
             state["done"] = True
             spinner.stop()
-            status_lbl.set_text("Nie można sprawdzić — przekroczono limit czasu.")
-            btn_close.set_label("Zamknij")
+            status_lbl.set_text(_("Cannot check for updates — timed out."))
+            btn_close.set_label(_("Close"))
             return False
-        status_lbl.set_text(f"Łączenie z serwerem... ({state['remaining']}s)")
+        status_lbl.set_text(
+            _("Connecting to server... ({seconds}s)").format(seconds=state["remaining"])
+        )
         return True
 
     GLib.timeout_add(1000, _countdown)
@@ -150,13 +156,13 @@ def _manual_update_check(window):
         spinner.stop()
         res = state["result"]
         if res == "none":
-            status_lbl.set_text("BTerminal jest aktualny. Brak nowych aktualizacji.")
-            btn_close.set_label("Zamknij")
+            status_lbl.set_text(_("BTerminal is up to date. No new updates."))
+            btn_close.set_label(_("Close"))
         elif isinstance(res, tuple) and res[0] == "updates":
             dialog.response(Gtk.ResponseType.OK)
         else:
-            status_lbl.set_text("Nie można sprawdzić aktualizacji.")
-            btn_close.set_label("Zamknij")
+            status_lbl.set_text(_("Cannot check for updates."))
+            btn_close.set_label(_("Close"))
         return False
 
     def _fetch():
@@ -212,7 +218,7 @@ _RESP_RESTART = 11
 def _prompt_update(window, log, errata=None):
     """Show update dialog on the main thread."""
     dialog = Gtk.Dialog(
-        title="Nowa wersja BTerminal",
+        title=_("New BTerminal version"),
         transient_for=window,
         modal=True,
     )
@@ -232,7 +238,7 @@ def _prompt_update(window, log, errata=None):
     vbox.set_border_width(20)
 
     title_lbl = Gtk.Label()
-    title_lbl.set_markup("<b>Dostępna nowa wersja BTerminal</b>")
+    title_lbl.set_markup("<b>" + _("A new version of BTerminal is available") + "</b>")
     title_lbl.set_halign(Gtk.Align.START)
     vbox.pack_start(title_lbl, False, False, 0)
 
@@ -262,9 +268,9 @@ def _prompt_update(window, log, errata=None):
     content.pack_start(scroll, True, True, 0)
     content.show_all()
 
-    dialog.add_button("Pokaż erratę", _RESP_ERRATA)
-    dialog.add_button("Nie teraz", Gtk.ResponseType.CANCEL)
-    btn_update = dialog.add_button("Aktualizuj i uruchom ponownie", Gtk.ResponseType.YES)
+    dialog.add_button(_("Show errata"), _RESP_ERRATA)
+    dialog.add_button(_("Not now"), Gtk.ResponseType.CANCEL)
+    btn_update = dialog.add_button(_("Update and restart"), Gtk.ResponseType.YES)
     btn_update.get_style_context().add_class("suggested-action")
     dialog.set_default_response(Gtk.ResponseType.YES)
 
@@ -277,19 +283,60 @@ def _prompt_update(window, log, errata=None):
 
     dialog.destroy()
     if response == Gtk.ResponseType.YES:
+        # License gate — show the LICENSE.md from origin/master (the
+        # version about to be installed). Decline aborts the update;
+        # if origin's LICENSE cannot be retrieved, fall back to the
+        # local one so the user still has a chance to accept.
+        new_license = _fetch_remote_license() or _read_local_license()
+        if new_license is None:
+            show_error_dialog(
+                window,
+                "Cannot read LICENSE.md (neither remote nor local). "
+                "Update aborted.",
+            )
+            return False
+        if not _require_license_for_update(window, new_license):
+            return False
         _do_update(window)
     return False
+
+
+def _fetch_remote_license():
+    """Return LICENSE.md from origin/master, or None on failure."""
+    if not REPO_DIR:
+        return None
+    try:
+        result = subprocess.run(
+            ["git", "show", "origin/master:LICENSE.md"],
+            cwd=REPO_DIR, capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            return result.stdout
+    except Exception:
+        pass
+    return None
+
+
+def _read_local_license():
+    """Return on-disk LICENSE.md (REPO_DIR), or None on failure."""
+    if not REPO_DIR:
+        return None
+    try:
+        with open(os.path.join(REPO_DIR, "LICENSE.md"), encoding="utf-8") as fh:
+            return fh.read()
+    except OSError:
+        return None
 
 
 def _show_errata_dialog(window, errata):
     """Show all errata entries in a scrollable dialog."""
     dialog = Gtk.Dialog(
-        title="Errata BTerminal",
+        title=_("BTerminal errata"),
         transient_for=window,
         modal=True,
     )
     dialog.set_default_size(560, 480)
-    dialog.add_button("Zamknij", Gtk.ResponseType.CLOSE)
+    dialog.add_button(_("Close"), Gtk.ResponseType.CLOSE)
 
     scroll = Gtk.ScrolledWindow()
     scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -299,7 +346,7 @@ def _show_errata_dialog(window, errata):
     vbox.set_border_width(20)
 
     if not errata:
-        empty = Gtk.Label(label="Brak wpisów errata.")
+        empty = Gtk.Label(label=_("No errata entries."))
         empty.set_halign(Gtk.Align.START)
         vbox.pack_start(empty, False, False, 0)
     else:
@@ -349,7 +396,7 @@ def _restart_bterminal():
 
 def _do_update(window):
     """Pull changes and run install.sh in a background thread."""
-    dialog = Gtk.Dialog(title="Aktualizacja BTerminal", transient_for=window, modal=True)
+    dialog = Gtk.Dialog(title=_("BTerminal update"), transient_for=window, modal=True)
     dialog.set_default_size(480, 220)
     dialog.set_resizable(False)
     dialog.set_deletable(False)
@@ -358,7 +405,7 @@ def _do_update(window):
     vbox.set_border_width(20)
 
     title_lbl = Gtk.Label()
-    title_lbl.set_markup("<b>Aktualizacja w toku…</b>")
+    title_lbl.set_markup("<b>" + _("Update in progress…") + "</b>")
     title_lbl.set_halign(Gtk.Align.START)
     vbox.pack_start(title_lbl, False, False, 0)
 
@@ -437,12 +484,16 @@ def _do_update(window):
             stderr_str = "\n".join(stderr_buf)
             if proc.returncode != 0:
                 if "BTERMINAL_ROLLBACK_OK" in stderr_str:
-                    msg = ("Nowa wersja BTerminal nie mogła zostać zainstalowana.\n\n"
-                           "Poprzednia wersja została automatycznie przywrócona — "
-                           "BTerminal działa normalnie.")
+                    msg = _(
+                        "The new version of BTerminal could not be installed.\n\n"
+                        "The previous version was restored automatically — "
+                        "BTerminal continues to work normally."
+                    )
                 else:
-                    msg = ("Instalacja nie powiodła się i nie ma poprzedniej wersji do przywrócenia.\n\n"
-                           f"Szczegóły:\n{stderr_str or ''.join(log_lines[-5:])}")
+                    msg = _(
+                        "Installation failed and no previous version is available "
+                        "to restore.\n\nDetails:\n{details}"
+                    ).format(details=stderr_str or ''.join(log_lines[-5:]))
                 GLib.idle_add(_update_done, window, dialog, msg)
                 return
             GLib.idle_add(_update_done, window, dialog, None)

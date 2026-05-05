@@ -15,6 +15,8 @@ from gi.repository import Gio, GLib, Gtk
 from bterminal import debug_rest
 from bterminal.app import BTerminalApp
 from bterminal.config import _OPTIONS
+from bterminal.i18n import init_locale
+from bterminal.license import _require_license_acceptance
 from bterminal.updater import _check_for_updates
 
 
@@ -34,6 +36,12 @@ def main():
         if _bin not in _path_parts:
             _path_parts.insert(0, _bin)
     os.environ["PATH"] = os.pathsep.join(_path_parts)
+
+    # i18n — resolve language from options.json / LANGUAGE / LANG / 'en'
+    # and install the matching gettext catalog. Must run BEFORE any GTK
+    # widget is created so that `_()` calls in dialogs already resolve
+    # to the active language. Safe to call before parse_args (no UI yet).
+    init_locale(_OPTIONS.get("language"))
 
     parser = argparse.ArgumentParser(prog="bterminal", add_help=True)
     parser.add_argument(
@@ -55,6 +63,11 @@ def main():
     )
 
     def on_activate(app_inst):
+        # License gate — must accept before the main window is created.
+        # On decline the app quits before any session/UI state loads.
+        if not _require_license_acceptance(window=None):
+            app_inst.quit()
+            return
         win = BTerminalApp()
         app_inst.add_window(win)
         if _OPTIONS.get("check_updates_on_start", True):

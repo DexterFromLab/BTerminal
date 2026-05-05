@@ -7,3 +7,6 @@ copied_images/
 plugins/
 .claude_log/
 claude_log/
+# i18n: .mo is a compiled artefact (built from .po by tools/i18n.sh
+# and re-built by install.sh). Keep .po + .pot in git, ignore .mo.
+locale/**/*.mo

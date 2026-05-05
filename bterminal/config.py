@@ -72,6 +72,13 @@ _OPTIONS_DEFAULTS = {
     "font": "Monospace 11",
     "shell": "",
     "check_updates_on_start": True,
+    # i18n — None / "auto" means: fall through to LANGUAGE / LANG env vars,
+    # then default to 'en'. Set explicitly via Options dialog (F5).
+    "language": None,
+    # When True and the active language != 'en', the AI intro prompt
+    # appends a one-liner telling the agent which language the user
+    # prefers. User can disable in the Options dialog.
+    "tell_ai_language": True,
 }
 
 # R1.f2: gdy load wykryje uszkodzony JSON, zapisuje tu wyjątek żeby

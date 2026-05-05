@@ -33,6 +33,7 @@ from bterminal.config import (
     show_info_dialog,
 )
 from bterminal.ctx.helpers import _smart_project_name
+from bterminal.i18n import _
 
 
 _WIZARD_BACK = 1
@@ -158,9 +159,11 @@ class CtxSetupWizard(Gtk.Dialog):
         scrolled.set_min_content_height(90)
         self.w_value = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR)
         self.w_value.get_buffer().set_text(
-            "Kontekst projektu nie został jeszcze zebrany. "
-            "Zbierz kontekst w trakcie pracy i zapisuj ważne odkrycia: "
-            "ctx set <project> <key> <value>"
+            _(
+                "Project context has not been collected yet. "
+                "Gather context as you work and save important findings: "
+                "ctx set <project> <key> <value>"
+            )
         )
         scrolled.add(self.w_value)
         grid.attach(scrolled, 1, 1, 1, 1)
@@ -316,15 +319,15 @@ class CtxSetupWizard(Gtk.Dialog):
                         f'- Before ending session: `ctx summary {name} "<what was done>"`\n'
                         f"\n"
                         f"## Consult & Tribunal (CLI tools)\n\n"
-                        f"Konsultacje z zewnętrznymi modelami AI: `consult \"pytanie\"`\n"
-                        f"Konkretny model: `consult -m <model_id> \"pytanie\"` — ZAWSZE najpierw sprawdź dostępne modele: `consult models`\n"
-                        f"Nazwy modeli to PEŁNE ID z prefixem providera, np. `google/gemini-2.5-pro`, `openai/gpt-5-codex`, `deepseek/deepseek-r1` — NIE skracaj.\n"
-                        f"Dołączanie pliku jako kontekst: `consult -f plik.py \"pytanie\"`\n"
-                        f"Tribunal — debata wielu modeli AI: `consult debate \"problem\"`\n"
-                        f"  Kontekst pliku: `consult debate -f plik.py \"problem\"`\n"
-                        f"  Domyślne role: `--analyst claude-code/opus --arbiter claude-code/opus`\n"
-                        f"  Advocate i Critic dobieraj wg potrzeb spośród: `openai/gpt-5-codex`, `deepseek/deepseek-r1`, `google/gemini-2.5-pro`\n"
-                        f'  Przykład: `consult debate "problem" --analyst claude-code/opus --advocate openai/gpt-5-codex --critic deepseek/deepseek-r1 --arbiter claude-code/opus`\n'
+                        f"Consult external AI models: `consult \"question\"`\n"
+                        f"Specific model: `consult -m <model_id> \"question\"` — ALWAYS check available models first: `consult models`\n"
+                        f"Model names are FULL IDs with provider prefix, e.g. `google/gemini-2.5-pro`, `openai/gpt-5-codex`, `deepseek/deepseek-r1` — DO NOT abbreviate.\n"
+                        f"Attach a file as context: `consult -f file.py \"question\"`\n"
+                        f"Tribunal — multi-model AI debate: `consult debate \"problem\"`\n"
+                        f"  File context: `consult debate -f file.py \"problem\"`\n"
+                        f"  Default roles: `--analyst claude-code/opus --arbiter claude-code/opus`\n"
+                        f"  Pick Advocate and Critic as needed from: `openai/gpt-5-codex`, `deepseek/deepseek-r1`, `google/gemini-2.5-pro`\n"
+                        f'  Example: `consult debate "problem" --analyst claude-code/opus --advocate openai/gpt-5-codex --critic deepseek/deepseek-r1 --arbiter claude-code/opus`\n'
                         f"\n"
                         f"## Task management (CLI tool)\n\n"
                         f"IMPORTANT: Use the `tasks` CLI tool via Bash — NOT the built-in TaskCreate/TaskUpdate/TaskList tools.\n"

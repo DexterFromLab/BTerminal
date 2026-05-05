@@ -1,0 +1,346 @@
+# German translations for bterminal package.
+# Copyright (C) 2026 Bartosz Czarnota
+# This file is distributed under the same license as the bterminal package.
+# Automatically generated, 2026.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version:  bterminal\n"
+"Report-Msgid-Bugs-To: bartoszczarnota1@gmail.com\n"
+"POT-Creation-Date: 2026-05-05 13:51+0200\n"
+"PO-Revision-Date: 2026-05-05 13:39+0200\n"
+"Last-Translator: Automatically generated\n"
+"Language: de\n"
+"Language-Team: none\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.10.3\n"
+
+#: bterminal/license.py:109
+#, python-brace-format
+msgid "BTerminal — License Agreement ({context})"
+msgstr "BTerminal — Lizenzvereinbarung ({context})"
+
+#: bterminal/license.py:117
+msgid "Decline and exit"
+msgstr "Ablehnen und beenden"
+
+#: bterminal/license.py:118
+msgid "Accept"
+msgstr "Annehmen"
+
+#: bterminal/license.py:131
+msgid "Please read the license agreement below."
+msgstr "Bitte lesen Sie die untenstehende Lizenzvereinbarung."
+
+#: bterminal/license.py:132
+msgid "You must accept these terms to use BTerminal."
+msgstr "Sie müssen diese Bedingungen akzeptieren, um BTerminal zu nutzen."
+
+#: bterminal/license.py:156
+msgid "I have read and accept the license terms."
+msgstr "Ich habe die Lizenzbedingungen gelesen und akzeptiere sie."
+
+#: bterminal/license.py:187
+msgid "First run"
+msgstr "Erster Start"
+
+#: bterminal/license.py:202
+msgid "Update"
+msgstr "Aktualisierung"
+
+#: bterminal/updater.py:57
+msgid "No repository"
+msgstr "Kein Repository"
+
+#: bterminal/updater.py:60
+msgid "Cannot check for updates — repository directory not found."
+msgstr "Kann nicht auf Updates prüfen — Repository-Verzeichnis nicht gefunden."
+
+#: bterminal/updater.py:107
+msgid "Checking for updates"
+msgstr "Suche nach Updates"
+
+#: bterminal/updater.py:122 bterminal/updater.py:146
+#, python-brace-format
+msgid "Connecting to server... ({seconds}s)"
+msgstr "Verbinde mit Server... ({seconds}s)"
+
+#: bterminal/ui/dialogs/options.py:154 bterminal/updater.py:131
+msgid "Cancel"
+msgstr "Abbrechen"
+
+#: bterminal/updater.py:142
+msgid "Cannot check for updates — timed out."
+msgstr "Update-Prüfung fehlgeschlagen — Zeitüberschreitung."
+
+#: bterminal/updater.py:143 bterminal/updater.py:160 bterminal/updater.py:165
+#: bterminal/updater.py:339
+msgid "Close"
+msgstr "Schließen"
+
+#: bterminal/updater.py:159
+msgid "BTerminal is up to date. No new updates."
+msgstr "BTerminal ist aktuell. Keine neuen Updates."
+
+#: bterminal/updater.py:164
+msgid "Cannot check for updates."
+msgstr "Update-Prüfung fehlgeschlagen."
+
+#: bterminal/updater.py:221
+msgid "New BTerminal version"
+msgstr "Neue BTerminal-Version"
+
+#: bterminal/updater.py:241
+msgid "A new version of BTerminal is available"
+msgstr "Eine neue Version von BTerminal ist verfügbar"
+
+#: bterminal/updater.py:271
+msgid "Show errata"
+msgstr "Errata anzeigen"
+
+#: bterminal/updater.py:272
+msgid "Not now"
+msgstr "Nicht jetzt"
+
+#: bterminal/updater.py:273
+msgid "Update and restart"
+msgstr "Aktualisieren und neu starten"
+
+#: bterminal/updater.py:334
+msgid "BTerminal errata"
+msgstr "BTerminal Errata"
+
+#: bterminal/updater.py:349
+msgid "No errata entries."
+msgstr "Keine Errata-Einträge."
+
+#: bterminal/updater.py:399
+msgid "BTerminal update"
+msgstr "BTerminal-Aktualisierung"
+
+#: bterminal/updater.py:408
+msgid "Update in progress…"
+msgstr "Aktualisierung läuft…"
+
+#: bterminal/updater.py:488
+msgid ""
+"The new version of BTerminal could not be installed.\n"
+"\n"
+"The previous version was restored automatically — BTerminal continues to work normally."
+msgstr ""
+"Die neue Version von BTerminal konnte nicht installiert werden.\n"
+"\n"
+"Die vorherige Version wurde automatisch wiederhergestellt — BTerminal funktioniert normal weiter."
+
+#: bterminal/updater.py:494
+#, python-brace-format
+msgid ""
+"Installation failed and no previous version is available to restore.\n"
+"\n"
+"Details:\n"
+"{details}"
+msgstr ""
+"Installation fehlgeschlagen und keine vorherige Version zum Wiederherstellen verfügbar.\n"
+"\n"
+"Details:\n"
+"{details}"
+
+#: bterminal/ui/sidebar.py:75
+#, python-brace-format
+msgid "{app} Sessions"
+msgstr "{app}-Sitzungen"
+
+#: bterminal/ui/panels/git.py:373
+#, python-brace-format
+msgid "{n} file"
+msgid_plural "{n} files"
+msgstr[0] "{n} Datei"
+msgstr[1] "{n} Dateien"
+
+#: bterminal/ui/panels/git.py:382
+msgid "Working tree clean"
+msgstr "Arbeitsverzeichnis sauber"
+
+#: bterminal/ui/dialogs/options.py:40
+msgid "Appearance"
+msgstr "Erscheinungsbild"
+
+#: bterminal/ui/dialogs/options.py:45
+msgid "Theme:"
+msgstr "Design:"
+
+#: bterminal/ui/dialogs/options.py:47
+msgid "Dark (Mocha)"
+msgstr "Dunkel (Mocha)"
+
+#: bterminal/ui/dialogs/options.py:48
+msgid "Light (Latte)"
+msgstr "Hell (Latte)"
+
+#: bterminal/ui/dialogs/options.py:53
+msgid "Terminal font:"
+msgstr "Terminal-Schriftart:"
+
+#: bterminal/ui/dialogs/options.py:65
+msgid "Terminal"
+msgstr "Terminal"
+
+#: bterminal/ui/dialogs/options.py:70
+msgid "Default shell:"
+msgstr "Standard-Shell:"
+
+#: bterminal/ui/dialogs/options.py:73
+#, python-brace-format
+msgid "default ({shell})"
+msgstr "Standard ({shell})"
+
+#: bterminal/ui/dialogs/options.py:84
+msgid "General"
+msgstr "Allgemein"
+
+#: bterminal/ui/dialogs/options.py:90
+msgid "Check for updates at startup:"
+msgstr "Beim Start auf Updates prüfen:"
+
+#: bterminal/ui/dialogs/options.py:104
+msgid "Language"
+msgstr "Sprache"
+
+#: bterminal/ui/dialogs/options.py:110
+msgid "Interface language:"
+msgstr "Oberflächensprache:"
+
+#: bterminal/ui/dialogs/options.py:115
+msgid "Auto-detect"
+msgstr "Automatisch erkennen"
+
+#: bterminal/ui/dialogs/options.py:130
+msgid "Restart BTerminal to apply language change."
+msgstr "BTerminal neu starten, um die Sprachänderung zu übernehmen."
+
+#: bterminal/ui/dialogs/options.py:145
+msgid "Tell the AI agent which language I speak"
+msgstr "Dem KI-Agenten mitteilen, welche Sprache ich spreche"
+
+#: bterminal/ui/dialogs/options.py:155
+msgid "Save"
+msgstr "Speichern"
+
+#: bterminal/ctx/dialogs.py:163
+msgid "Project context has not been collected yet. Gather context as you work and save important findings: ctx set <project> <key> <value>"
+msgstr "Der Projektkontext wurde noch nicht gesammelt. Sammeln Sie Kontext während der Arbeit und speichern Sie wichtige Erkenntnisse: ctx set <project> <key> <value>"
+
+#: bterminal/app.py:189 bterminal/app.py:221 bterminal/app.py:462
+msgid "Sessions"
+msgstr "Sitzungen"
+
+#: bterminal/app.py:192 bterminal/app.py:221 bterminal/app.py:463
+msgid "Ctx"
+msgstr "Ctx"
+
+#: bterminal/app.py:195 bterminal/app.py:222 bterminal/app.py:464
+msgid "Consult"
+msgstr "Consult"
+
+#: bterminal/app.py:198 bterminal/app.py:222 bterminal/app.py:465
+msgid "Tasks"
+msgstr "Aufgaben"
+
+#: bterminal/app.py:201 bterminal/app.py:223
+msgid "Memory"
+msgstr "Speicher"
+
+#: bterminal/app.py:204 bterminal/app.py:223
+msgid "Skills"
+msgstr "Skills"
+
+#: bterminal/app.py:207 bterminal/app.py:224
+msgid "Files"
+msgstr "Dateien"
+
+#: bterminal/app.py:210 bterminal/app.py:224 bterminal/app.py:466
+msgid "Plugins"
+msgstr "Plugins"
+
+#: bterminal/app.py:242
+msgid "Hide sidebar (Ctrl+B)"
+msgstr "Seitenleiste ausblenden (Strg+B)"
+
+#: bterminal/app.py:319
+msgid "Show sidebar (Ctrl+B)"
+msgstr "Seitenleiste anzeigen (Strg+B)"
+
+#: bterminal/app.py:329
+msgid "Toggle light/dark theme"
+msgstr "Helles/dunkles Design umschalten"
+
+#: bterminal/app.py:335
+msgid "Show Git panel (Ctrl+G)"
+msgstr "Git-Panel anzeigen (Strg+G)"
+
+#: bterminal/app.py:384
+#, python-brace-format
+msgid ""
+"The file ~/.config/bterminal/options.json was corrupted — default settings have been restored.\n"
+"\n"
+"Cause: {exc_type}: {exc}"
+msgstr ""
+"Die Datei ~/.config/bterminal/options.json war beschädigt — Standardeinstellungen wurden wiederhergestellt.\n"
+"\n"
+"Ursache: {exc_type}: {exc}"
+
+#: bterminal/app.py:446
+msgid "New local tab"
+msgstr "Neuer lokaler Tab"
+
+#: bterminal/app.py:447
+msgid "New SSH session…"
+msgstr "Neue SSH-Sitzung…"
+
+#: bterminal/app.py:448
+msgid "New Claude Code session…"
+msgstr "Neue Claude-Code-Sitzung…"
+
+#: bterminal/app.py:450
+msgid "Options…"
+msgstr "Einstellungen…"
+
+#: bterminal/app.py:452
+msgid "Quit"
+msgstr "Beenden"
+
+#: bterminal/app.py:453
+msgid "File"
+msgstr "Datei"
+
+#: bterminal/app.py:457
+msgid "Toggle sidebar (Ctrl+B)"
+msgstr "Seitenleiste umschalten (Strg+B)"
+
+#: bterminal/app.py:458
+msgid "Toggle Git panel (Ctrl+G)"
+msgstr "Git-Panel umschalten (Strg+G)"
+
+#: bterminal/app.py:459
+msgid "Toggle theme ☀/🌙"
+msgstr "Design umschalten ☀/🌙"
+
+#: bterminal/app.py:475
+msgid "View"
+msgstr "Ansicht"
+
+#: bterminal/app.py:479
+msgid "Check for updates"
+msgstr "Auf Updates prüfen"
+
+#: bterminal/app.py:480
+msgid "Errata…"
+msgstr "Errata…"
+
+#: bterminal/app.py:482
+msgid "Tools"
+msgstr "Werkzeuge"
+

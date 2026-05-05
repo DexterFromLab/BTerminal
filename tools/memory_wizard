@@ -1087,8 +1087,9 @@ def main():
 
     print("\n[5/5] Applying changes…")
     counts = _execute(project, accepted)
-    if not auto_mode:
-        _save_config(project, inject_every, refresh_every)
+    # Always persist config — even in --auto mode the row needs to exist
+    # so terminal_tab.py:_maybe_inject_rules picks up non-default intervals.
+    _save_config(project, inject_every, refresh_every)
 
     _print_summary(project, accepted, counts, inject_every, refresh_every)
     if not auto_mode:
