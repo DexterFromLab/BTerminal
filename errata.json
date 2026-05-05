@@ -1,5 +1,23 @@
 [
   {
+    "date": "2026-05-05",
+    "message": "BTerminal v1.3.0 — multi-language UI in 13 languages (English, Polski, Deutsch, Español, Français, Italiano, Português, Русский, Українська, Čeština, 中文, 日本語, 한국어), license-acceptance dialog enforced at first launch and before each update, and live language switching from Options without restart. The user can also opt the AI agent into responding in their language. Recommended: run install.sh to compile the new translation catalogs, then accept the localised license on next launch.",
+    "changes": [
+      "feat(i18n): GNU gettext infrastructure with 13 languages, live UI refresh on language change (no restart), Auto-detect resolution from LANGUAGE/LANG env, plural-form support (3-form for Slavic, 2-form for Romance/Germanic, 1-form for CJK)",
+      "feat(license): per-language license dialog (defaults/license/LICENSE.<lang>.md) with SHA-256 acceptance hash, re-prompt on language switch or LICENSE update; declining first run quits the app, declining before update aborts the update",
+      "feat(options): Language dropdown (Auto-detect / English / Polski / + 11 more) and 'Tell the AI agent which language I speak' toggle in Options",
+      "feat(ai-prompt): when user language != English, append a one-liner hint to the Claude Code intro prompt so the agent responds in the user's language; AI prompt itself stays English by policy",
+      "feat(install): install.sh now compiles every locale/<lang>/LC_MESSAGES/*.po -> .mo via msgfmt; locale/ live-symlinked into install dir",
+      "feat(tools): tools/i18n.sh (extract / update / compile / new <lang> / stats), tools/check_i18n.py (AST-based audit for hardcoded PL outside _()), tools/_fill_translations.py (batch fill of all 12 language dicts)",
+      "fix(updater): show_error_dialog import was missing in updater.py since the v1.2.0 refactor — would have crashed on a failed update",
+      "fix(idle): Claude Code idle detection refactored from re-armed timer to poll-based (1 s tick, >=2 s quiet OR >=60 s hard cap) — spinner ticks no longer starve injection scheduling",
+      "fix(memory): Memory panel reloads rules config on project switch (not only on reload)",
+      "fix(tasks): cmd_done in tools/tasks now also DELETEs from task_claims so the table doesn't grow per finished task",
+      "fix(memory_wizard): persist config in --auto mode so non-default inject/refresh intervals are picked up by terminal_tab",
+      "test: 314 tests covering hash logic, locale resolution chain, catalog completeness per language, plural-form correctness per category, license attribution preserved per language, live-refresh registry semantics"
+    ]
+  },
+  {
     "date": "2026-05-04",
     "message": "BTerminal v1.2.0 — refactor of the bterminal.py monolith (11758 lines) into a Python package bterminal/ (~30 modules). Entry point is now `python -m bterminal`. Full regression test suite: 207 tests, ~26s locally. No functional changes for the user — this is an architectural refactor that opens the door for provider abstraction (Copilot/Aider) and easier testability.",
     "changes": [
