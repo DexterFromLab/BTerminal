@@ -308,6 +308,13 @@ find_copilot_bin_loose() {
 # failing because do_fix hit `validate_npm_cli: command not found`
 # at line 504 when fixing AI provider symlinks.
 validate_npm_cli() {
+    # #111: every external probe below (readlink, head, stat, the binary
+    # itself) inherits this shell's cwd via fork(). When wizard spawns
+    # install.sh --fix from cwd=$INSTALL_DIR and a later phase renames
+    # INSTALL_DIR aside, the next subprocess fork prints "current working
+    # directory was deleted" before --version even runs. cd is a bash
+    # builtin so it works even when cwd is dangling.
+    cd /tmp 2>/dev/null || cd /
     local bin_path="$1"
     local friendly="$2"
     if [[ -z "$bin_path" ]]; then
@@ -475,6 +482,11 @@ do_uninstall() {
 }
 
 do_fix() {
+    # #111: wizard may spawn install.sh --fix with cwd=$INSTALL_DIR,
+    # which gets temporarily renamed during the repair flow (BACKUP_DIR
+    # rotation if we fall through to full install). Move to a stable cwd
+    # so every external probe below inherits a valid one via fork().
+    cd /tmp 2>/dev/null || cd /
     echo "=== BTerminal fix (repair broken install) ==="
     echo ""
     status_json fix installing 5 "Starting repair"
@@ -727,6 +739,9 @@ echo ""
 # Returns: 0 if usable, 1 if missing, 2 if not executable (chmod missing),
 #          3 if stub (fake binary placeholder), 4 if --version errored.
 validate_npm_cli() {
+    # #111: see forward declaration above — neutralize a possibly-deleted
+    # cwd before any subprocess fork.
+    cd /tmp 2>/dev/null || cd /
     local bin_path="$1"
     local friendly="$2"
     if [[ -z "$bin_path" ]]; then
