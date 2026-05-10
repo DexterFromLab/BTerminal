@@ -423,8 +423,37 @@ def _show_errata_dialog(window, errata):
 
 
 def _restart_bterminal():
-    """Restart the BTerminal process in-place."""
-    os.execv(sys.executable, [sys.executable] + sys.argv)
+    """Restart the BTerminal process in-place.
+
+    BUG#15: cannot simply re-exec `sys.executable + sys.argv` — when
+    BTerminal was launched via `python -m bterminal`, sys.argv[0] is
+    set to the FULL path of the package's __main__.py file (PEP 338).
+    Running `python <that_path>` directly puts the bterminal/ dir
+    itself onto sys.path[0], which means `from bterminal import …`
+    inside __main__.py fails with ModuleNotFoundError.
+
+    Correct restart paths, in order of preference:
+      1. The launcher symlink (~/.local/bin/bterminal) — its wrapper
+         shell script `cd`s into the install dir + execs
+         `python3 -m bterminal`, so the package is importable.
+      2. Fallback: `python3 -m bterminal` directly. Requires that
+         the install dir is on sys.path AND the package is found
+         there. Works when launcher is missing but the install is
+         in the standard location.
+
+    sys.argv[1:] (user flags, e.g. --debug-rest) is passed through
+    in both cases. sys.argv[0] is dropped — it points at the
+    module file, not a re-launch entry point.
+    """
+    launcher = os.path.expanduser("~/.local/bin/bterminal")
+    user_args = sys.argv[1:]
+    if os.path.isfile(launcher) or os.path.islink(launcher):
+        os.execv(launcher, [launcher] + user_args)
+    else:
+        # Fallback — works as long as bterminal package is importable
+        # from CWD or PYTHONPATH (true for the standard install dir).
+        os.execv(sys.executable,
+                 [sys.executable, "-m", "bterminal"] + user_args)
 
 
 # ─── V1: dirty-tree-safe git pull (pure helpers, testable) ─────────────────

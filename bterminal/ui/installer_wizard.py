@@ -93,8 +93,11 @@ def build_install_argv(repo_dir: str, selected_deps: list,
     non-empty so legacy 'all auto deps' behaviour stays available
     via an empty pick page.
 
-    action: "install" (default), "fix", or "uninstall". Each maps
-            to the corresponding install.sh flag.
+    action: "install" (default), "update", "fix", or "uninstall".
+            install + update both run the full installer (phase [5/7]
+            always rsyncs the bterminal/ package, so a plain install
+            on an existing setup IS effectively an update). fix only
+            validates symlinks/binaries. uninstall removes everything.
     purge:  only relevant for action="uninstall" — passes --purge
             to also drop user configs + DB.
     """
@@ -106,27 +109,40 @@ def build_install_argv(repo_dir: str, selected_deps: list,
         argv.append("--uninstall")
         if purge:
             argv.append("--purge")
+    # action="install" or "update" → no extra flag (default install).
+    # The wizard distinguishes the two for UX (radio label + button
+    # text) but the underlying install.sh phase is identical.
     if no_sudo:
         argv.append("--no-sudo")
-    if action == "install" and selected_deps:
+    if action in ("install", "update") and selected_deps:
         # CSV with no embedded commas (dep names are simple identifiers)
         argv.extend(["--selected", ",".join(selected_deps)])
     return argv
 
 
-def detect_install_state(home: Optional[Path] = None) -> str:
+def detect_install_state(home: Optional[Path] = None,
+                          repo_dir: Optional[Path] = None) -> str:
     """Pure helper: classify current BTerminal install on disk.
 
     Args:
         home: base HOME path. Defaults to $HOME — the override is for
               unit tests that simulate broken state in tmp_path.
+        repo_dir: repo working tree path. Defaults to REPO_DIR from
+              config (or auto-detect from script location). Used only
+              for the "installed vs installed_outdated" comparison
+              (BUG#16): compare the SHA-256 of repo's __main__.py to
+              the installed copy.
 
-    Returns: "not_installed" | "installed" | "broken"
+    Returns: "not_installed" | "installed" | "installed_outdated" | "broken"
       - not_installed: no launcher AND no install dir
       - installed: launcher + pkg __init__.py + companion CLIs
                    (ctx/tasks/consult/memory_wizard/claude_log) all
                    present AND any installed AI CLI binary passes
-                   validate (no stub markers, executable)
+                   validate (no stub markers, executable) AND the
+                   installed __main__.py content matches the repo copy.
+      - installed_outdated: like "installed", but the installed
+                   __main__.py content DIFFERS from repo's copy —
+                   wizard should offer Update (BUG#16 fix).
       - broken: any subset of the above is missing/corrupt — covers
                 5 known break scenarios from task #143:
                   (a) launcher symlink missing
@@ -208,6 +224,35 @@ def detect_install_state(home: Optional[Path] = None) -> str:
         except (OSError, ValueError):
             pass
 
+    # BUG#16: "installed_outdated" — installed package files differ
+    # from repo. Compare __main__.py SHA-256 as a cheap proxy for
+    # full content equality (any code edit touches imports/state, so
+    # __main__.py is virtually never identical between releases).
+    repo_main = None
+    if repo_dir is not None:
+        repo_main = Path(repo_dir) / "bterminal" / "__main__.py"
+    else:
+        # Auto-detect: walk up from this module to find a sibling
+        # install.sh. installer_wizard.py is bterminal/ui/installer_wizard.py
+        # so repo root is parents[2].
+        candidate = Path(__file__).resolve().parents[2]
+        if (candidate / "install.sh").is_file() \
+           and (candidate / "bterminal" / "__main__.py").is_file():
+            repo_main = candidate / "bterminal" / "__main__.py"
+    if repo_main and repo_main.is_file() and pkg_init.is_file():
+        installed_main = install_dir / "bterminal" / "__main__.py"
+        if installed_main.is_file():
+            try:
+                import hashlib
+                h_repo = hashlib.sha256(
+                    repo_main.read_bytes()).hexdigest()
+                h_installed = hashlib.sha256(
+                    installed_main.read_bytes()).hexdigest()
+                if h_repo != h_installed:
+                    return "installed_outdated"
+            except OSError:
+                pass  # read failure — fall through to "installed"
+
     return "installed"
 
 
@@ -254,6 +299,10 @@ class InstallerWizard(Gtk.Dialog):
     # shows when navigating Next/Back. Indices map into PAGES.
     PAGES_BY_ACTION = {
         "install":   (0, 1, 2, 4, 5),       # full 5-page flow
+        "update":    (0, 4, 5),              # welcome → progress → summary
+                                              # (BUG#16: skip inventory/picks
+                                              # — user just wants the existing
+                                              # install refreshed with new code)
         "fix":       (0, 4, 5),              # welcome → progress → summary
         "uninstall": (0, 3, 4, 5),           # welcome → confirm → progress → summary
     }
@@ -265,6 +314,11 @@ class InstallerWizard(Gtk.Dialog):
             2: "Step 3 of 5: Pick what to install",
             4: "Step 4 of 5: Installing…",
             5: "Step 5 of 5: Summary",
+        },
+        "update": {
+            0: "Step 1 of 3: Welcome — update BTerminal",
+            4: "Step 2 of 3: Updating…",
+            5: "Step 3 of 3: Summary",
         },
         "fix": {
             0: "Step 1 of 3: Welcome — repair existing install",
@@ -388,7 +442,18 @@ class InstallerWizard(Gtk.Dialog):
         elif self._install_state == "installed":
             state_lbl.set_markup(
                 "<small>Detected: BTerminal is <b>already installed</b>"
-                " — choose Fix to validate/repair, or Uninstall to remove.</small>"
+                " and up to date — choose Fix to validate/repair, or "
+                "Uninstall to remove.</small>"
+            )
+        elif self._install_state == "installed_outdated":
+            # BUG#16 fix: installed package differs from repo HEAD.
+            # Offer Update prominently — wizard's Repair button label
+            # also flips to "Update →" when this is the chosen action.
+            state_lbl.set_markup(
+                "<small>Detected: BTerminal is <b>installed but out of"
+                " date</b> — repo has newer files than the installed"
+                " copy. Choose Update to refresh the installation, or"
+                " Fix to only validate symlinks.</small>"
             )
         else:  # broken
             state_lbl.set_markup(
@@ -403,21 +468,35 @@ class InstallerWizard(Gtk.Dialog):
 
         rb_install = Gtk.RadioButton.new_with_label_from_widget(
             None, "Install BTerminal")
+        # BUG#16 fix: dedicated Update radio for "installed_outdated"
+        # state. Wired to action="update" which maps to a plain
+        # install.sh run (phase [5/7] always rsyncs new files).
+        rb_update = Gtk.RadioButton.new_with_label_from_widget(
+            rb_install, "Update BTerminal (refresh installed files)")
         rb_fix = Gtk.RadioButton.new_with_label_from_widget(
             rb_install, "Fix existing install (validate + repair)")
         rb_uninstall = Gtk.RadioButton.new_with_label_from_widget(
             rb_install, "Uninstall BTerminal")
         self._action_radios["install"] = rb_install
+        self._action_radios["update"] = rb_update
         self._action_radios["fix"] = rb_fix
         self._action_radios["uninstall"] = rb_uninstall
 
         # Sensitivity per state
-        rb_install.set_sensitive(self._install_state != "installed")
-        rb_fix.set_sensitive(self._install_state in ("installed", "broken"))
-        rb_uninstall.set_sensitive(self._install_state in ("installed", "broken"))
+        rb_install.set_sensitive(self._install_state == "not_installed"
+                                  or self._install_state == "broken")
+        rb_update.set_sensitive(
+            self._install_state in ("installed", "installed_outdated"))
+        rb_fix.set_sensitive(self._install_state in (
+            "installed", "installed_outdated", "broken"))
+        rb_uninstall.set_sensitive(self._install_state in (
+            "installed", "installed_outdated", "broken"))
 
         # Default selection
-        if self._install_state == "installed":
+        if self._install_state == "installed_outdated":
+            rb_update.set_active(True)
+            self._action = "update"
+        elif self._install_state == "installed":
             rb_fix.set_active(True)
             self._action = "fix"
         else:
@@ -427,6 +506,22 @@ class InstallerWizard(Gtk.Dialog):
         for name, rb in self._action_radios.items():
             rb.connect("toggled", self._on_action_changed, name)
             action_box.pack_start(rb, False, False, 0)
+
+        # BUG#18: when state is "installed_outdated" the wizard was
+        # likely opened because the user wants an update (either via
+        # Tools→Install dependencies after dismissing the auto-update
+        # prompt, or directly). Showing Install (greyed) + Fix +
+        # Uninstall alongside Update is decision-fatigue — Fix can't
+        # refresh files, Install is greyed for installed state, and
+        # Uninstall is a destructive sidetrack. Hide the noise and
+        # let the user proceed straight to Update.
+        if self._install_state == "installed_outdated":
+            rb_install.hide()
+            rb_install.set_no_show_all(True)
+            rb_fix.hide()
+            rb_fix.set_no_show_all(True)
+            rb_uninstall.hide()
+            rb_uninstall.set_no_show_all(True)
 
         page.pack_start(action_frame, False, False, 0)
 
@@ -984,6 +1079,7 @@ class InstallerWizard(Gtk.Dialog):
         if is_last_input:
             label = {
                 "install": "Install →",
+                "update": "Update →",
                 "fix": "Repair →",
                 "uninstall": "Uninstall →",
             }.get(self._action, "Next →")
@@ -1118,6 +1214,7 @@ class InstallerWizard(Gtk.Dialog):
         else:
             done_label = {
                 "install": "Installation finished.",
+                "update": "Update finished.",
                 "fix": "Repair finished.",
                 "uninstall": "Uninstall finished.",
             }.get(self._action, "Done.")
