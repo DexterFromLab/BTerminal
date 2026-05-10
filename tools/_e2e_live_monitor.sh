@@ -1,26 +1,25 @@
 #!/usr/bin/env bash
-# tools/_e2e_live_monitor.sh — live screenshot+log monitor for VM E2E tests
-# (#156)
+# tools/_e2e_live_monitor.sh — event-driven live screenshot+log monitor
+# for VM E2E tests (#156, action-driven snapshots since task #1).
 #
-# Spawns two background loops while a test driver runs interactively:
-#   1. gnome-screenshot on VM every $INTERVAL sec → scp pull →
-#      SESSION_DIR/frames/NNNN.png
-#   2. tail -F install.log + bterminal.log on VM →
-#      SESSION_DIR/log-stream.txt
+# Spawns one background loop (log tail) while a test driver runs.
+# Screenshots are NEVER polled — every snapshot comes from an explicit
+# `tag NAME` call, which executes ssh+gnome-screenshot on demand.
 #
-# Lets the test runner observe what's happening WITHOUT predefined sleep
-# checkpoints — bug screenshots are caught even when the test path is
-# ambiguous. The runner can also call `tag NAME` to record a symlink to
-# the latest frame at a known UI state (login screen, dialog open, etc.).
+# Why action-driven: the previous polling implementation produced
+# thousands of duplicate frames (5279 PNGs / 990MB in smoke-logs/) even
+# during idle stretches of a test. With per-action tags the evidence
+# bundle has exactly N PNGs where N = number of meaningful state
+# changes — every screenshot maps to a documented step.
 #
 # Designed to compose with the per-menu E2E scripts (#157-#161): each
 # of those wraps its xdotool flow with `start`, `tag`s key states, then
 # `stop`s — leaving an evidence bundle in smoke-logs/live-monitor/<ts>/.
 #
 # Usage:
-#   ./tools/_e2e_live_monitor.sh start         # spawn monitors → echo SESSION_DIR
-#   ./tools/_e2e_live_monitor.sh tag NAME      # snapshot+symlink latest frame
-#   ./tools/_e2e_live_monitor.sh stop          # kill monitors, finalize
+#   ./tools/_e2e_live_monitor.sh start         # spawn log-tail loop → echo SESSION_DIR
+#   ./tools/_e2e_live_monitor.sh tag NAME      # ssh+gnome-screenshot NOW → tag-HHMMSS-NAME.png
+#   ./tools/_e2e_live_monitor.sh stop          # kill log loop, finalize
 #   ./tools/_e2e_live_monitor.sh status        # is a monitor running?
 #   ./tools/_e2e_live_monitor.sh --help        # this help
 #
@@ -28,11 +27,13 @@
 #   VM_HOST            — ssh host (default: vm-test)
 #   VM_LOG_DIR         — where to tail logs from on VM
 #                        (default: /home/michal/.local/share/bterminal/logs)
-#   MONITOR_INTERVAL_SEC — frame grab interval (default: 2)
+#   MONITOR_INTERVAL_SEC — DEPRECATED, kept only for back-compat with
+#                          older callers. Action-driven mode ignores it.
 #   STATE_FILE         — PID/dir state (default: /tmp/_e2e_monitor.state)
 #   SESSION_DIR_ROOT   — output root (default: smoke-logs/live-monitor)
-#   MONITOR_NO_VM      — set to 1 to skip ssh (pin-test mode); only writes
-#                        the session structure, doesn't grab frames.
+#   MONITOR_NO_VM      — set to 1 to skip ssh (pin-test mode); `tag`
+#                        writes empty-placeholder PNGs so test fixtures
+#                        can assert file presence without ssh.
 
 set -uo pipefail
 
@@ -61,36 +62,13 @@ case "$cmd" in
 
         echo "SESSION_DIR=$SESSION_DIR" > "$STATE_FILE"
 
+        # FRAMES_PID is always 0 in action-driven mode — there is no
+        # background screenshot loop to track. Kept in state for
+        # back-compat with `status` consumers and existing pin tests.
         if [[ "$NO_VM" != "1" ]]; then
-            # Background screenshot loop. Each iteration:
-            #   1. ssh into VM, gnome-screenshot to /tmp on VM
-            #   2. cat the bytes back over stdout → local frame file
-            # Errors swallowed so transient ssh hiccups don't kill the loop.
-            # Crucial: `setsid -f` forks then detaches into its own
-            # session, severing all inherited fds. Without -f a
-            # $(start) substitution would wait on the bg process's
-            # stdout (still tied to the substitution pipe).
-            # We write PIDs to a small marker file so we can read
-            # them back without command substitution timing.
-            FRAMES_MARKER="$SESSION_DIR/.frames.pid"
+            # Only the log-tail loop runs in the background; screenshots
+            # are taken on-demand by `tag` (no polling).
             LOGS_MARKER="$SESSION_DIR/.logs.pid"
-
-            setsid -f bash -c '
-                STATE_FILE="$1" SESSION_DIR="$2" VM_HOST="$3" INTERVAL="$4"
-                MARKER="$5"
-                echo "$$" > "$MARKER"
-                i=0
-                while [[ -f "$STATE_FILE" ]]; do
-                    i=$((i+1))
-                    fname=$(printf "%04d.png" "$i")
-                    ssh -n -o ConnectTimeout=3 -o BatchMode=yes "$VM_HOST" \
-                        "DISPLAY=:0 gnome-screenshot --display=:0 -f /tmp/_mon.png 2>/dev/null && cat /tmp/_mon.png" \
-                        > "$SESSION_DIR/frames/$fname" 2>>"$SESSION_DIR/monitor.log" \
-                        || rm -f "$SESSION_DIR/frames/$fname"
-                    sleep "$INTERVAL"
-                done
-            ' _ "$STATE_FILE" "$SESSION_DIR" "$VM_HOST" "$INTERVAL" "$FRAMES_MARKER" \
-                </dev/null >/dev/null 2>>"$SESSION_DIR/monitor.log"
 
             setsid -f bash -c '
                 VM_HOST="$1" VM_LOG_DIR="$2" SESSION_DIR="$3" MARKER="$4"
@@ -101,14 +79,12 @@ case "$cmd" in
             ' _ "$VM_HOST" "$VM_LOG_DIR" "$SESSION_DIR" "$LOGS_MARKER" \
                 </dev/null >/dev/null 2>>"$SESSION_DIR/monitor.log"
 
-            # Wait briefly for markers (forked child writes its PID).
             for _ in 1 2 3 4 5; do
-                [[ -f "$FRAMES_MARKER" && -f "$LOGS_MARKER" ]] && break
+                [[ -f "$LOGS_MARKER" ]] && break
                 sleep 0.1
             done
-            FRAMES_PID="$(cat "$FRAMES_MARKER" 2>/dev/null || echo 0)"
             LOGS_PID="$(cat "$LOGS_MARKER" 2>/dev/null || echo 0)"
-            echo "FRAMES_PID=$FRAMES_PID" >> "$STATE_FILE"
+            echo "FRAMES_PID=0" >> "$STATE_FILE"
             echo "LOGS_PID=$LOGS_PID" >> "$STATE_FILE"
         else
             echo "FRAMES_PID=0" >> "$STATE_FILE"
@@ -129,24 +105,30 @@ case "$cmd" in
         # shellcheck disable=SC1090
         source "$STATE_FILE"
         ts="$(date +%H%M%S)"
-        # Find latest NON-EMPTY frame (skip in-progress writes from
-        # the bg ssh redirect — those appear with size 0 until ssh
-        # finishes streaming).
-        latest=""
-        # shellcheck disable=SC2012
-        for f in $(ls -1t "$SESSION_DIR/frames/"*.png 2>/dev/null); do
-            if [[ -s "$f" ]]; then
-                latest="$f"
-                break
-            fi
-        done
         out="$SESSION_DIR/tag-${ts}-${name}.png"
-        if [[ -n "$latest" ]]; then
-            cp "$latest" "$out"
-        else
+        if [[ "$NO_VM" == "1" ]]; then
+            # Pin-test mode: write empty placeholder so callers can
+            # assert is_file() without ssh dependencies.
             : > "$out"
-            echo "[$(date '+%H:%M:%S')] tag $name: no non-empty frame yet" \
+            echo "[$(date '+%H:%M:%S')] tag $name (NO_VM placeholder)" \
                 >> "$SESSION_DIR/monitor.log"
+        else
+            # Action-driven snapshot — ssh into VM, grab one fresh
+            # frame, stream bytes back. This is the ONLY place a
+            # screenshot is taken; no polling buffer involved.
+            if ssh -n -o ConnectTimeout=5 -o BatchMode=yes "$VM_HOST" \
+                "DISPLAY=:0 gnome-screenshot --display=:0 -f /tmp/_tag.png 2>/dev/null && cat /tmp/_tag.png" \
+                > "$out" 2>>"$SESSION_DIR/monitor.log" && [[ -s "$out" ]]; then
+                : # success
+            else
+                rm -f "$out"
+                echo "[$(date '+%H:%M:%S')] tag $name: ssh+gnome-screenshot failed" \
+                    >> "$SESSION_DIR/monitor.log"
+                # Still emit the path so callers can detect the failure
+                # via missing file rather than parsing stderr.
+                echo "$out" >&2
+                exit 1
+            fi
         fi
         echo "$out"
         ;;

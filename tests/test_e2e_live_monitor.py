@@ -186,3 +186,76 @@ def test_script_documents_required_helpers_for_e2e_runners():
         assert token in src, f"missing env var doc/use: {token}"
     for cmd in ("start", "stop", "tag", "status"):
         assert cmd in src, f"missing subcommand: {cmd}"
+
+
+# ── Acceptance: action-driven mode produces exactly N PNGs for N tags ──
+
+
+def test_acceptance_5_tags_produce_exactly_5_pngs(monitor_env):
+    """Pin (task #1 acceptance): start + 5×tag + stop must leave
+    EXACTLY 5 PNG files in SESSION_DIR. The previous polling
+    implementation would accumulate hundreds of frames in `frames/`
+    even during idle stretches; action-driven mode is event-only."""
+    start_res = _run(["start"], monitor_env)
+    session_dir = Path(start_res.stdout.strip())
+    assert session_dir.is_dir()
+
+    for label in ("step1", "step2", "step3", "step4", "step5"):
+        res = _run(["tag", label], monitor_env)
+        assert res.returncode == 0, f"tag {label} failed: {res.stderr}"
+
+    _run(["stop"], monitor_env)
+
+    # Count ALL PNG files anywhere under session_dir — frames/ subdir,
+    # top-level, anywhere. The contract is: 5 tags → 5 PNGs total.
+    all_pngs = list(session_dir.rglob("*.png"))
+    assert len(all_pngs) == 5, (
+        f"expected exactly 5 PNGs after 5 tags, got {len(all_pngs)}: "
+        f"{[p.relative_to(session_dir) for p in all_pngs]}"
+    )
+
+    # All of them must be tag-prefixed (no anonymous polling frames).
+    tag_pngs = list(session_dir.glob("tag-*.png"))
+    assert len(tag_pngs) == 5, (
+        f"all 5 PNGs must be tag-* files at SESSION_DIR root; "
+        f"got tag-files={len(tag_pngs)}"
+    )
+
+
+def test_no_polling_loop_in_start_block():
+    """Pin: the `start` block must NOT contain a screenshot polling
+    loop. Specifically: no `while ... gnome-screenshot ...; sleep`
+    pattern that would accumulate frames over time."""
+    src = SCRIPT.read_text()
+    # Slice the `start)` case body up to the next `;;`
+    start_idx = src.find("    start)")
+    assert start_idx >= 0
+    end_idx = src.find("        ;;", start_idx)
+    start_body = src[start_idx:end_idx]
+
+    # Must NOT contain a `while [[ -f "$STATE_FILE" ]]` followed by
+    # gnome-screenshot — that's the old polling pattern.
+    assert "gnome-screenshot" not in start_body, (
+        "`start` must not invoke gnome-screenshot — screenshots "
+        "are taken on-demand by `tag` only"
+    )
+    # The `start` block also must not `sleep "$INTERVAL"` in any
+    # surviving loop.
+    assert 'sleep "$INTERVAL"' not in start_body, (
+        "polling sleep removed; INTERVAL is documented as deprecated"
+    )
+
+
+def test_tag_block_invokes_gnome_screenshot_directly():
+    """Pin: `tag` is the new home of ssh+gnome-screenshot. Failure to
+    move the call here would mean either (a) tag still relies on a
+    polling buffer, or (b) screenshots were silently dropped."""
+    src = SCRIPT.read_text()
+    tag_idx = src.find("    tag)")
+    assert tag_idx >= 0
+    end_idx = src.find("        ;;", tag_idx)
+    tag_body = src[tag_idx:end_idx]
+    assert "gnome-screenshot" in tag_body, (
+        "`tag` must do its own ssh+gnome-screenshot now — "
+        "no buffer to copy from"
+    )
