@@ -469,6 +469,47 @@ class TerminalTab(Gtk.Box):
         )
 
     @staticmethod
+    def _materialize_rules_file(config):
+        """BUG#3: materialize ctx rules to a per-spawn temp file and
+        store path in `config["provider_options"]["rules_file"]`.
+        Provider's build_argv may surface this as --read so the LLM
+        sees rules from prompt #1 instead of waiting for the periodic
+        PTY-feed inject_every threshold."""
+        project_dir = config.get("project_dir")
+        if not project_dir:
+            return
+        try:
+            from bterminal.ctx.helpers import _resolve_ctx_project_name
+            proj = _resolve_ctx_project_name(project_dir)
+        except Exception:
+            return
+        if not proj:
+            return
+        try:
+            result = subprocess.run(
+                ["ctx", "rules", "inject", proj],
+                capture_output=True, text=True, timeout=5,
+            )
+            block = result.stdout.strip()
+        except Exception:
+            return
+        if not block:
+            return
+        # Per-spawn temp file. PID + monotonic time = unique enough.
+        import tempfile
+        fd, path = tempfile.mkstemp(
+            prefix=f"_bt_aider_rules_{os.getpid()}_",
+            suffix=".md",
+        )
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(block)
+        except Exception:
+            return
+        opts = config.setdefault("provider_options", {})
+        opts["rules_file"] = path
+
+    @staticmethod
     def _build_spawn_script(provider, config, intro_prompt):
         """Pure function: bash -c script for spawning an AI CLI binary.
 
@@ -481,6 +522,7 @@ class TerminalTab(Gtk.Box):
         sudo (legacy top-level OR provider_options.sudo) AND (b) the
         provider declares supports_sudo capability.
         """
+        TerminalTab._materialize_rules_file(config)
         argv = provider.build_argv(config, intro_prompt)
         if not argv:
             # Provider couldn't build argv (typically: binary missing).

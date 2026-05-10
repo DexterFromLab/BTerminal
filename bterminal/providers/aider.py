@@ -191,11 +191,29 @@ class AiderProvider(AIProvider):
         if opts.get("skip_permissions") and self.capabilities.skip_permissions:
             argv.extend(self._argv_spec.get("yolo", ["--yes-always"]))
 
+        # BUG#3 fix: per-spawn rules file (materialized by spawn helper
+        # in terminal_tab.py:_materialize_rules_file) is surfaced as
+        # readonly via --read. This puts active ctx rules into the
+        # LLM's context from prompt #1, not after PTY-feed threshold.
+        rules_file = opts.get("rules_file")
+        if rules_file and os.path.isfile(rules_file):
+            argv.extend(["--read", rules_file])
+
         # Project dir is passed as a positional argument (aider's cwd
         # detection); BT also chdir's the spawn so this is belt-and-
         # suspenders. project_dir absent → aider uses spawn cwd.
         project_dir = config.get("project_dir")
         if project_dir:
+            # BUG#2 fix: aider 0.86.2 does NOT auto-discover AIDER.md
+            # from cwd. We explicitly attach the project's context
+            # file as readonly via --read so the LLM sees conventions
+            # from prompt #1. AIDER.md preferred (provider-native);
+            # CLAUDE.md fallback (mirrored by task #113 bootstrap).
+            for ctx_fname in ("AIDER.md", "CLAUDE.md"):
+                ctx_path = os.path.join(project_dir, ctx_fname)
+                if os.path.isfile(ctx_path):
+                    argv.extend(["--read", ctx_path])
+                    break  # one ctx file is enough — typically symlinked
             argv.append(project_dir)
 
         # NOTE intro_prompt intentionally not appended — see docstring.
