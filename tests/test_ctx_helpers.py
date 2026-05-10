@@ -31,13 +31,43 @@ def test_smart_project_name_walks_up_for_generic_names(tmp_path):
     assert ctx_helpers._smart_project_name(str(src)) == "MyRepo"
 
 
-def test_smart_project_name_no_git_root_uses_parent(tmp_path):
-    """Generic basename without .git anywhere → use parent dir name."""
+def test_smart_project_name_no_git_root_keeps_basename(tmp_path):
+    """Bug #56 (2026-05-07): when basename is in _GENERIC_SUBDIRS but
+    NO .git is found anywhere up the tree, trust the basename.
+
+    Previously this case fell through to the parent dir name, which
+    was wrong for users who organize their work in folders like
+    ~/Dokumenty/test, ~/Desktop/scratch — the parent dir is just a
+    home-directory bucket, not a project. The 'walk up to project
+    root' heuristic only makes sense WITH a git anchor; otherwise
+    we have nothing meaningful to walk up to."""
     parent = tmp_path / "Container"
     parent.mkdir()
     src = parent / "src"
     src.mkdir()
-    assert ctx_helpers._smart_project_name(str(src)) == "Container"
+    assert ctx_helpers._smart_project_name(str(src)) == "src"
+
+
+def test_smart_project_name_users_documents_test_returns_test(tmp_path):
+    """Direct regression for user's screenshot (2026-05-07): picking
+    ~/Dokumenty/test as project_dir prefilled "Dokumenty" in the ctx
+    wizard. After fix it must prefill "test" (the actual chosen folder)."""
+    docs = tmp_path / "Dokumenty"
+    docs.mkdir()
+    test_dir = docs / "test"
+    test_dir.mkdir()
+    assert ctx_helpers._smart_project_name(str(test_dir)) == "test"
+
+
+def test_smart_project_name_generic_basename_inside_git_walks_to_repo(tmp_path):
+    """Sanity: the existing walk-up-to-git heuristic still works when
+    a .git anchor is present. ~/projects/myrepo/tests → 'myrepo'."""
+    repo = tmp_path / "myrepo"
+    repo.mkdir()
+    (repo / ".git").mkdir()
+    tests_dir = repo / "tests"
+    tests_dir.mkdir()
+    assert ctx_helpers._smart_project_name(str(tests_dir)) == "myrepo"
 
 
 def test_smart_project_name_strips_trailing_slash(tmp_path):

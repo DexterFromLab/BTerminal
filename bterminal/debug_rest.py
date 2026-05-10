@@ -340,9 +340,14 @@ def _route_tabs(h: BTerminalDebugHandler) -> None:
             if not isinstance(tab, TerminalTab):
                 continue
             entry = {"idx": idx, "title": tab.get_label()}
-            if getattr(tab, "claude_config", None):
+            if getattr(tab, "ai_config", None):
                 entry["type"] = "claude"
-                entry["claude_config_name"] = tab.claude_config.get("name")
+                entry["claude_config_name"] = tab.ai_config.get("name")
+                # Task #65 (2026-05-07): provider name explicit in
+                # payload so tests / external tooling don't have to
+                # parse emoji prefix from title (which is gone after
+                # the SVG-pixbuf migration).
+                entry["provider"] = tab.ai_config.get("provider", "claude")
             elif getattr(tab, "session", None):
                 entry["type"] = "ssh"
                 entry["session_name"] = tab.session.get("name")
@@ -493,31 +498,156 @@ def _route_post_tabs_local(h: BTerminalDebugHandler) -> None:
     h._send_json(200, {"ok": True, "idx": new_idx})
 
 
-def _route_post_tabs_claude(h: BTerminalDebugHandler) -> None:
-    body = h._read_json_body()
-    if body is None:
-        return
-    config_name = body.get("config_name")
-    if not isinstance(config_name, str) or not config_name:
-        h._send_error(400, "'config_name' required (string)")
-        return
-    enabled_override = body.get("enabled_plugins")
+def _open_ai_tab_by_name(
+    h: BTerminalDebugHandler,
+    config_name: str,
+    enabled_override,
+    *,
+    require_provider: str | None = None,
+) -> None:
+    """Shared logic for /api/tabs/ai/{provider} (legacy /api/tabs/claude
+    removed in T4.6.1).
+
+    require_provider=None:  match by name only (kept for the path where
+                            no provider filter is desired — currently no
+                            public route uses it after T4.6.1).
+    require_provider=str:   strict match — name AND provider must equal.
+    """
     app = h.server.app
 
     def _open():
-        for cfg in app.claude_manager.all():
-            if cfg.get("name") == config_name:
-                config = dict(cfg)
-                if isinstance(enabled_override, list):
-                    config["enabled_plugins"] = enabled_override
-                app.open_claude_tab(config)
-                return ("ok", app.notebook.get_current_page())
+        for cfg in app.ai_manager.all():
+            if cfg.get("name") != config_name:
+                continue
+            if require_provider is not None:
+                cfg_provider = cfg.get("provider", "claude")
+                if cfg_provider != require_provider:
+                    continue
+            config = dict(cfg)
+            if isinstance(enabled_override, list):
+                config["enabled_plugins"] = enabled_override
+            app.open_claude_tab(config)
+            return ("ok", app.notebook.get_current_page())
         return ("not_found", None)
 
     status, idx = _via_glib_idle(_open, timeout=10.0)
     if status == "not_found":
-        h._send_error(404, f"claude session '{config_name}' not found")
+        provider_label = require_provider if require_provider else "claude"
+        h._send_error(404, f"{provider_label} session '{config_name}' not found")
         return
+    h._send_json(200, {"ok": True, "idx": idx})
+
+
+# T4.6.1 (2026-05-07): the legacy `/api/tabs/claude` route was removed.
+# Use POST /api/tabs/ai/claude instead. Pre-T2.8 REST consumers will
+# now get 404 from the route dispatcher — by design; the new endpoint
+# is provider-aware and a strict drop-in replacement.
+
+
+def _route_post_tabs_ai(h: BTerminalDebugHandler, provider: str) -> None:
+    """T2.8: provider-aware tab open.
+
+    POST /api/tabs/ai/{provider} with body {"config_name": "..."}.
+    Strict match — session must have both `name == config_name` and
+    `provider == {path-arg}`. Validates the provider exists in the
+    registry first so an unknown provider returns 404 (not 500).
+    """
+    body = h._read_json_body()
+    if body is None:
+        return
+
+    # Validate the path-arg provider against the registry.
+    from bterminal.providers import get_registry
+    try:
+        get_registry().get(provider)
+    except KeyError:
+        h._send_error(404, f"unknown provider '{provider}'")
+        return
+
+    config_name = body.get("config_name")
+    if not isinstance(config_name, str) or not config_name:
+        h._send_error(400, "'config_name' required (string)")
+        return
+
+    _open_ai_tab_by_name(
+        h, config_name, body.get("enabled_plugins"),
+        require_provider=provider,
+    )
+
+
+def _route_post_sidebar_context_menu(
+    h: BTerminalDebugHandler, session_id: str,
+) -> None:
+    """Task #63: REST analog of right-click → 'Run as ▸' / 'Resume'.
+
+    POST /api/sidebar/context_menu/<session_id>?action=<action>[&provider=<name>]
+
+    Actions:
+      run_as: requires &provider=<name>, must differ from saved
+              session.provider; spawns a one-off tab with the override.
+      resume: gated on session.provider's capabilities.resume_flag;
+              spawns with force_options={'resume': True}.
+
+    Always preserves the saved session JSON (open_ai_tab_one_off
+    deep-clones); body returns {'ok': true, 'idx': <new_tab_idx>}.
+    """
+    app = h.server.app
+
+    # Resolve session by id first — 404 if unknown (uniform across actions).
+    session = app.ai_manager.get(session_id)
+    if session is None:
+        h._send_error(404, f"AI session '{session_id}' not found")
+        return
+
+    action = h._query.get("action", [None])[0]
+    if action not in ("run_as", "resume"):
+        h._send_error(
+            400, "query 'action' must be 'run_as' or 'resume'",
+        )
+        return
+
+    if action == "run_as":
+        provider = h._query.get("provider", [None])[0]
+        if not provider:
+            h._send_error(400, "'run_as' requires query 'provider'")
+            return
+        from bterminal.providers import get_registry
+        try:
+            get_registry().get(provider)
+        except KeyError:
+            h._send_error(404, f"unknown provider '{provider}'")
+            return
+        saved_provider = session.get("provider", "claude")
+        if provider == saved_provider:
+            h._send_error(
+                400,
+                f"'run_as' provider matches saved session.provider "
+                f"({saved_provider!r}) — use Connect instead",
+            )
+            return
+
+        def _do_run_as():
+            app.open_ai_tab_one_off(session, override_provider=provider)
+            return ("ok", app.notebook.get_current_page())
+        status, idx = _via_glib_idle(_do_run_as, timeout=10.0)
+        h._send_json(200, {"ok": True, "idx": idx})
+        return
+
+    # action == "resume"
+    from bterminal.ui.sidebar import session_supports_resume_menu
+    from bterminal.providers import get_registry
+    if not session_supports_resume_menu(session, get_registry()):
+        h._send_error(
+            400,
+            f"session provider {session.get('provider', 'claude')!r} "
+            f"has no resume capability",
+        )
+        return
+
+    def _do_resume():
+        app.open_ai_tab_one_off(session, force_options={"resume": True})
+        return ("ok", app.notebook.get_current_page())
+    status, idx = _via_glib_idle(_do_resume, timeout=10.0)
     h._send_json(200, {"ok": True, "idx": idx})
 
 
@@ -596,7 +726,7 @@ def _route_post_tab_simulate_prompt(h: BTerminalDebugHandler, idx: str) -> None:
         tab = _resolve_tab(app, idx_int)
         if tab is None or not isinstance(tab, TerminalTab):
             return ("not_found", None)
-        if tab._stats_bar is None or tab.claude_config is None:
+        if tab._stats_bar is None or tab.ai_config is None:
             return ("not_claude_tab", None)
         tab._stats_bar.increment_prompt()
         tab._maybe_inject_rules()
@@ -726,6 +856,192 @@ def _route_post_toggle_git_panel(h: BTerminalDebugHandler) -> None:
 
     visible = _via_glib_idle(_toggle)
     h._send_json(200, {"ok": True, "visible": visible})
+
+
+def _route_window_state(h: BTerminalDebugHandler) -> None:
+    """GET /api/window/state — reads sidebar/git/theme state without
+    mutating anything. Used by View menu E2E (#158) for assertions."""
+    app = h.server.app
+
+    def _gather():
+        return {
+            "sidebar_visible": bool(getattr(app, "_sidebar_visible", False)),
+            "sidebar_active_panel": (
+                app.sidebar_stack.get_visible_child_name()
+                if hasattr(app, "sidebar_stack") and app.sidebar_stack else None
+            ),
+            "git_visible": bool(getattr(app, "_git_visible", False)),
+            "theme": _OPTIONS.get("theme"),
+        }
+
+    h._send_json(200, _via_glib_idle(_gather))
+
+
+def _route_sessions_list(h: BTerminalDebugHandler) -> None:
+    """GET /api/sessions — read-only inventory of saved sidebar entries
+    (SSH + AI). Used by Sidebar CRUD E2E (#160) to verify Add/Edit/
+    Delete operations.
+    """
+    app = h.server.app
+
+    def _gather():
+        ssh = []
+        for s in app.session_manager.all():
+            ssh.append({
+                "id": s.get("id"),
+                "name": s.get("name", ""),
+                "host": s.get("host", ""),
+                "user": s.get("username", ""),
+                "folder": s.get("folder", ""),
+            })
+        ai = []
+        for s in app.ai_manager.all():
+            ai.append({
+                "id": s.get("id"),
+                "name": s.get("name", ""),
+                "provider": s.get("provider", "claude"),
+                "project_dir": s.get("project_dir", ""),
+                "folder": s.get("folder", ""),
+            })
+        return {"ssh": ssh, "ai": ai}
+
+    h._send_json(200, _via_glib_idle(_gather))
+
+
+def _route_session_add_ssh(h: BTerminalDebugHandler) -> None:
+    """POST /api/sessions/ssh — programmatic equivalent of
+    File → New SSH session → fill form → OK. Used by Sidebar CRUD
+    E2E (#160) where xdotool typing into a Gtk.SpinButton (Port)
+    discards the text. Body: {"name", "host", optionally "user"/"port"}."""
+    body = h._read_json_body()
+    if body is None:
+        return
+    name = body.get("name", "")
+    host = body.get("host", "")
+    if not name or not host:
+        h._send_error(400, "'name' and 'host' required")
+        return
+    app = h.server.app
+    entry = {
+        "name": name,
+        "host": host,
+        "port": int(body.get("port", 22)),
+        "username": body.get("user", ""),
+        "key": body.get("key", ""),
+        "folder": body.get("folder", ""),
+    }
+
+    def _add():
+        return app.session_manager.add(entry)
+
+    saved = _via_glib_idle(_add)
+    h._send_json(200, {"ok": True, "id": saved.get("id"), "kind": "ssh"})
+
+
+def _route_session_add_ai(h: BTerminalDebugHandler) -> None:
+    """POST /api/sessions/ai — programmatic equivalent of
+    File → New Claude Code session → fill form → OK. Body:
+    {"name", optionally "provider", "project_dir", "folder",
+     "custom_prompt"}. Defaults to provider=claude."""
+    body = h._read_json_body()
+    if body is None:
+        return
+    name = body.get("name", "")
+    if not name:
+        h._send_error(400, "'name' required")
+        return
+    provider = body.get("provider", "claude")
+    app = h.server.app
+    # #108: reject duplicate session names. UI dialog (claude_code.py)
+    # validates same way; REST endpoint must enforce same constraint
+    # so test fixtures don't accidentally bypass uniqueness.
+    for existing in app.ai_manager.all():
+        if existing.get("name", "").strip() == name:
+            h._send_error(
+                409, f"session name '{name}' already in use"
+            )
+            return
+    entry = {
+        "name": name,
+        "provider": provider,
+        "project_dir": body.get("project_dir", ""),
+        "folder": body.get("folder", ""),
+        "custom_prompt": body.get("custom_prompt", ""),
+        "resume": False,
+        "skip_permissions": False,
+        "permissions_allowlist": "",
+    }
+
+    def _add():
+        return app.ai_manager.add(entry)
+
+    saved = _via_glib_idle(_add)
+    # #113: parity with sidebar.py's UI flow — when the user adds an AI
+    # session through Add ▼ → Claude Code → OK, sidebar.py:701 runs
+    # _run_ctx_wizard_if_needed which materializes CLAUDE.md and the
+    # per-provider mirrors (AGENTS.md, AIDER.md). REST callers (test
+    # fixtures, automation) deserve the same on-disk scaffolding.
+    # Headless: skip the GUI wizard, write the default template +
+    # mirror via bootstrap_provider_context_files.
+    if entry["project_dir"]:
+        try:
+            from bterminal.ctx.helpers import (
+                bootstrap_provider_context_files,
+            )
+            bootstrap_provider_context_files(entry["project_dir"])
+        except Exception:
+            pass  # non-fatal; session itself was saved successfully
+
+    h._send_json(200, {"ok": True, "id": saved.get("id"), "kind": "ai"})
+
+
+def _route_session_update(
+    h: BTerminalDebugHandler, session_id: str,
+) -> None:
+    """POST /api/sessions/<session_id>/update — programmatic equivalent
+    of Edit dialog → change field → OK. Body: dict of fields to merge
+    into the existing session JSON."""
+    body = h._read_json_body()
+    if body is None:
+        return
+    app = h.server.app
+
+    def _update():
+        # Try AI manager first, then SSH.
+        if app.ai_manager.get(session_id):
+            return ("ai", app.ai_manager.update(session_id, body))
+        if app.session_manager.get(session_id):
+            return ("ssh", app.session_manager.update(session_id, body))
+        return (None, None)
+
+    kind, updated = _via_glib_idle(_update)
+    if kind is None:
+        h._send_error(404, f"session '{session_id}' not found")
+        return
+    h._send_json(200, {"ok": True, "kind": kind, "id": session_id})
+
+
+def _route_session_delete(
+    h: BTerminalDebugHandler, session_id: str,
+) -> None:
+    """POST /api/sessions/<session_id>/delete — remove sidebar entry by
+    id. Searches both SSH and AI managers."""
+    app = h.server.app
+
+    def _delete():
+        if app.session_manager.get(session_id):
+            app.session_manager.delete(session_id)
+            return "ssh"
+        if app.ai_manager.get(session_id):
+            app.ai_manager.delete(session_id)
+            return "ai"
+        return None
+
+    kind = _via_glib_idle(_delete)
+    if kind is None:
+        h._send_error(404, f"session '{session_id}' not found")
+        return
+    h._send_json(200, {"ok": True, "deleted": session_id, "kind": kind})
 
 
 def _route_post_quit(h: BTerminalDebugHandler) -> None:
@@ -977,6 +1293,8 @@ def _start_debug_rest_server(app, token: str) -> BTerminalDebugServer:
         (r"/api/tabs/(?P<idx>\d+)/plugins", _route_get_tab_plugins),
         (r"/api/tabs/(?P<idx>\d+)/intro_prompt", _route_get_tab_intro_prompt),
         (r"/api/window/screenshot", _route_window_screenshot),
+        (r"/api/window/state", _route_window_state),
+        (r"/api/sessions", _route_sessions_list),
         (r"/api/debug/log", _route_debug_log),
         (r"/api/debug/feed_log", _route_feed_log),
     ])
@@ -985,7 +1303,10 @@ def _start_debug_rest_server(app, token: str) -> BTerminalDebugServer:
     ])
     server._routes_post.extend([
         (r"/api/tabs/local", _route_post_tabs_local),
-        (r"/api/tabs/claude", _route_post_tabs_claude),
+        # T2.8: provider-aware. Path-arg `provider` matches a-zA-Z0-9_-
+        # (subset of route regex) — validated against the registry inside
+        # the handler so unknown providers return 404 rather than 500.
+        (r"/api/tabs/ai/(?P<provider>[\w-]+)", _route_post_tabs_ai),
         (r"/api/tabs/(?P<idx>\d+)/close", _route_post_tab_close),
         (r"/api/tabs/(?P<idx>\d+)/feed", _route_post_tab_feed),
         (r"/api/tabs/(?P<idx>\d+)/key", _route_post_tab_key),
@@ -995,10 +1316,17 @@ def _start_debug_rest_server(app, token: str) -> BTerminalDebugServer:
         (r"/api/window/sidebar/show", _route_post_sidebar_show),
         (r"/api/window/toggle_git_panel", _route_post_toggle_git_panel),
         (r"/api/quit", _route_post_quit),
+        (r"/api/sessions/ssh", _route_session_add_ssh),
+        (r"/api/sessions/ai", _route_session_add_ai),
+        (r"/api/sessions/(?P<session_id>[\w.-]+)/update", _route_session_update),
+        (r"/api/sessions/(?P<session_id>[\w.-]+)/delete", _route_session_delete),
         (r"/api/plugins/(?P<name>[\w.-]+)/enable", _route_post_plugin_enable),
         (r"/api/plugins/(?P<name>[\w.-]+)/disable", _route_post_plugin_disable),
         (r"/api/sidecars/(?P<name>[\w.-]+)/start", _route_post_sidecar_start),
         (r"/api/sidecars/(?P<name>[\w.-]+)/stop", _route_post_sidecar_stop),
+        # Task #63: REST analog of right-click → 'Run as ▸' / 'Resume'.
+        (r"/api/sidebar/context_menu/(?P<session_id>[\w.-]+)",
+         _route_post_sidebar_context_menu),
     ])
     thread = threading.Thread(target=server.serve_forever, daemon=True, name="debug-rest")
     thread.start()

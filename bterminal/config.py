@@ -33,7 +33,12 @@ APP_VERSION = _read_version()
 
 CONFIG_DIR = os.path.expanduser("~/.config/bterminal")
 SESSIONS_FILE = os.path.join(CONFIG_DIR, "sessions.json")
+# Legacy filename — read once for migration into AI_SESSIONS_FILE (T1.7),
+# then renamed to .bak. Kept as a constant so the migrator can find it.
 CLAUDE_SESSIONS_FILE = os.path.join(CONFIG_DIR, "claude_sessions.json")
+# Canonical AI session store (T1.7) — provider-aware (`provider` field
+# per session) so Claude / Copilot / future CLIs share one file.
+AI_SESSIONS_FILE = os.path.join(CONFIG_DIR, "ai_sessions.json")
 CONSULT_CONFIG_FILE = os.path.join(CONFIG_DIR, "consult.json")
 PLUGINS_DIR = os.path.join(CONFIG_DIR, "plugins")
 PLUGINS_CONFIG_FILE = os.path.join(CONFIG_DIR, "plugins.json")
@@ -79,6 +84,24 @@ _OPTIONS_DEFAULTS = {
     # appends a one-liner telling the agent which language the user
     # prefers. User can disable in the Options dialog.
     "tell_ai_language": True,
+    # Task #70 (2026-05-07): when True (default), pasting an image
+    # into an AI tab whose provider declares an `image_paste_template`
+    # wraps the path with that template (e.g. "User provided image:
+    # {path} — Read it before responding." for Copilot). When False,
+    # bare path always — provider templates ignored. Per-session
+    # override via provider_options.image_paste_template (#71)
+    # supersedes both this toggle and the provider default.
+    "image_paste_hint_enabled": True,
+    # Task #7 (#79 in audit doc): per-provider local model overrides.
+    # Map provider name → ollama tag (e.g. "aider" → "qwen2.5-coder:1.5b").
+    # Empty dict = use provider's capabilities.default_model. Edited
+    # via OptionsDialog 'Set as default' button.
+    "default_local_model_for_provider": {},
+    # Task #11 (#83): names of bundled providers the user has hidden
+    # via OptionsDialog → AI Providers. Disabled providers stay
+    # registered (existing sessions keep working) but vanish from the
+    # Add AI Session dropdown. Empty list = all enabled (default).
+    "disabled_providers": [],
 }
 
 # R1.f2: gdy load wykryje uszkodzony JSON, zapisuje tu wyjątek żeby

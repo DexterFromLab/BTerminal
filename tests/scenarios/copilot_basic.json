@@ -1,0 +1,13 @@
+{
+  "_doc": "Minimal scenario for E2E smoke — mock GitHub Copilot CLI responds to common patterns. Copilot-styled prompt prefix '> ' on default replies; ignores TUI-safe flags (--no-mouse / --plain-diff / --no-color) since mock_ai_cli treats unknown argv as positional and logs them.",
+  "responses": [
+    {"trigger": "(?i)^hello", "reply": "Hi! GitHub Copilot CLI ready."},
+    {"trigger": "(?i)^hi", "reply": "Hi there — Copilot here."},
+    {"trigger": "(?i)\\bping\\b", "reply": "pong"},
+    {"trigger": "\\[AUTO-TRIGGER\\]", "reply": "Acknowledged. Picking up the task.", "delay_ms": 50},
+    {"trigger": "(?i)^/usage", "reply": "premium requests used: 0 (mock)"},
+    {"trigger": "(?i)^/login", "reply": "Already authenticated (mock token)"}
+  ],
+  "default_reply": "> {input}",
+  "exit_on": "^/exit$|^/quit$"
+}

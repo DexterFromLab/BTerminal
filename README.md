@@ -2,9 +2,66 @@
 
 A GTK 3 terminal emulator built for developers who work with SSH servers and Claude Code. Combines session management, macro automation, a persistent context database, multi-model AI consultation, task orchestration, git awareness, a skills library and a global rules system in a single window. Ships with Catppuccin Mocha (dark) and Latte (light) themes.
 
-**Current release: v1.3.0**
+**Current release: v1.3.1**
 
 ![BTerminal](screenshot.png)
+
+## What's new in v1.3.1
+
+Stability & UX bug-fix release driven by manual QA in Polish locale.
+All fixes verified end-to-end on real VM with semi-automatic UI driver
+(`tools/_e2e_ui_driver.sh` + `tools/_e2e_atspi_driver.py`).
+
+**Aider provider:**
+- Aider session now receives `--read AIDER.md` (or `CLAUDE.md` fallback)
+  at spawn, so the LLM sees project conventions from prompt #1 instead
+  of relying on auto-discovery (which aider 0.86.2 does not do).
+- Active ctx rules are materialized to a per-spawn temp file and
+  passed via `--read` — rules reach the LLM context immediately
+  rather than waiting for the periodic PTY-feed threshold.
+
+**Pull Ollama model dialog:**
+- Curated dropdown of 7 recommended tags (qwen2.5-coder, deepseek-coder-v2,
+  codellama, llama3.1, qwen2.5, llava) plus free-form Entry for new
+  releases.
+- "Browse all models on ollama.com →" link button.
+- Warning dialog before pulling models below 3 B parameters (qwen 0.5b
+  cannot follow Aider's edit format).
+- Pull failure messages now stripped of ANSI cursor sequences and
+  mapped to short Polish text (`Model 'X' nie istnieje w bibliotece
+  Ollama. Sprawdź pisownię na ollama.com/library.` etc.) instead of
+  multi-line stderr dumps.
+
+**Options dialog:**
+- Wider default size (720 × content) + min size 680 × 480 + resizable
+  so longer Polish (and other non-English) labels fit without left-edge
+  cropping.
+- Persistent vertical scrollbar (≥ 12 px) with overlay-scrolling off so
+  expanded `AI providers` + `Local Models` sections stay navigable.
+- Theme combo Save now applies the picked target directly via a new
+  idempotent `_set_theme(target)` setter — fixes the Light → Dark
+  regression after Dark → Light.
+
+**Polish locale completeness:**
+- `Diagnostyka…` / `Zainstaluj zależności…` Tools menu items.
+- `Dodaj wskazówkę vision przy wklejaniu obrazów do sesji Copilot`
+  Options checkbox.
+- `Pobierz model Ollama` / `Pobierz` / `Pobieranie nieudane` /
+  `Model pobrany` Pull dialog strings.
+- `Nowa sesja AI…` File menu (replaces `Nowa sesja Claude Code…` that
+  predated multi-provider work; clicking it opens the same
+  provider-picker the sidebar `Add ▾` uses).
+
+**Test infrastructure:**
+- `tools/_e2e_live_monitor.sh` rewritten to action-driven mode —
+  screenshots taken only on `tag <name>` instead of polling every
+  N seconds. Eliminates thousands of duplicate frames per test run.
+- New `tools/_e2e_atspi_driver.py` accessibility-tree driver lets pin
+  tests click GTK widgets by label (XPath-equivalent) instead of
+  flaky `xdotool mousemove` coordinates.
+- 14 new pytest pin tests under `tests/e2e/test_*` — one per fixed
+  bug — each combining structural source/catalog parsing with
+  behavioural xvfb-driven contract checks.
 
 ## Features
 
@@ -17,15 +74,198 @@ A GTK 3 terminal emulator built for developers who work with SSH servers and Cla
 - Clipboard image detection on paste (`Ctrl+Shift+V`) — saves the image to `copied_images/` in the project directory and pastes the path; right-click option to paste directly into ctx
 - Drag-and-drop file URIs into the terminal to paste paths
 
-### Claude Code
+### AI providers — Claude Code + GitHub Copilot CLI
 
-- Saved Claude Code session configs: project directory, initial prompt, sudo askpass, resume flag, permission skip
-- Sudo elevation via a temporary `SUDO_ASKPASS` helper — password entered once, retried on failure, cleaned up on exit
-- Session metrics bar showing live duration, prompts, responses, tokens, cache hit rate, cost and throughput (parsed from Claude Code JSONL output)
-- **Usage limits bar**: session (5 h) and weekly (7 d) utilization percentages fetched from the Anthropic OAuth API, refreshed every 60 s
-- Emoji-tagged tabs for quick visual identification across multiple sessions
-- "Open with" context menu — open a project directory in File Manager, VS Code, Zed or a custom command
-- **BTerminal environment header** injected into every session's intro prompt so the agent knows it is working inside BTerminal and where to find the README
+BTerminal supports two AI CLI providers per session. Pick one in the
+"Add ▾ → AI Session" dialog dropdown; the choice is stored in
+`~/.config/bterminal/ai_sessions.json` (provider-aware schema R4.2)
+and drives spawn args, visual marker, log parsing, idle detection
+and task auto-trigger.
+
+| Feature | Claude Code (✨) | GitHub Copilot CLI (🤖) | Aider (🦫) |
+|---|---|---|---|
+| Binary | `claude` (npm `@anthropic-ai/claude-code`) | `copilot` (npm `@github/copilot`) | `aider` (pip / pipx `aider-chat`) |
+| Local LLM support | no (Anthropic API) | no (GitHub routing) | **yes** — Ollama / llama.cpp / vLLM via OpenAI-compatible endpoint |
+| Resume / Continue | `--resume` / `--continue` | `--resume` / `--continue` | `--restore-chat-history` |
+| Skip permissions | `--dangerously-skip-permissions` | `--yolo` / `--allow-all` | `--yes-always` |
+| Plan mode | n/a | `--plan` checkbox | n/a |
+| Granular permissions | n/a | `Allowed tools` textarea (`shell(rm)` etc.) | n/a |
+| Sudo askpass | yes | no | no |
+| Session log | `~/.claude/projects/<sanitized>/*.jsonl` | `~/.copilot/session-state/<uuid>/events.jsonl` | `<project_dir>/.aider.chat.history.md` |
+| Session index DB | n/a | `~/.copilot/session-store.db` (FTS5 search) | n/a |
+| Plan-usage gauge | 5 h / 7 d via Anthropic OAuth | n/a (Copilot has no public usage API) | n/a (off-process model dispatch — no per-call cost data) |
+| Context file | `CLAUDE.md` (cumulative) | `AGENTS.md` (auto-symlinked → `CLAUDE.md`) | `AIDER.md` (auto-symlinked → `CLAUDE.md`) |
+| Idle detection | VTE contents-changed | `events.jsonl` tail-f thread | VTE-silent debounce (no ready marker) |
+| Visual marker | ✨ icon, blue accent | 🤖 icon, green accent | 🦫 icon, peach accent |
+| Image paste handling | bare path — Anthropic auto-Reads | prefixed with vision hint (`User provided image: {path} — Read it before responding.`) | prefixed with `User provided image: {path} — describe what you see before editing any code.` (Aider routes to vision-capable model when configured) |
+
+Each tab gets a deterministic provider emoji + brand color in the tab
+label and a tooltip with the provider's long name. Sessions of the
+same name + provider get a `#N` suffix to disambiguate.
+
+Common to both providers (capability-gated in
+`~/.config/bterminal/providers.json`): saved session configs (project
+directory, initial prompt, color, enabled plugins), session metrics
+bar (tokens / cost / response count; Copilot tabs hide the plan-usage
+gauge), periodic rules re-injection, task auto-trigger loop, "Open
+with" context menu, provider-aware intro prompt header.
+
+`memory_wizard` accepts `--provider {claude|copilot|aider}` and
+auto-detects the active provider from `ai_sessions.json` when the flag
+is omitted.
+
+#### Local LLM via Ollama (experimental)
+
+The Aider provider (🦫) routes through any OpenAI-compatible endpoint,
+which means you can run BTerminal entirely against a **local model** —
+zero recurring cost, fully offline once the model is pulled, and no
+data leaves your machine. Default config wires it to Ollama on
+`localhost:11434` with Qwen2.5-Coder 0.5B as the smallest sensible
+starter.
+
+**Hardware matrix** — what fits each tier (Q4 quantized, CPU
+inference unless GPU column applies):
+
+| RAM available | CPU-only | With ≥12GB GPU | With ≥24GB GPU |
+|---|---|---|---|
+| 1–2 GB | `qwen2.5-coder:0.5b` (~400MB) | — | — |
+| 2–4 GB | `tinyllama:1.1b`, `qwen2.5-coder:1.5b` | — | — |
+| 4–8 GB | `phi3:mini`, `qwen2.5-coder:3b`, `llama3.2:3b` | — | — |
+| 8–16 GB | `qwen2.5-coder:7b`, `llama3.1:8b` | + 14B with GPU offload | — |
+| 16–32 GB | (same as 8–16) | `qwen2.5-coder:14b` | — |
+| 32+ GB | (same) | (same) | `qwen2.5-coder:32b` |
+
+`bterminal/system_probe.py:recommend_models(probe_system())` does this
+selection automatically — surfaced in **File → Options → Local Models
+(Ollama)** as a "Fits this machine:" panel. Each suggested model is
+either 💻 (CPU-only fits) or 🚀 (GPU-accelerated tier).
+
+**Quick start**:
+
+```bash
+# 1. Install Ollama (one-time, requires sudo for systemd unit):
+./install.sh --selected llama
+# Or skip the BT installer and use ollama's own:
+curl -fsSL https://ollama.com/install.sh | sh
+
+# 2. Pull the starter model:
+ollama pull qwen2.5-coder:0.5b
+
+# 3. Start the daemon (auto-runs as systemd service after install):
+ollama serve &
+
+# 4. Open BT, "Add ▾ → AI Session", pick provider 🦫 Aider, save.
+# 5. Connect — argv defaults wire it to localhost:11434/v1.
+```
+
+Customize via **File → Options → Local Models (Ollama) → Set as
+default for…** to map any installed model to a specific provider, or
+edit `~/.config/bterminal/providers.json` for permanent overrides
+(`providers.aider.capabilities.default_model` and
+`local_endpoint_url`).
+
+**Troubleshooting**:
+
+- *"Connection refused on :11434"* — daemon not running. `ollama serve`
+  in a terminal, or `systemctl --user status ollama` (the apt install
+  enables a user-scoped service).
+- *"model not found"* — `ollama list` to inventory; `ollama pull
+  <name>` to fetch. Names must match exactly (case-sensitive,
+  including the `:tag` suffix).
+- *Slow inference* (>10s/token on CPU) — pull a smaller model
+  (`:0.5b`/`:1.5b`); or set up GPU offload via Ollama's
+  `OLLAMA_GPU_LAYERS` env var; or run llama.cpp's `llama-server`
+  with `--n-gpu-layers 99` and point Aider's
+  `--openai-api-base` at it.
+- *Aider hangs after first prompt* — Ollama's `--stream` default
+  conflicts with Aider's `--no-stream` (BT default). Either flip
+  Aider to streaming via the session dialog or restart the daemon.
+- *"Unknown provider 'aider'"* in BT after upgrade — old
+  `~/.config/bterminal/providers.json` user override doesn't list
+  the new provider. Either delete that file (lets BT use bundled
+  defaults) or add the `aider` block manually (see `bterminal/
+  providers/defaults.json` for a full reference).
+
+#### Tips: pasting images into AI sessions
+
+Pressing **Ctrl+Shift+V** with an image in the clipboard saves it to
+`<project_dir>/copied_images/<uuid>.png`, registers it in the CTX
+images table (`~/.claude-context/images/<project>/`), and pastes a
+provider-aware reference into the prompt:
+
+- **Claude Code**: bare path. Anthropic's prompt engineering reliably
+  dispatches the `Read` tool on naked file paths, so additional cues
+  would be noise.
+- **GitHub Copilot CLI**: path wrapped with a vision hint
+  (`User provided image: {path} — Read it before responding.`).
+  Copilot's models (claude-sonnet-4-5 / gpt-5 / gemini-3-pro) are
+  vision-capable, but in interactive mode they call `Read` on bare
+  paths only when the surrounding context implies "look at this" —
+  the wrapper makes the dispatch deterministic.
+
+**Customizing**:
+
+- **Global kill-switch** — File → Options → "Auto-add vision hint
+  when pasting images into Copilot sessions". Default ON. Toggling
+  OFF makes BT paste bare paths everywhere (useful if you find the
+  default phrasing too verbose).
+- **Per-session override** — Edit any AI session and fill in the
+  "Image paste template (optional):" Entry. Examples:
+  ```
+  Take a careful look at: {path} — describe UI elements only.
+  ```
+  ```
+  Image attached: {path} — focus on layout, ignore colors.
+  ```
+  The `{path}` placeholder gets substituted with the absolute saved
+  image path. Leave the Entry empty to fall back to the provider
+  default. The session-level override **bypasses** the global kill-
+  switch — explicit user intent always wins.
+- **Provider default** — defined in
+  `~/.config/bterminal/providers.json` under
+  `providers.<name>.argv.image_paste_template` (string with `{path}`
+  placeholder, or `null` for bare path). Override the bundled
+  defaults by adding the file with just the keys you want changed.
+
+GitHub Copilot CLI is **optional** — `install.sh` detects it but never
+auto-installs (Copilot requires an active subscription). Install
+manually with `npm install -g @github/copilot`.
+
+#### Development workflow
+
+**Two-tier deploy** when iterating on BTerminal's own code, so the
+host's running BTerminal isn't perturbed by full reinstalls or
+`xvfb-run` test spawns:
+
+**1. VM testing** (isolated regression, doesn't touch the host BT)
+
+```bash
+./tools/vm_sync.sh           # rsync working tree → VM (no git, no conflicts)
+./tools/vm_test.sh           # sync + ./tools/test_all.sh --quick on VM
+./tools/vm_test.sh -- --slow # full + slow regression on VM
+./tools/vm_install.sh        # sync + ./install.sh on VM
+```
+
+VM target is `Mint_Michal` @ 192.168.0.123 via SSH alias `vm-test`.
+Host's `~/.local/share/bterminal/` stays untouched.
+
+**2. Host single-file deploy** (when VM tests pass and you want the
+running BT to pick up changes without a full `install.sh`):
+
+```bash
+./tools/sync_install.sh           # rsync working tree → ~/.local/share/bterminal/
+./tools/sync_install.sh --check   # dry-run; lists what would change
+./tools/sync_install.sh --target /alt/path  # alternate INSTALL_DIR
+```
+
+`sync_install.sh` skips apt/npm/license/symlinks (handled once by
+`install.sh`); only the `bterminal/` package, CLI tools (`ctx`,
+`consult`, `tasks`, `claude_log`, `memory_wizard`, `mock_ai_cli`)
+and recompiled `.mo` translation catalogs are touched. Restart
+BTerminal to load the new code.
+
+Use `install.sh` only for a fresh install or after system-package
+changes (Node, Python, GTK, gettext).
 
 ### Git Panel
 
@@ -222,6 +462,42 @@ A toggle "Tell the AI agent which language I speak" (default ON) appends
 a one-line hint to the Claude Code session intro prompt so the agent
 responds in the user's language. The AI prompt itself stays English by
 policy — only the hint identifies the user's preferred language.
+
+## Known limitations
+
+### Copilot CLI session: no scrollback / mouse selection of older output
+
+GitHub Copilot CLI v1.0.43 enters **alt-screen mode** on startup
+(`\x1b[?1049h`), like `vim`, `htop`, `less`, `man`, `tmux`, `mc`,
+`btop`, `k9s`, `lazygit`. This is a **standard VT100 / xterm
+behavior**, not a BTerminal limitation:
+
+- BT uses the same VTE engine as `gnome-terminal` — try opening
+  `vim` or `htop` in any terminal emulator and you'll see the same:
+  scrollbar/mouse-wheel can't reach lines older than the current
+  viewport. After exit, the previous main-screen content reappears.
+- Copilot's alt-screen escape is hardcoded in the binary regardless
+  of `TERM` (verified against `dumb`, `ansi`, `vt100`, `vt52`, `linux`,
+  `xterm-mono`) and the `--screen-reader` flag. Nothing the host
+  terminal can do disables it short of stripping escape sequences on
+  a PTY proxy (which would break copilot's rendering).
+- Selection inside the visible viewport works but is wiped on next
+  redraw (Copilot redraws aggressively). Use Copilot's own
+  copy/scroll keybindings inside the TUI for in-session navigation.
+
+**Claude Code uses main-screen** mode, so its output rolls naturally
+into VTE scrollback — the difference between the two providers is
+entirely upstream design choice, not anything BT controls.
+
+**Workaround**: use `Open with… → Editor` from the right-click menu
+to open the project directory; Claude Code session output remains
+fully scrollable in the regular tab.
+
+**Future work**: a transcript-file capture (raw stdout written to
+`~/.local/share/bterminal/transcripts/<session>-<ts>.log` with
+escape codes stripped) would give a post-session searchable log
+without changing in-session UX. Not implemented yet — open an
+issue if you'd like it prioritized.
 
 ## Requirements
 

@@ -298,9 +298,9 @@ class MemoryPanel(Gtk.Box):
         lub ctx alias) → set combo. Tab bez claude_config → no-op
         (zachowaj poprzednio wybrany).
         """
-        if tab is None or getattr(tab, "claude_config", None) is None:
+        if tab is None or getattr(tab, "ai_config", None) is None:
             return
-        project_dir = (tab.claude_config or {}).get("project_dir", "")
+        project_dir = (tab.ai_config or {}).get("project_dir", "")
         if not project_dir:
             return
         # Lazy import — avoid circular
@@ -517,11 +517,11 @@ class MemoryPanel(Gtk.Box):
         if nb is None:
             return
         current = nb.get_nth_page(nb.get_current_page())
-        if not current or not getattr(current, "claude_config", None):
+        if not current or not getattr(current, "ai_config", None):
             show_info_dialog(self.app, "Collect log",
                              "Switch to an active Claude Code tab first.")
             return
-        project_dir = current.claude_config.get("project_dir", "")
+        project_dir = current.ai_config.get("project_dir", "")
         if not project_dir:
             return
 

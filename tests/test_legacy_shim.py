@@ -28,7 +28,7 @@ import bterminal
     "BTerminalPlugin", "SidecarManifest", "SidecarRunner", "SidecarDiscovery",
     "HealthChecker",
     # models
-    "ClaudeSessionManager", "ConsultManager", "JsonListManager", "SessionManager",
+    "AISessionManager", "ConsultManager", "JsonListManager", "SessionManager",
     # ctx
     "_resolve_ctx_project_name", "_smart_project_name", "_collect_claude_log",
     "_is_ctx_available", "_is_ctx_project_registered",

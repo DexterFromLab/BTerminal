@@ -17,11 +17,29 @@ from pathlib import Path
 DB_PATH = Path.home() / ".claude-context" / "context.db"
 
 
+def _ensure_secure_perms(path):
+    """Force 0o600 on the CTX DB file + 0o700 on its parent dir
+    (#129 / audit § 6.7 #30). Mirror of tools/ctx's helper —
+    both CLIs share DB_PATH so either can be the one that
+    creates the file on first ever invocation."""
+    try:
+        os.chmod(path.parent, 0o700)
+    except OSError:
+        pass
+    if path.exists():
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+
+
 def get_db():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(str(DB_PATH))
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA journal_mode=WAL")
+    # #129: tighten perms after sqlite has created the file
+    _ensure_secure_perms(DB_PATH)
     return db
 
 

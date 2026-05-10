@@ -1,7 +1,7 @@
 """BTerminal data models — JSON-backed managers for sessions and Consult config.
 
 JsonListManager is a generic CRUD manager for list-of-dicts persisted as
-JSON. SessionManager and ClaudeSessionManager are SSH/Claude session
+JSON. SessionManager and AISessionManager are SSH/AI session
 stores. ConsultManager handles consult API key + model registry +
 tribunal project presets.
 
@@ -12,15 +12,103 @@ migration etap.
 
 import json
 import os
+import sys
 import tempfile
 import uuid
 
 from bterminal.config import (
+    AI_SESSIONS_FILE,
     CLAUDE_SESSIONS_FILE,
     CONFIG_DIR,
     CONSULT_CONFIG_FILE,
     SESSIONS_FILE,
 )
+
+
+# Top-level keys that historically lived directly on a Claude session;
+# in the R4.2 schema they belong under provider_options. Used by the
+# T1.7 migrator to relocate them.
+_LEGACY_PROVIDER_OPTION_KEYS = (
+    "resume", "continue", "skip_permissions", "sudo", "model",
+)
+
+
+def _migrate_claude_to_ai_sessions(claude_path: str, ai_path: str) -> bool:
+    """One-shot, idempotent migration claude_sessions.json → ai_sessions.json.
+
+    Behavior (R4b):
+      - If ai_path already exists, do nothing (idempotent — second run
+        is a no-op).
+      - If claude_path doesn't exist (fresh install), do nothing.
+      - Otherwise: read legacy file, for each session add
+        provider="claude" and move legacy top-level keys
+        (resume/continue/skip_permissions/sudo/model) into
+        provider_options dict, write atomically to ai_path, then rename
+        the legacy file to claude_path + ".bak" as a safety net.
+
+    Returns True iff a migration ran. Logs the outcome to stderr.
+    """
+    if os.path.exists(ai_path):
+        return False
+    if not os.path.exists(claude_path):
+        return False
+
+    try:
+        with open(claude_path, encoding="utf-8") as fh:
+            sessions = json.load(fh)
+    except (json.JSONDecodeError, OSError) as exc:
+        print(
+            f"[bterminal] WARN: cannot migrate {claude_path}: {exc}",
+            file=sys.stderr,
+        )
+        return False
+
+    if not isinstance(sessions, list):
+        print(
+            f"[bterminal] WARN: {claude_path} is not a JSON list — "
+            f"skipping migration",
+            file=sys.stderr,
+        )
+        return False
+
+    for s in sessions:
+        if not isinstance(s, dict):
+            continue
+        s["provider"] = "claude"
+        opts = dict(s.get("provider_options") or {})
+        for k in _LEGACY_PROVIDER_OPTION_KEYS:
+            if k in s:
+                opts[k] = s.pop(k)
+        if opts:
+            s["provider_options"] = opts
+
+    # Atomic write — tmp file + os.replace so a crash mid-write doesn't
+    # leave a half-written ai_sessions.json that would block re-migration.
+    target_dir = os.path.dirname(ai_path) or "."
+    os.makedirs(target_dir, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=target_dir, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(sessions, fh, indent=2)
+        os.replace(tmp, ai_path)
+    except Exception:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+
+    bak_path = claude_path + ".bak"
+    # If a previous attempt left a .bak around, clobber it — the new
+    # ai_sessions.json is the authoritative state now.
+    if os.path.exists(bak_path):
+        os.unlink(bak_path)
+    os.rename(claude_path, bak_path)
+
+    print(
+        f"[bterminal] Migrated {len(sessions)} session(s) "
+        f"claude_sessions.json → ai_sessions.json (backup: {bak_path})",
+        file=sys.stderr,
+    )
+    return True
 
 
 # ─── JsonListManager + session managers ───────────────────────────────────────
@@ -177,11 +265,48 @@ class SessionPasswordCache:
         return len(self._cache)
 
 
-class ClaudeSessionManager(JsonListManager):
-    """Zarządzanie zapisanymi konfiguracjami Claude Code."""
+class AISessionManager(JsonListManager):
+    """Manager sesji AI CLI (Claude Code, GitHub Copilot, ...).
 
-    def __init__(self):
-        super().__init__(CLAUDE_SESSIONS_FILE)
+    Każda sesja ma pole `provider` wskazujące który CLI ją obsługuje
+    (R4.2). Sesje bez `provider` (legacy z czasów claude_sessions.json)
+    są automatycznie tagowane jako `provider="claude"` przy `load()` —
+    zmiana w pamięci, plik na dysku zostaje nietknięty aż do faktycznej
+    migracji w T1.7 (rename do ai_sessions.json + .bak backup).
+
+    File path (T1.7): canonical `ai_sessions.json`. The first time the
+    manager runs after upgrade, it migrates any pre-existing
+    `claude_sessions.json` (renaming the legacy file to .bak).
+    """
+
+    def __init__(self, filepath=None):
+        if filepath is None:
+            # Run migration BEFORE choosing which file to read. Idempotent
+            # — second/third instantiation is a no-op once ai_sessions.json
+            # exists. Tests pass an explicit filepath and skip this branch.
+            _migrate_claude_to_ai_sessions(
+                CLAUDE_SESSIONS_FILE, AI_SESSIONS_FILE
+            )
+            filepath = AI_SESSIONS_FILE
+        super().__init__(filepath)
+
+    def load(self):
+        super().load()
+        # Silent in-memory migration: tag legacy entries with provider="claude".
+        # File on disk is NOT rewritten — that's T1.7's responsibility.
+        for s in self.sessions:
+            s.setdefault("provider", "claude")
+
+    def validate_entry(self, entry):
+        """Ensure new/edited sessions always carry a provider field."""
+        entry.setdefault("provider", "claude")
+
+
+# T4.6.1 (2026-05-07): the `ClaudeSessionManager` alias was removed.
+# Use `AISessionManager` directly. Pre-T1.6 importers (`from bterminal.models
+# import ClaudeSessionManager`) will raise ImportError — this is intentional;
+# `provider`-aware sessions need the canonical name to make the multi-provider
+# story explicit.
 
 
 # ─── ConsultManager ──────────────────────────────────────────────────────────

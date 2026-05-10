@@ -263,6 +263,10 @@ def bterminal_process():
         "        return b\n\n"
         "def create_plugin(app): return TestPanel()\n"
     )
+    # Pre-accept license so the subprocess doesn't open a modal GTK
+    # dialog and block debug-REST startup (see _subprocess_helpers).
+    from tests._subprocess_helpers import seed_license
+    seed_license(home)
     env = {**os.environ, "HOME": home,
            "BTERMINAL_DEBUG_REST_PORT": str(_TEST_PORT)}
     # Capture stderr to file — runtime errors w GTK callbacks (NameError z

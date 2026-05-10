@@ -35,12 +35,102 @@ from bterminal.config import (
 
 
 # TreeStore columns
-COL_ICON = 0
+COL_ICON = 0       # emoji fallback (str) — empty when COL_PIXBUF set
 COL_NAME = 1
 COL_ID = 2
 COL_TOOLTIP = 3
 COL_COLOR = 4
 COL_WEIGHT = 5
+COL_PIXBUF = 6     # task #57: Pixbuf or None — provider logo (preferred over emoji)
+
+
+# Pixbuf cache so we don't re-decode the SVG for every row refresh.
+_PIXBUF_CACHE: dict = {}
+
+
+def session_supports_resume_menu(session, registry) -> bool:
+    """Pure predicate: should the 'Resume last session' context-menu
+    item be shown for this session? (task #61)
+
+    Gates on `provider.capabilities.resume_flag` so a future provider
+    whose --resume has incompatible semantics can opt out by flipping
+    the capability to false in defaults.json or providers.json — no
+    code change in the sidebar needed.
+
+    Returns False when:
+      - session is empty / has no provider field
+      - the saved provider isn't registered (forward-compat)
+      - the registered provider's capabilities.resume_flag is False
+    """
+    if not session:
+        return False
+    name = session.get("provider", "claude")
+    try:
+        provider = registry.get(name)
+    except KeyError:
+        return False
+    return bool(getattr(provider.capabilities, "resume_flag", False))
+
+
+def build_run_as_menu_items(session, registry):
+    """Pure helper for task #60 'Run as ▸' submenu population.
+
+    Returns a list of (provider_name, label) tuples for every provider
+    in the registry whose name differs from session.provider. Empty
+    list when there are no alternative providers (single-provider
+    install) — caller can omit the submenu in that case.
+
+    Forward-compat: a session whose `provider` field names a provider
+    that isn't (yet) registered still contributes to "every other"
+    correctly because we compare against the saved string, not the
+    resolved provider object.
+    """
+    saved = (session or {}).get("provider", "claude")
+    out = []
+    for p in registry.all():
+        if p.name == saved:
+            continue
+        # Combo-style label: "{long_label}" — icon is rendered by the
+        # caller (Gtk.MenuItem doesn't support pixbuf attributes the
+        # same way TreeView columns do). Keeping it text-only here
+        # makes the helper trivial to unit-test without GTK.
+        out.append((p.name, p.display.long_label))
+    return out
+
+
+def _load_icon_pixbuf(rel_path, size: int = 16):
+    """Load (and cache) an icon by relative path under defaults/.
+
+    Used by both _provider_pixbuf (AI providers) and the local-tab
+    label code (task #65 — SVG icon for the "Local terminal" tab too,
+    not just AI providers). Returns None when the path doesn't
+    resolve or load fails — caller should fall back to emoji.
+    """
+    from bterminal.providers.base import resolve_provider_icon_path
+    abs_path = resolve_provider_icon_path(rel_path)
+    if abs_path is None:
+        return None
+    cache_key = (abs_path, size)
+    if cache_key in _PIXBUF_CACHE:
+        return _PIXBUF_CACHE[cache_key]
+    try:
+        pix = GdkPixbuf.Pixbuf.new_from_file_at_size(abs_path, size, size)
+    except Exception:
+        pix = None
+    _PIXBUF_CACHE[cache_key] = pix
+    return pix
+
+
+def _provider_pixbuf(provider, size: int = 16):
+    """Load (and cache) a provider's icon as a Pixbuf at the given size.
+
+    Returns None when provider.display.icon_path is unset or the file
+    can't be resolved/loaded. Sidebar callers fall back to the emoji
+    column in that case.
+    """
+    return _load_icon_pixbuf(
+        getattr(provider.display, "icon_path", None), size,
+    )
 
 
 def _save_expanded(tree, store, id_col):
@@ -82,14 +172,24 @@ class SessionSidebar(Gtk.Box):
         self.pack_start(header, False, False, 0)
 
         # TreeView
-        self.store = Gtk.TreeStore(str, str, str, str, str, int)  # icon, name, id, tooltip, color, weight
+        # icon (emoji), name, id, tooltip, color, weight, pixbuf (logo, task #57)
+        self.store = Gtk.TreeStore(
+            str, str, str, str, str, int, GdkPixbuf.Pixbuf,
+        )
         self.tree = Gtk.TreeView(model=self.store)
         self.tree.set_headers_visible(False)
         self.tree.set_tooltip_column(COL_TOOLTIP)
         self.tree.set_activate_on_single_click(False)
 
-        # Renderer
+        # Renderer — pixbuf first (provider logo), then emoji fallback,
+        # then name. Rows that don't carry a pixbuf set COL_PIXBUF=None
+        # which CellRendererPixbuf renders as a 0×0 box (invisible);
+        # those rows fall back to the COL_ICON emoji string.
         col = Gtk.TreeViewColumn()
+
+        cell_pixbuf = Gtk.CellRendererPixbuf()
+        col.pack_start(cell_pixbuf, False)
+        col.add_attribute(cell_pixbuf, "pixbuf", COL_PIXBUF)
 
         cell_icon = Gtk.CellRendererText()
         col.pack_start(cell_icon, False)
@@ -122,9 +222,11 @@ class SessionSidebar(Gtk.Box):
         item_terminal = Gtk.MenuItem(label="Local Terminal")
         item_terminal.connect("activate", lambda _: self.app.add_local_tab())
         add_menu.append(item_terminal)
-        item_claude = Gtk.MenuItem(label="Claude Code")
-        item_claude.connect("activate", lambda _: self._on_add_claude())
-        add_menu.append(item_claude)
+        # T2.5+ "AI Session" opens AISessionDialog with a provider
+        # dropdown — user picks Claude / Copilot inside the dialog.
+        item_ai = Gtk.MenuItem(label="AI Session")
+        item_ai.connect("activate", lambda _: self._on_add_claude())
+        add_menu.append(item_ai)
         add_menu.show_all()
         btn_add.set_popup(add_menu)
 
@@ -145,6 +247,14 @@ class SessionSidebar(Gtk.Box):
         self.tree.connect("row-activated", self._on_row_activated)
         self.tree.connect("button-press-event", self._on_button_press)
 
+        # Task #9 (#81): auto-refresh after install completion. The
+        # 'Open With' context-menu items (VS Code / Zed) appear/
+        # disappear based on is_feature_available; invalidate_cache()
+        # → listener → refresh() rebuilds the tree so the next right-
+        # click reflects the new dep state without BT restart.
+        from bterminal.diagnostics import subscribe_invalidation
+        subscribe_invalidation(self.refresh)
+
         self.refresh()
 
     def _append_session(self, parent_iter, session):
@@ -157,6 +267,7 @@ class SessionSidebar(Gtk.Box):
             tooltip,
             _session_color("ssh"),
             Pango.Weight.NORMAL,
+            None,
         ])
         for macro in session.get("macros", []):
             macro_id = f"macro:{session['id']}:{macro['id']}"
@@ -167,26 +278,62 @@ class SessionSidebar(Gtk.Box):
                 f"Macro: {macro['name']}",
                 CATPPUCCIN["green"],
                 Pango.Weight.NORMAL,
+                None,
             ])
 
-    def _append_claude_session(self, parent_iter, session):
-        """Add a Claude Code session node to the tree store."""
+    def _append_ai_session(self, parent_iter, session, provider):
+        """Add an AI session node (Claude / Copilot / future) to the tree.
+
+        provider: AIProvider instance from the registry. Its
+        `display.icon` and `display.color` are used so each row carries
+        the visual marker (R7a) that matches the spawned tab. Options
+        list reads from R4.2's `provider_options` first, falling back
+        to top-level keys so legacy session entries keep rendering.
+        """
         opts = []
-        if session.get("sudo"):
-            opts.append("sudo")
-        if session.get("resume"):
-            opts.append("resume")
-        if session.get("skip_permissions"):
-            opts.append("skip-perms")
-        tooltip = ", ".join(opts) if opts else "Claude Code"
+        opt_source = session.get("provider_options") or session
+        for key, label in (
+            ("sudo", "sudo"),
+            ("resume", "resume"),
+            ("skip_permissions", "skip-perms"),
+            ("plan_mode", "plan-mode"),
+        ):
+            if opt_source.get(key):
+                opts.append(label)
+        model = opt_source.get("model")
+        if model:
+            opts.append(f"model={model}")
+
+        long_label = provider.display.long_label
+        tooltip = f"{long_label} — {', '.join(opts)}" if opts else long_label
+        color = provider.display.color or _session_color("claude")
+
+        # task #57: prefer the provider's pixbuf logo when shipped;
+        # the emoji column stays empty in that case so it doesn't
+        # render alongside the logo. Fallback: emoji + no pixbuf.
+        # 21px = baseline 16px + 30% per user feedback (2026-05-07).
+        pix = _provider_pixbuf(provider, size=21)
+        emoji_cell = "" if pix is not None else provider.display.icon
         self.store.append(parent_iter, [
-            "\U0001F916",  # 🤖
+            emoji_cell,
             session["name"],
-            f"claude:{session['id']}",
+            f"claude:{session['id']}",  # legacy prefix — handlers use it
             tooltip,
-            _session_color("claude"),
+            color,
             Pango.Weight.NORMAL,
+            pix,
         ])
+
+    # Legacy alias — keep so any external caller that reached for the
+    # old name doesn't break. T4.6 cleanup may drop it.
+    def _append_claude_session(self, parent_iter, session):
+        from bterminal.providers import get_registry
+        provider_name = session.get("provider", "claude")
+        try:
+            provider = get_registry().get(provider_name)
+        except KeyError:
+            provider = get_registry().default_provider()
+        self._append_ai_session(parent_iter, session, provider)
 
     def refresh(self):
         expanded = _save_expanded(self.tree, self.store, COL_ID)
@@ -213,6 +360,7 @@ class SessionSidebar(Gtk.Box):
                 folder_name,
                 CATPPUCCIN["subtext1"],
                 Pango.Weight.BOLD,
+                None,
             ])
             for s in folders[folder_name]:
                 self._append_session(parent, s)
@@ -221,50 +369,66 @@ class SessionSidebar(Gtk.Box):
         for s in ungrouped:
             self._append_session(None, s)
 
-        # ── Claude Code sessions ──
-        claude_sessions = self.app.claude_manager.all()
-        if claude_sessions:
-            # Section header as parent node
-            claude_root = self.store.append(None, [
-                "\U0001F916",  # 🤖
-                "Claude Code",
-                "section:claude",
-                "Claude Code sessions",
-                CATPPUCCIN["mauve"],
-                Pango.Weight.BOLD,
-            ])
+        # ── AI sessions, flat list under user folders (task #58) ──
+        # User feedback (screenshot 2026-05-07): provider sub-grouping
+        # ('Claude Code' / 'GitHub Copilot CLI' headers above each
+        # folder) was redundant because the per-row icon already
+        # signals the provider. We now group ONLY by user-defined
+        # folder, mixing providers within the same folder when the
+        # user assigns them there. The "cfolder:" id prefix is kept
+        # for backward-compat with _FOLDER_PREFIXES sniffing logic in
+        # context-menu / drag-drop handlers; AI folders stay distinct
+        # from SSH "folder:" entries because the two managers don't
+        # share state and an SSH "Work" + AI "Work" represent
+        # different lists.
+        ai_sessions = self.app.ai_manager.all()
+        if ai_sessions:
+            from bterminal.providers import get_registry
+            registry = get_registry()
 
-            claude_folders = {}
-            claude_ungrouped = []
-            for s in claude_sessions:
+            ai_folders: dict = {}
+            ai_ungrouped: list = []
+            for s in ai_sessions:
                 folder = s.get("folder", "").strip()
                 if folder:
-                    claude_folders.setdefault(folder, []).append(s)
+                    ai_folders.setdefault(folder, []).append(s)
                 else:
-                    claude_ungrouped.append(s)
+                    ai_ungrouped.append(s)
 
-            for folder_name in sorted(claude_folders.keys()):
-                count = len(claude_folders[folder_name])
-                parent = self.store.append(claude_root, [
+            def _resolve_provider_or_default(s):
+                """Provider lookup tolerant of forward-compat entries:
+                an unknown provider name in the saved session falls back
+                to the registry default rather than dropping the row,
+                so users always see every saved session."""
+                name = s.get("provider", "claude")
+                try:
+                    return registry.get(name)
+                except KeyError:
+                    return registry.default_provider()
+
+            for folder_name in sorted(ai_folders.keys()):
+                count = len(ai_folders[folder_name])
+                parent = self.store.append(None, [
                     "\U0001F4C1",
                     f"{folder_name} ({count})",
                     f"cfolder:{folder_name}",
                     folder_name,
                     CATPPUCCIN["subtext1"],
                     Pango.Weight.BOLD,
+                    None,
                 ])
-                for s in claude_folders[folder_name]:
-                    self._append_claude_session(parent, s)
+                for s in ai_folders[folder_name]:
+                    self._append_ai_session(parent, s, _resolve_provider_or_default(s))
 
-            for s in claude_ungrouped:
-                self._append_claude_session(claude_root, s)
+            for s in ai_ungrouped:
+                self._append_ai_session(None, s, _resolve_provider_or_default(s))
 
         if expanded:
             _restore_expanded(self.tree, self.store, COL_ID, expanded)
         else:
             self.tree.expand_all()
 
-    _FOLDER_PREFIXES = ("folder:", "cfolder:", "section:")
+    _FOLDER_PREFIXES = ("folder:", "cfolder:")
 
     def _get_selected_session_id(self):
         sel = self.tree.get_selection()
@@ -394,6 +558,44 @@ class SessionSidebar(Gtk.Box):
                     item_connect.connect("activate", lambda _, cid=claude_id: self._connect_claude(cid))
                     menu.append(item_connect)
 
+                    # Task #61: 'Resume last session' shortcut so users
+                    # don't have to open the dialog and tick the resume
+                    # checkbox. Forces resume=True for THIS spawn only —
+                    # session JSON unchanged.
+                    if config:
+                        from bterminal.providers import get_registry as _gr
+                        if session_supports_resume_menu(config, _gr()):
+                            item_resume = Gtk.MenuItem(label="Resume last session")
+                            item_resume.connect(
+                                "activate",
+                                lambda _, cfg=config:
+                                    self.app.open_ai_tab_one_off(
+                                        cfg, force_options={"resume": True}),
+                            )
+                            menu.append(item_resume)
+
+                    # Task #60: ad-hoc spawn with a different provider
+                    # (clones config, doesn't mutate saved JSON).
+                    if config:
+                        from bterminal.providers import get_registry
+                        run_as_items = build_run_as_menu_items(
+                            config, get_registry())
+                        if run_as_items:
+                            item_run_as = Gtk.MenuItem(label="Run as ▸")
+                            submenu = Gtk.Menu()
+                            for prov_name, label in run_as_items:
+                                sub_item = Gtk.MenuItem(label=label)
+                                sub_item.connect(
+                                    "activate",
+                                    lambda _, cfg=config, pn=prov_name:
+                                        self.app.open_ai_tab_one_off(
+                                            cfg, override_provider=pn),
+                                )
+                                submenu.append(sub_item)
+                            submenu.show_all()
+                            item_run_as.set_submenu(submenu)
+                            menu.append(item_run_as)
+
                     item_edit = Gtk.MenuItem(label="Edit")
                     item_edit.connect("activate", lambda _, cid=claude_id: self._edit_claude(cid))
                     menu.append(item_edit)
@@ -485,8 +687,11 @@ class SessionSidebar(Gtk.Box):
         dlg.destroy()
 
     def _on_add_claude(self):
-        from bterminal import ClaudeCodeDialog, _run_ctx_wizard_if_needed  # lazy: Etap 7
-        dlg = ClaudeCodeDialog(self.app)
+        # T2.5: AISessionDialog adds the provider dropdown on top of
+        # the legacy ClaudeCodeDialog fields. Edit-mode below mirrors.
+        from bterminal import _run_ctx_wizard_if_needed  # lazy: Etap 7
+        from bterminal.ui.dialogs.ai_session import AISessionDialog
+        dlg = AISessionDialog(self.app)
         while True:
             resp = dlg.run()
             if resp != Gtk.ResponseType.OK:
@@ -498,6 +703,12 @@ class SessionSidebar(Gtk.Box):
                 self.refresh()
                 break
         dlg.destroy()
+
+    # BUG#13 fix: public name for the same provider-picker dialog.
+    # The legacy `_on_add_claude` predates the multi-provider work;
+    # the dialog itself is already provider-agnostic.
+    def _on_add_ai_session(self):
+        self._on_add_claude()
 
     def _on_edit(self, button):
         sel = self.tree.get_selection()
@@ -733,8 +944,9 @@ class SessionSidebar(Gtk.Box):
                         lambda _, d=project_dir: self._open_with_app("xdg-open", d))
         submenu.append(item_fm)
 
+        from bterminal.diagnostics import is_feature_available
         for name, cmd in [("VS Code", "code"), ("Zed", "zed")]:
-            if shutil.which(cmd):
+            if is_feature_available(cmd):
                 item = Gtk.MenuItem(label=name)
                 item.connect("activate",
                              lambda _, c=cmd, d=project_dir: self._open_with_app(c, d))
@@ -814,11 +1026,12 @@ class SessionSidebar(Gtk.Box):
             self.app.open_claude_tab(config)
 
     def _edit_claude(self, claude_id):
-        from bterminal import ClaudeCodeDialog, _run_ctx_wizard_if_needed  # lazy: Etap 7
+        from bterminal import _run_ctx_wizard_if_needed  # lazy: Etap 7
+        from bterminal.ui.dialogs.ai_session import AISessionDialog
         config = self.app.claude_manager.get(claude_id)
         if not config:
             return
-        dlg = ClaudeCodeDialog(self.app, config)
+        dlg = AISessionDialog(self.app, config)
         while True:
             resp = dlg.run()
             if resp != Gtk.ResponseType.OK:

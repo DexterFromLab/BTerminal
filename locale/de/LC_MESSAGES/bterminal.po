@@ -7,15 +7,15 @@ msgid ""
 msgstr ""
 "Project-Id-Version:  bterminal\n"
 "Report-Msgid-Bugs-To: bartoszczarnota1@gmail.com\n"
-"POT-Creation-Date: 2026-05-05 13:51+0200\n"
+"POT-Creation-Date: 2026-05-10 21:39+0200\n"
 "PO-Revision-Date: 2026-05-05 13:39+0200\n"
 "Last-Translator: Automatically generated\n"
-"Language: de\n"
 "Language-Team: none\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Language: de\n"
 "MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
+"Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
 "Generated-By: Babel 2.10.3\n"
 
 #: bterminal/license.py:109
@@ -68,7 +68,8 @@ msgstr "Suche nach Updates"
 msgid "Connecting to server... ({seconds}s)"
 msgstr "Verbinde mit Server... ({seconds}s)"
 
-#: bterminal/ui/dialogs/options.py:154 bterminal/updater.py:131
+#: bterminal/updater.py:131 bterminal/ui/dialogs/options.py:298
+#: bterminal/ui/dialogs/options.py:629 bterminal/ui/dialogs/options.py:809
 msgid "Cancel"
 msgstr "Abbrechen"
 
@@ -77,7 +78,7 @@ msgid "Cannot check for updates — timed out."
 msgstr "Update-Prüfung fehlgeschlagen — Zeitüberschreitung."
 
 #: bterminal/updater.py:143 bterminal/updater.py:160 bterminal/updater.py:165
-#: bterminal/updater.py:339
+#: bterminal/updater.py:372
 msgid "Close"
 msgstr "Schließen"
 
@@ -109,33 +110,35 @@ msgstr "Nicht jetzt"
 msgid "Update and restart"
 msgstr "Aktualisieren und neu starten"
 
-#: bterminal/updater.py:334
+#: bterminal/updater.py:367
 msgid "BTerminal errata"
 msgstr "BTerminal Errata"
 
-#: bterminal/updater.py:349
+#: bterminal/updater.py:382
 msgid "No errata entries."
 msgstr "Keine Errata-Einträge."
 
-#: bterminal/updater.py:399
+#: bterminal/updater.py:539
 msgid "BTerminal update"
 msgstr "BTerminal-Aktualisierung"
 
-#: bterminal/updater.py:408
+#: bterminal/updater.py:548
 msgid "Update in progress…"
 msgstr "Aktualisierung läuft…"
 
-#: bterminal/updater.py:488
+#: bterminal/updater.py:638
 msgid ""
 "The new version of BTerminal could not be installed.\n"
 "\n"
-"The previous version was restored automatically — BTerminal continues to work normally."
+"The previous version was restored automatically — BTerminal continues to "
+"work normally."
 msgstr ""
 "Die neue Version von BTerminal konnte nicht installiert werden.\n"
 "\n"
-"Die vorherige Version wurde automatisch wiederhergestellt — BTerminal funktioniert normal weiter."
+"Die vorherige Version wurde automatisch wiederhergestellt — BTerminal "
+"funktioniert normal weiter."
 
-#: bterminal/updater.py:494
+#: bterminal/updater.py:644
 #, python-brace-format
 msgid ""
 "Installation failed and no previous version is available to restore.\n"
@@ -143,12 +146,13 @@ msgid ""
 "Details:\n"
 "{details}"
 msgstr ""
-"Installation fehlgeschlagen und keine vorherige Version zum Wiederherstellen verfügbar.\n"
+"Installation fehlgeschlagen und keine vorherige Version zum Wiederherstellen "
+"verfügbar.\n"
 "\n"
 "Details:\n"
 "{details}"
 
-#: bterminal/ui/sidebar.py:75
+#: bterminal/ui/sidebar.py:165
 #, python-brace-format
 msgid "{app} Sessions"
 msgstr "{app}-Sitzungen"
@@ -164,183 +168,289 @@ msgstr[1] "{n} Dateien"
 msgid "Working tree clean"
 msgstr "Arbeitsverzeichnis sauber"
 
-#: bterminal/ui/dialogs/options.py:40
+#: bterminal/ui/dialogs/options.py:128
 msgid "Appearance"
 msgstr "Erscheinungsbild"
 
-#: bterminal/ui/dialogs/options.py:45
+#: bterminal/ui/dialogs/options.py:133
 msgid "Theme:"
 msgstr "Design:"
 
-#: bterminal/ui/dialogs/options.py:47
+#: bterminal/ui/dialogs/options.py:135
 msgid "Dark (Mocha)"
 msgstr "Dunkel (Mocha)"
 
-#: bterminal/ui/dialogs/options.py:48
+#: bterminal/ui/dialogs/options.py:136
 msgid "Light (Latte)"
 msgstr "Hell (Latte)"
 
-#: bterminal/ui/dialogs/options.py:53
+#: bterminal/ui/dialogs/options.py:141
 msgid "Terminal font:"
 msgstr "Terminal-Schriftart:"
 
-#: bterminal/ui/dialogs/options.py:65
+#: bterminal/ui/dialogs/options.py:153
 msgid "Terminal"
 msgstr "Terminal"
 
-#: bterminal/ui/dialogs/options.py:70
+#: bterminal/ui/dialogs/options.py:158
 msgid "Default shell:"
 msgstr "Standard-Shell:"
 
-#: bterminal/ui/dialogs/options.py:73
+#: bterminal/ui/dialogs/options.py:161
 #, python-brace-format
 msgid "default ({shell})"
 msgstr "Standard ({shell})"
 
-#: bterminal/ui/dialogs/options.py:84
+#: bterminal/ui/dialogs/options.py:172
 msgid "General"
 msgstr "Allgemein"
 
-#: bterminal/ui/dialogs/options.py:90
+#: bterminal/ui/dialogs/options.py:178
 msgid "Check for updates at startup:"
 msgstr "Beim Start auf Updates prüfen:"
 
-#: bterminal/ui/dialogs/options.py:104
+#: bterminal/ui/dialogs/options.py:192
 msgid "Language"
 msgstr "Sprache"
 
-#: bterminal/ui/dialogs/options.py:110
+#: bterminal/ui/dialogs/options.py:198
 msgid "Interface language:"
 msgstr "Oberflächensprache:"
 
-#: bterminal/ui/dialogs/options.py:115
+#: bterminal/ui/dialogs/options.py:203
 msgid "Auto-detect"
 msgstr "Automatisch erkennen"
 
-#: bterminal/ui/dialogs/options.py:130
+#: bterminal/ui/dialogs/options.py:218
 msgid "Restart BTerminal to apply language change."
 msgstr "BTerminal neu starten, um die Sprachänderung zu übernehmen."
 
-#: bterminal/ui/dialogs/options.py:145
+#: bterminal/ui/dialogs/options.py:233
 msgid "Tell the AI agent which language I speak"
 msgstr "Dem KI-Agenten mitteilen, welche Sprache ich spreche"
 
-#: bterminal/ui/dialogs/options.py:155
+#: bterminal/ui/dialogs/options.py:244
+msgid "Auto-add vision hint when pasting images into Copilot sessions"
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:258
+msgid "AI Providers"
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:276
+msgid "Local Models (Ollama)"
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:299
 msgid "Save"
 msgstr "Speichern"
 
-#: bterminal/ctx/dialogs.py:163
-msgid "Project context has not been collected yet. Gather context as you work and save important findings: ctx set <project> <key> <value>"
-msgstr "Der Projektkontext wurde noch nicht gesammelt. Sammeln Sie Kontext während der Arbeit und speichern Sie wichtige Erkenntnisse: ctx set <project> <key> <value>"
+#: bterminal/ui/dialogs/options.py:432
+msgid "Start daemon"
+msgstr ""
 
-#: bterminal/app.py:189 bterminal/app.py:221 bterminal/app.py:462
+#: bterminal/ui/dialogs/options.py:433
+msgid "Stop daemon"
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:434 bterminal/ui/dialogs/options.py:522
+msgid "Refresh"
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:454
+msgid "Recommendations for this machine:"
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:487
+msgid "Installed models:"
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:509
+msgid "Pull…"
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:513
+msgid "Delete"
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:517
+msgid "Set as default for…"
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:625
+msgid "Pull Ollama model"
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:630
+msgid "Pull"
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:642
+msgid "Pick a model from the list below or type a custom tag."
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:644
+msgid "Note: models below 3B parameters often fail with Aider's edit format."
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:676
+msgid "Browse all models on ollama.com →"
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:696
+#, python-brace-format
+msgid "{name} has only {size}B parameters"
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:699
+msgid ""
+"Models below 3B parameters often fail to follow Aider's edit format and "
+"produce empty or repeated responses. Are you sure you want to pull this "
+"model?"
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:740
+msgid "Model pulled"
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:740
+msgid "Pull failed"
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:810
+msgid "Apply"
+msgstr ""
+
+#: bterminal/ctx/dialogs.py:163
+msgid ""
+"Project context has not been collected yet. Gather context as you work and "
+"save important findings: ctx set <project> <key> <value>"
+msgstr ""
+"Der Projektkontext wurde noch nicht gesammelt. Sammeln Sie Kontext während "
+"der Arbeit und speichern Sie wichtige Erkenntnisse: ctx set <project> <key> "
+"<value>"
+
+#: bterminal/app.py:193 bterminal/app.py:225 bterminal/app.py:466
 msgid "Sessions"
 msgstr "Sitzungen"
 
-#: bterminal/app.py:192 bterminal/app.py:221 bterminal/app.py:463
+#: bterminal/app.py:196 bterminal/app.py:225 bterminal/app.py:467
 msgid "Ctx"
 msgstr "Ctx"
 
-#: bterminal/app.py:195 bterminal/app.py:222 bterminal/app.py:464
+#: bterminal/app.py:199 bterminal/app.py:226 bterminal/app.py:468
 msgid "Consult"
 msgstr "Consult"
 
-#: bterminal/app.py:198 bterminal/app.py:222 bterminal/app.py:465
+#: bterminal/app.py:202 bterminal/app.py:226 bterminal/app.py:469
 msgid "Tasks"
 msgstr "Aufgaben"
 
-#: bterminal/app.py:201 bterminal/app.py:223
+#: bterminal/app.py:205 bterminal/app.py:227
 msgid "Memory"
 msgstr "Speicher"
 
-#: bterminal/app.py:204 bterminal/app.py:223
+#: bterminal/app.py:208 bterminal/app.py:227
 msgid "Skills"
 msgstr "Skills"
 
-#: bterminal/app.py:207 bterminal/app.py:224
+#: bterminal/app.py:211 bterminal/app.py:228
 msgid "Files"
 msgstr "Dateien"
 
-#: bterminal/app.py:210 bterminal/app.py:224 bterminal/app.py:466
+#: bterminal/app.py:214 bterminal/app.py:228 bterminal/app.py:470
 msgid "Plugins"
 msgstr "Plugins"
 
-#: bterminal/app.py:242
+#: bterminal/app.py:246
 msgid "Hide sidebar (Ctrl+B)"
 msgstr "Seitenleiste ausblenden (Strg+B)"
 
-#: bterminal/app.py:319
+#: bterminal/app.py:323
 msgid "Show sidebar (Ctrl+B)"
 msgstr "Seitenleiste anzeigen (Strg+B)"
 
-#: bterminal/app.py:329
+#: bterminal/app.py:333
 msgid "Toggle light/dark theme"
 msgstr "Helles/dunkles Design umschalten"
 
-#: bterminal/app.py:335
+#: bterminal/app.py:339
 msgid "Show Git panel (Ctrl+G)"
 msgstr "Git-Panel anzeigen (Strg+G)"
 
-#: bterminal/app.py:384
+#: bterminal/app.py:388
 #, python-brace-format
 msgid ""
-"The file ~/.config/bterminal/options.json was corrupted — default settings have been restored.\n"
+"The file ~/.config/bterminal/options.json was corrupted — default settings "
+"have been restored.\n"
 "\n"
 "Cause: {exc_type}: {exc}"
 msgstr ""
-"Die Datei ~/.config/bterminal/options.json war beschädigt — Standardeinstellungen wurden wiederhergestellt.\n"
+"Die Datei ~/.config/bterminal/options.json war beschädigt — "
+"Standardeinstellungen wurden wiederhergestellt.\n"
 "\n"
 "Ursache: {exc_type}: {exc}"
 
-#: bterminal/app.py:446
+#: bterminal/app.py:450
 msgid "New local tab"
 msgstr "Neuer lokaler Tab"
 
-#: bterminal/app.py:447
+#: bterminal/app.py:451
 msgid "New SSH session…"
 msgstr "Neue SSH-Sitzung…"
 
-#: bterminal/app.py:448
-msgid "New Claude Code session…"
-msgstr "Neue Claude-Code-Sitzung…"
+#: bterminal/app.py:452
+#, fuzzy
+msgid "New AI session…"
+msgstr "Neue SSH-Sitzung…"
 
-#: bterminal/app.py:450
+#: bterminal/app.py:454
 msgid "Options…"
 msgstr "Einstellungen…"
 
-#: bterminal/app.py:452
+#: bterminal/app.py:456
 msgid "Quit"
 msgstr "Beenden"
 
-#: bterminal/app.py:453
+#: bterminal/app.py:457
 msgid "File"
 msgstr "Datei"
 
-#: bterminal/app.py:457
+#: bterminal/app.py:461
 msgid "Toggle sidebar (Ctrl+B)"
 msgstr "Seitenleiste umschalten (Strg+B)"
 
-#: bterminal/app.py:458
+#: bterminal/app.py:462
 msgid "Toggle Git panel (Ctrl+G)"
 msgstr "Git-Panel umschalten (Strg+G)"
 
-#: bterminal/app.py:459
+#: bterminal/app.py:463
 msgid "Toggle theme ☀/🌙"
 msgstr "Design umschalten ☀/🌙"
 
-#: bterminal/app.py:475
+#: bterminal/app.py:479
 msgid "View"
 msgstr "Ansicht"
 
-#: bterminal/app.py:479
+#: bterminal/app.py:483
 msgid "Check for updates"
 msgstr "Auf Updates prüfen"
 
-#: bterminal/app.py:480
+#: bterminal/app.py:484
 msgid "Errata…"
 msgstr "Errata…"
 
-#: bterminal/app.py:482
+#: bterminal/app.py:487
+msgid "Diagnostics…"
+msgstr ""
+
+#: bterminal/app.py:494
+msgid "Install dependencies…"
+msgstr ""
+
+#: bterminal/app.py:498
 msgid "Tools"
 msgstr "Werkzeuge"
 
+#~ msgid "New Claude Code session…"
+#~ msgstr "Neue Claude-Code-Sitzung…"

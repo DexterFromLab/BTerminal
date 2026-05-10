@@ -71,7 +71,7 @@ from bterminal.ctx.helpers import (
 from bterminal.ctx.dialogs import CtxEditDialog
 from bterminal.ui.dialogs.claude_code import ClaudeCodeDialog
 from bterminal.ui.dialogs.options import OptionsDialog
-from bterminal.models import ClaudeSessionManager, ConsultManager, SessionManager
+from bterminal.models import AISessionManager, ConsultManager, SessionManager
 from bterminal.ui.panels.consult import ConsultPanel
 from bterminal.ui.panels.ctx_manager import CtxManagerPanel
 from bterminal.ui.panels.files import FilesPanel
@@ -148,7 +148,11 @@ class BTerminalApp(Gtk.Window):
 
         # Session managers
         self.session_manager = SessionManager()
-        self.claude_manager = ClaudeSessionManager()
+        # New canonical name (T1.6); claude_manager kept as alias for
+        # backward-compat with debug_rest, dialogs, and tests until T4.6
+        # cleanup. Both names point at the SAME instance.
+        self.ai_manager = AISessionManager()
+        self.claude_manager = self.ai_manager
 
         # Layout: VBox → menubar + HPaned
         root_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -445,7 +449,7 @@ class BTerminalApp(Gtk.Window):
         file_menu = Gtk.Menu()
         file_menu.append(_item(N_("New local tab"), self.add_local_tab))
         file_menu.append(_item(N_("New SSH session…"), lambda: self.sidebar._on_add(None)))
-        file_menu.append(_item(N_("New Claude Code session…"), lambda: self.sidebar._on_add_claude()))
+        file_menu.append(_item(N_("New AI session…"), lambda: self.sidebar._on_add_ai_session()))
         file_menu.append(_sep())
         file_menu.append(_item(N_("Options…"), lambda: OptionsDialog(self).run_and_apply()))
         file_menu.append(_sep())
@@ -478,6 +482,18 @@ class BTerminalApp(Gtk.Window):
         tools_menu = Gtk.Menu()
         tools_menu.append(_item(N_("Check for updates"), lambda: _check_for_updates(self, manual=True)))
         tools_menu.append(_item(N_("Errata…"), lambda: _show_errata_dialog(self, _load_local_errata())))
+        # Task #62: live audit of system deps — same data as install.sh's
+        # [SUMMARY] block, refreshed by re-running shutil.which on demand.
+        tools_menu.append(_item(N_("Diagnostics…"), self._show_diagnostics_dialog))
+        # Task #6 (#78): GUI installer entry point. Re-runs
+        # InstallerWizard for users who want to install/update deps
+        # without re-running install.sh from a terminal. Repo_dir is
+        # derived from REPO_DIR (set during initial install) so the
+        # wizard knows which install.sh to invoke.
+        tools_menu.append(_item(
+            N_("Install dependencies…"),
+            self._show_installer_wizard,
+        ))
         tools_root = Gtk.MenuItem()
         tr(tools_root, "set_label", N_("Tools"))
         tools_root.set_submenu(tools_menu)
@@ -529,7 +545,7 @@ class BTerminalApp(Gtk.Window):
             if panel is not None and hasattr(panel, "set_active_tab"):
                 GLib.idle_add(panel.set_active_tab, active_tab)
         # Git panel: show only for Claude Code tabs
-        is_claude = isinstance(page, TerminalTab) and page.claude_config is not None
+        is_claude = isinstance(page, TerminalTab) and page.ai_config is not None
         if is_claude:
             self._show_git_btn.show()
             if self._git_visible:
@@ -561,15 +577,59 @@ class BTerminalApp(Gtk.Window):
         finally:
             self.task_panel._suspend_changed = False
 
-    def _build_tab_label(self, text, tab_widget):
+    def _build_tab_label(self, text, tab_widget, tooltip=None,
+                          icon_pixbuf=None, tab_emoji=None, on_rename=None):
         """Build a tab label with a close button.
 
+        Layout (left → right):
+            [provider SVG] [name (renamable)] [random emoji] [×]
+
+        tooltip:     optional hover text (R7a — provider's long_label).
+        icon_pixbuf: task #57 — optional GdkPixbuf for the provider logo
+                     prepended as a Gtk.Image on the LEFT. Callers must
+                     strip the emoji prefix from `text` themselves.
+        tab_emoji:   task #67 (2026-05-07) — random per-tab disambiguator
+                     emoji rendered as a Gtk.Label on the RIGHT (replaces
+                     the color dot from task #65). Each open tab gets a
+                     unique emoji from a 30-character pool (collision-
+                     avoid then fall back to full pool when ≥30 tabs).
+        on_rename:   task #65 — when set, double-click on the label
+                     swaps it for an inline Gtk.Entry; pressing Enter
+                     calls on_rename(new_text) and restores the label.
+                     Used for local terminal tabs so the user can give
+                     a generic 'Terminal' tab a meaningful name.
         Stores label reference on tab_widget._tab_label for efficient updates.
         """
         box = Gtk.Box(spacing=4)
+        if tooltip:
+            box.set_tooltip_text(tooltip)
 
-        label = Gtk.Label(label=text)
-        box.pack_start(label, True, True, 0)
+        if icon_pixbuf is not None:
+            img = Gtk.Image.new_from_pixbuf(icon_pixbuf)
+            box.pack_start(img, False, False, 0)
+
+        label = Gtk.Label()
+        label.set_text(text)
+        # Wrap label in EventBox so we can catch double-click without
+        # interfering with notebook tab selection (single click).
+        evbox = Gtk.EventBox()
+        evbox.add(label)
+        evbox.set_visible_window(False)
+        if on_rename is not None:
+            evbox.connect(
+                "button-press-event",
+                lambda _w, ev: self._maybe_start_rename(
+                    ev, label, evbox, on_rename),
+            )
+        box.pack_start(evbox, True, True, 0)
+
+        # Task #67: random per-tab emoji disambiguator on the RIGHT.
+        # Survives VTE title-change because it's a separate widget,
+        # not part of the label text.
+        if tab_emoji:
+            emoji_label = Gtk.Label(label=tab_emoji)
+            emoji_label.set_valign(Gtk.Align.CENTER)
+            box.pack_start(emoji_label, False, False, 0)
 
         close_btn = Gtk.Button(label="×")
         close_btn.get_style_context().add_class("tab-close-btn")
@@ -579,11 +639,78 @@ class BTerminalApp(Gtk.Window):
 
         box.show_all()
         tab_widget._tab_label = label
+        # Stash tooltip + emoji so update_tab_title knows what to keep
+        tab_widget._tab_tooltip = tooltip
+        tab_widget._tab_emoji = tab_emoji
         return box
 
+    def _maybe_start_rename(self, event, label, evbox, on_rename):
+        """Task #65: swap a tab Label for an Entry on double-click."""
+        if event.type != Gdk.EventType.DOUBLE_BUTTON_PRESS:
+            return False
+        current = label.get_text()
+        entry = Gtk.Entry()
+        entry.set_text(current)
+        entry.set_width_chars(max(8, len(current) + 2))
+        entry.select_region(0, -1)
+
+        def _commit(new_text):
+            evbox.remove(entry)
+            label.set_text(new_text or current)
+            evbox.add(label)
+            evbox.show_all()
+            if new_text and new_text != current:
+                on_rename(new_text)
+
+        def _on_activate(e):
+            _commit(e.get_text().strip())
+
+        def _on_focus_out(e, _ev):
+            _commit(e.get_text().strip())
+            return False
+
+        def _on_key(e, ev):
+            if ev.keyval == Gdk.KEY_Escape:
+                _commit(current)  # cancel
+                return True
+            return False
+
+        entry.connect("activate", _on_activate)
+        entry.connect("focus-out-event", _on_focus_out)
+        entry.connect("key-press-event", _on_key)
+        evbox.remove(label)
+        evbox.add(entry)
+        evbox.show_all()
+        entry.grab_focus()
+        return True
+
     def add_local_tab(self):
+        from bterminal.ui.terminal_tab import compute_tab_label
+        from bterminal.ui.sidebar import _load_icon_pixbuf
         tab = TerminalTab(self)
-        label = self._build_tab_label("Terminal", tab)
+        label_data = compute_tab_label(None, "Terminal", kind="local")
+
+        # Task #65: SVG icon for local tab too (defaults/icons/local.svg)
+        # + double-click rename so users can give a generic 'Terminal'
+        # tab a meaningful name without dialog.
+        tab_pix = _load_icon_pixbuf("icons/local.svg", size=21)
+        if tab_pix is not None:
+            display_text = label_data["display"].split(" ", 1)[1] \
+                if " " in label_data["display"] else label_data["display"]
+        else:
+            display_text = label_data["display"]
+
+        def _rename(new_name, t=tab):
+            t._local_name = new_name
+            self._update_window_title()
+
+        label = self._build_tab_label(
+            display_text, tab,
+            tooltip=label_data["tooltip"],
+            icon_pixbuf=tab_pix,
+            tab_emoji=self._pick_tab_emoji(),
+            on_rename=_rename,
+        )
         idx = self.notebook.append_page(tab, label)
         self.notebook.set_current_page(idx)
         self.notebook.set_tab_reorderable(tab, True)
@@ -627,9 +754,15 @@ class BTerminalApp(Gtk.Window):
             tab.terminal.connect("child-exited", _on_exit)
 
     def open_ssh_tab(self, session):
+        from bterminal.ui.terminal_tab import compute_tab_label
         tab = TerminalTab(self, session=session)
         name = session.get("name", "SSH")
-        label = self._build_tab_label(name, tab)
+        label_data = compute_tab_label(None, name, kind="ssh")
+        label = self._build_tab_label(
+            label_data["display"], tab,
+            tooltip=label_data["tooltip"],
+            tab_emoji=self._pick_tab_emoji(),
+        )
         idx = self.notebook.append_page(tab, label)
         self.notebook.set_current_page(idx)
         self.notebook.set_tab_reorderable(tab, True)
@@ -637,9 +770,15 @@ class BTerminalApp(Gtk.Window):
         self._update_window_title()
 
     def open_ssh_tab_with_macro(self, session, macro):
+        from bterminal.ui.terminal_tab import compute_tab_label
         tab = TerminalTab(self, session=session)
         name = f"{session.get('name', 'SSH')} \u2014 {macro.get('name', 'Macro')}"
-        label = self._build_tab_label(name, tab)
+        label_data = compute_tab_label(None, name, kind="ssh")
+        label = self._build_tab_label(
+            label_data["display"], tab,
+            tooltip=label_data["tooltip"],
+            tab_emoji=self._pick_tab_emoji(),
+        )
         idx = self.notebook.append_page(tab, label)
         self.notebook.set_current_page(idx)
         self.notebook.set_tab_reorderable(tab, True)
@@ -647,11 +786,65 @@ class BTerminalApp(Gtk.Window):
         tab.run_macro(macro)
         self._update_window_title()
 
-    _TAB_EMOJIS = [
+    # Task #67 (2026-05-07): per-tab random emoji disambiguator
+    # restored. Provider identity is now carried by the SVG pixbuf on
+    # the LEFT (task #57); the random emoji on the RIGHT distinguishes
+    # MULTIPLE tabs of the same session ("test 🦊", "test 🐙") which
+    # is friendlier than the "test #2 #3" suffix from the
+    # provider-abstraction era.
+    _TAB_EMOJIS: list[str] = [
         "🦊", "🐙", "🎯", "🚀", "⚡", "🔮", "🎲", "🌀", "🦋", "🐺",
         "🎸", "🌊", "🔥", "💎", "🦅", "🐍", "🎪", "🌵", "🦈", "🍄",
-        "🎭", "🏴\u200d☠️", "🛸", "🧊", "🦎", "🐝", "🌻", "🎱", "🦜", "🐲",
+        "🎭", "🏴‍☠️", "🛸", "🧊", "🦎", "🐝", "🌻", "🎱", "🦜", "🐲",
     ]
+
+    def _pick_tab_emoji(self) -> str:
+        """Return a random emoji from _TAB_EMOJIS, preferring one not
+        currently assigned to any open tab. Falls back to the full
+        pool when ≥30 tabs are already open (Pythonic mod-pick rather
+        than blocking)."""
+        import random
+        used = set()
+        for i in range(self.notebook.get_n_pages()):
+            page = self.notebook.get_nth_page(i)
+            e = getattr(page, "_tab_emoji", None)
+            if e:
+                used.add(e)
+        available = [e for e in self._TAB_EMOJIS if e not in used] \
+                    or self._TAB_EMOJIS
+        return random.choice(available)
+
+    def open_ai_tab_one_off(self, config, override_provider=None,
+                              force_options=None):
+        """Spawn an AI tab with ad-hoc overrides (tasks #60 / #61).
+
+        Use cases:
+          - 'Run as Copilot' on a Claude session (override_provider)
+          - 'Resume last session' (force_options={'resume': True})
+            even when the saved session has resume=False
+
+        Saved session JSON (claude_manager / ai_manager) is NOT
+        mutated — we clone the dict, apply overrides locally, and
+        spawn through the normal open_claude_tab flow. provider_options
+        carries through; build_argv tolerates spurious keys per
+        task #54 backcompat (Claude's `sudo` is simply ignored when
+        Copilot's argv builder runs).
+
+        override_provider=None / force_options=None / both → no-op
+        clone-and-spawn (useful as generic mutation-safe helper).
+        """
+        cloned = dict(config or {})
+        # provider_options is a nested dict — copy it too so future
+        # widget mutations on the saved config don't bleed through.
+        opts = dict(cloned.get("provider_options") or {})
+        if force_options:
+            opts.update(force_options)
+        # Always assign so the cloned dict has its own provider_options
+        # — even when the input lacked the key entirely (legacy session).
+        cloned["provider_options"] = opts
+        if override_provider:
+            cloned["provider"] = override_provider
+        self.open_claude_tab(cloned)
 
     def open_claude_tab(self, config):
         # Per-tab plugin gating: PRZEKAŻ enabled_plugins do TerminalTab
@@ -659,7 +852,7 @@ class BTerminalApp(Gtk.Window):
         # i filtruje per tab.enabled_plugins. Bug fix 2026-05-04: previously
         # was set AFTER constructor returned (zbyt późno).
         enabled = config.get("enabled_plugins")
-        tab = TerminalTab(self, claude_config=config, enabled_plugins=enabled)
+        tab = TerminalTab(self, ai_config=config, enabled_plugins=enabled)
         if tab.enabled_plugins is not None:
             # Acquire sidecars referenced by this tab. The first tab to
             # claim a sidecar starts it; the last to release it stops it
@@ -668,25 +861,59 @@ class BTerminalApp(Gtk.Window):
                 if name in self.sidecar_manifests:
                     self._sidecar_acquire(name)
         base_name = config.get("name", "Claude Code")
-        # Count existing tabs with the same base config name
+        # Count existing tabs with the same base config name (for ` #N`
+        # disambiguation when the user opens the same session multiple times).
         count = 0
         for i in range(self.notebook.get_n_pages()):
             page = self.notebook.get_nth_page(i)
-            if isinstance(page, TerminalTab) and page.claude_config:
-                if page.claude_config.get("name") == config.get("name"):
+            if isinstance(page, TerminalTab) and page.ai_config:
+                if page.ai_config.get("name") == config.get("name"):
                     count += 1
-        # Pick a random emoji not already used by sibling tabs
-        used = set()
-        for i in range(self.notebook.get_n_pages()):
-            page = self.notebook.get_nth_page(i)
-            if isinstance(page, TerminalTab) and hasattr(page, "_claude_tab_emoji"):
-                used.add(page._claude_tab_emoji)
-        available = [e for e in self._TAB_EMOJIS if e not in used] or self._TAB_EMOJIS
-        emoji = random.choice(available)
-        tab._claude_tab_emoji = emoji
-        tab_name = f"{base_name} #{count + 1} {emoji}"
-        tab._claude_tab_display = tab_name
-        label = self._build_tab_label(tab_name, tab)
+
+        # T2.7 / R7a: deterministic tab marker from provider.display
+        # (no more random emoji per tab).
+        from bterminal.providers import get_registry
+        from bterminal.ui.terminal_tab import compute_tab_label
+        label_data = compute_tab_label(
+            ai_config=config,
+            session_name=base_name,
+            count=count,
+            registry=get_registry(),
+            kind="ai",
+        )
+        # task #57: prefer the provider's pixbuf logo over the emoji
+        # prefix that compute_tab_label baked into `display`. When we
+        # have a pixbuf, strip the leading "<emoji> " from the display
+        # text so the rendered tab is "<logo> <session_name>" not
+        # "<logo> <emoji> <session_name>".
+        from bterminal.ui.sidebar import _provider_pixbuf
+        provider = get_registry().get(config.get("provider", "claude")) \
+            if get_registry().has(config.get("provider", "claude")) else None
+        # 21px matches the sidebar row size (task #57 / 2026-05-07
+        # +30% bump per user feedback).
+        tab_pix = _provider_pixbuf(provider, size=21) if provider else None
+        if tab_pix is not None:
+            display_text = label_data["display"].split(" ", 1)[1] \
+                if " " in label_data["display"] else label_data["display"]
+        else:
+            display_text = label_data["display"]
+
+        # Stash deprecated names so legacy readers (sidebar, terminal_tab
+        # window-title-changed handler) keep working until T4.6 cleanup.
+        # Bug #65 (2026-05-07): _claude_tab_display MUST be the
+        # post-pixbuf-strip text — _on_title_changed pushes it through
+        # update_tab_title which set_text's it on the label. Storing
+        # the unstripped "🤖 test1" caused the emoji to reappear next
+        # to the SVG pixbuf on every VTE title-change event.
+        tab._claude_tab_emoji = label_data["display"].split(" ", 1)[0]
+        tab._claude_tab_display = display_text
+
+        label = self._build_tab_label(
+            display_text, tab,
+            tooltip=label_data["tooltip"],
+            icon_pixbuf=tab_pix,
+            tab_emoji=self._pick_tab_emoji(),
+        )
         idx = self.notebook.append_page(tab, label)
         self.notebook.set_current_page(idx)
         self.notebook.set_tab_reorderable(tab, True)
@@ -746,14 +973,24 @@ class BTerminalApp(Gtk.Window):
         tab._dead_key_handler = tab.terminal.connect("key-press-event", _cancel_timer)
 
     def update_tab_title(self, tab, title):
-        """Update tab label when terminal title changes."""
+        """Update tab label when terminal title changes.
+
+        Task #67 (2026-05-07): visual disambiguator is the right-side
+        random emoji widget, not Pango markup. VTE title-change just
+        replaces the name label text; the emoji widget keeps its glyph
+        independently because it lives in its own Gtk.Label.
+        """
         idx = self.notebook.page_num(tab)
         if idx >= 0:
             label = getattr(tab, "_tab_label", None)
             if label:
                 label.set_text(title)
             else:
-                label_widget = self._build_tab_label(title, tab)
+                label_widget = self._build_tab_label(
+                    title, tab,
+                    tooltip=getattr(tab, "_tab_tooltip", None),
+                    tab_emoji=getattr(tab, "_tab_emoji", None),
+                )
                 self.notebook.set_tab_label(tab, label_widget)
             self._update_window_title()
 
@@ -779,21 +1016,129 @@ class BTerminalApp(Gtk.Window):
             self._show_sidebar_btn.hide()
         self._sidebar_visible = not self._sidebar_visible
 
-    def _toggle_theme(self):
-        """Switch between Catppuccin Mocha (dark) and Latte (light)."""
+    def _show_installer_wizard(self):
+        """Tools → Install dependencies… (task #6 / #78).
+
+        Re-runs the same 5-page wizard the install.sh GTK auto-spawn
+        opens. Useful for users who picked a minimal set initially
+        and want to add meld / latex / ollama later without re-running
+        install.sh from a terminal.
+
+        repo_dir lookup priority: bterminal.config.REPO_DIR (canonical,
+        written by install.sh's last successful run) → ~/.local/share/
+        bterminal (post-install location).
+        """
+        from pathlib import Path
+        from bterminal.config import REPO_DIR
+        from bterminal.ui.installer_wizard import InstallerWizard
+
+        candidates = [
+            REPO_DIR if REPO_DIR else None,
+            os.path.expanduser("~/.local/share/bterminal"),
+        ]
+        repo_dir = None
+        for c in candidates:
+            if c and os.path.isfile(os.path.join(c, "install.sh")):
+                repo_dir = c
+                break
+        if repo_dir is None:
+            show_error_dialog(
+                self,
+                "Cannot locate install.sh — set ~/.config/bterminal/repo_path.",
+            )
+            return
+
+        wiz = InstallerWizard(parent=self, repo_dir=repo_dir)
+        wiz.run_and_install()
+        wiz.destroy()
+
+    def _show_diagnostics_dialog(self):
+        """Tools → Diagnostics… (task #62) — live audit of system deps.
+
+        Shows the same content install.sh's [SUMMARY] block emits at
+        the end of installation, but refreshed live each time the
+        dialog is opened so users can verify that an apt install they
+        ran AFTER BTerminal install actually landed.
+        """
+        from bterminal.diagnostics import (
+            audit, audit_ai_providers, format_summary_text,
+            missing_features,
+        )
+
+        statuses = audit()
+        # #109: include AI providers (Claude/Copilot/Aider) in summary
+        ai_statuses = audit_ai_providers()
+        text = format_summary_text(statuses, ai_statuses=ai_statuses)
+        missing = missing_features(statuses)
+
+        dialog = Gtk.Dialog(
+            title="BTerminal — Diagnostics",
+            transient_for=self, modal=True,
+        )
+        dialog.set_default_size(560, 480)
+        dialog.add_button("Close", Gtk.ResponseType.CLOSE)
+
+        content = dialog.get_content_area()
+        content.set_border_width(12)
+        content.set_spacing(8)
+
+        if missing:
+            warn = Gtk.Label()
+            warn.set_markup(
+                f"<b>{len(missing)} feature(s) currently disabled "
+                f"by missing tools.</b>"
+            )
+            warn.set_xalign(0)
+            warn.set_line_wrap(True)
+            content.pack_start(warn, False, False, 0)
+
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        view = Gtk.TextView()
+        view.set_editable(False)
+        view.set_monospace(True)
+        view.set_cursor_visible(False)
+        view.set_left_margin(8)
+        view.set_right_margin(8)
+        view.set_top_margin(6)
+        view.set_bottom_margin(6)
+        view.get_buffer().set_text(text)
+        scrolled.add(view)
+        content.pack_start(scrolled, True, True, 0)
+
+        content.show_all()
+        dialog.run()
+        dialog.destroy()
+
+    def _set_theme(self, target: str):
+        """BUG#14 fix: target-driven idempotent theme setter. Apply
+        the requested theme regardless of `_current_theme` state.
+        Calling with current target is a no-op (does NOT flip).
+
+        The legacy `_toggle_theme` (now a thin wrapper) flipped
+        based on the global, which broke when state drifted between
+        OptionsDialog combo state and `_current_theme` global —
+        users picking Dark would sometimes flip to Light and vice
+        versa.
+        """
         global _current_theme, CSS
-        if _current_theme == "dark":
-            _current_theme = "light"
+        if target == _current_theme:
+            return
+        if target == "light":
             CATPPUCCIN.update(CATPPUCCIN_LATTE)
             TERMINAL_PALETTE[:] = TERMINAL_PALETTE_LATTE
-            self._gtk_settings.set_property("gtk-application-prefer-dark-theme", False)
+            self._gtk_settings.set_property(
+                "gtk-application-prefer-dark-theme", False)
             self._theme_btn.set_label("☾")
-        else:
-            _current_theme = "dark"
+        elif target == "dark":
             CATPPUCCIN.update(CATPPUCCIN_MOCHA)
             TERMINAL_PALETTE[:] = TERMINAL_PALETTE_MOCHA
-            self._gtk_settings.set_property("gtk-application-prefer-dark-theme", True)
+            self._gtk_settings.set_property(
+                "gtk-application-prefer-dark-theme", True)
             self._theme_btn.set_label("☀")
+        else:
+            raise ValueError(f"unknown theme: {target!r}")
+        _current_theme = target
         _OPTIONS["theme"] = _current_theme
         _save_options(_OPTIONS)
         # Reload CSS
@@ -818,6 +1163,14 @@ class BTerminalApp(Gtk.Window):
         # Refresh git panel if visible
         if self._git_visible:
             self.git_panel.refresh()
+
+    def _toggle_theme(self, *_):
+        """Legacy headerbar / View-menu callback: flip dark↔light.
+        Delegates to the target-driven _set_theme so callers picking
+        a specific value (OptionsDialog) and callers wanting flip
+        (toggle button) share the same code path."""
+        opposite = "light" if _current_theme == "dark" else "dark"
+        self._set_theme(opposite)
 
     def toggle_git_panel(self):
         """Show/hide the right-side Git panel (mirror of toggle_sidebar)."""
@@ -858,8 +1211,8 @@ class BTerminalApp(Gtk.Window):
             self.git_panel.set_project_dir(None)
             return
         tab = self.notebook.get_nth_page(idx)
-        if isinstance(tab, TerminalTab) and tab.claude_config:
-            proj_dir = tab.claude_config.get("project_dir", "")
+        if isinstance(tab, TerminalTab) and tab.ai_config:
+            proj_dir = tab.ai_config.get("project_dir", "")
             self.git_panel.set_project_dir(proj_dir)
         else:
             # For local/SSH tabs, try CWD

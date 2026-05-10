@@ -305,47 +305,30 @@ class CtxSetupWizard(Gtk.Dialog):
         except FileNotFoundError:
             return False
 
-        # 3. CLAUDE.md
+        # 3. CLAUDE.md — template factored out at #113 so the REST
+        # add_ai handler renders the exact same scaffolding headlessly.
         claude_md = os.path.join(self.project_dir, "CLAUDE.md")
         if not os.path.exists(claude_md):
+            from bterminal.ctx.helpers import _render_claude_md
             try:
                 with open(claude_md, "w") as f:
-                    f.write(
-                        f"# {name}\n\n"
-                        f"Context is loaded automatically via intro prompt. No need to run `ctx get` manually.\n\n"
-                        f"During work:\n"
-                        f"- Save important discoveries: `ctx set {name} <key> <value>`\n"
-                        f"- Append to existing: `ctx append {name} <key> <value>`\n"
-                        f'- Before ending session: `ctx summary {name} "<what was done>"`\n'
-                        f"\n"
-                        f"## Consult & Tribunal (CLI tools)\n\n"
-                        f"Consult external AI models: `consult \"question\"`\n"
-                        f"Specific model: `consult -m <model_id> \"question\"` — ALWAYS check available models first: `consult models`\n"
-                        f"Model names are FULL IDs with provider prefix, e.g. `google/gemini-2.5-pro`, `openai/gpt-5-codex`, `deepseek/deepseek-r1` — DO NOT abbreviate.\n"
-                        f"Attach a file as context: `consult -f file.py \"question\"`\n"
-                        f"Tribunal — multi-model AI debate: `consult debate \"problem\"`\n"
-                        f"  File context: `consult debate -f file.py \"problem\"`\n"
-                        f"  Default roles: `--analyst claude-code/opus --arbiter claude-code/opus`\n"
-                        f"  Pick Advocate and Critic as needed from: `openai/gpt-5-codex`, `deepseek/deepseek-r1`, `google/gemini-2.5-pro`\n"
-                        f'  Example: `consult debate "problem" --analyst claude-code/opus --advocate openai/gpt-5-codex --critic deepseek/deepseek-r1 --arbiter claude-code/opus`\n'
-                        f"\n"
-                        f"## Task management (CLI tool)\n\n"
-                        f"IMPORTANT: Use the `tasks` CLI tool via Bash — NOT the built-in TaskCreate/TaskUpdate/TaskList tools.\n"
-                        f"The built-in task tools are a different system. Always use `tasks` in Bash.\n\n"
-                        f"```bash\n"
-                        f"tasks list {name}                           # show all tasks\n"
-                        f"tasks context {name}                        # show tasks + next task instructions\n"
-                        f'tasks add {name} "description"              # add a task\n'
-                        f"tasks done {name} <task_id>                 # mark task as done\n"
-                        f"tasks --help                                # full help\n"
-                        f"```\n\n"
-                        f"Do NOT pick up tasks on your own. Only execute tasks when the auto-trigger system sends you a command.\n"
-                    )
+                    f.write(_render_claude_md(name))
             except IOError as e:
                 self.lbl_status.set_markup(
                     f'<span foreground="red">CLAUDE.md: {GLib.markup_escape_text(str(e))}</span>'
                 )
                 return False
+
+        # T2.9 + #92: mirror CLAUDE.md to every provider's context file
+        # (Copilot's AGENTS.md, Aider's AIDER.md, …). Driven by each
+        # provider's capabilities.context_file — adding a new provider
+        # auto-extends this without touching the wizard. Symlink first;
+        # falls back to a copy on filesystems that don't support links.
+        # Failures are non-fatal — the project still works for Claude.
+        from bterminal.ctx.helpers import (
+            ensure_context_files_for_all_providers,
+        )
+        ensure_context_files_for_all_providers(self.project_dir)
 
         self.project_name = name
         self.result_prompt = _build_intro_prompt(name)

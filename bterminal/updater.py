@@ -301,13 +301,31 @@ def _prompt_update(window, log, errata=None):
     return False
 
 
-def _fetch_remote_license():
-    """Return LICENSE.md from origin/master, or None on failure."""
+def _remote_license_blob_path():
+    """Resolve which LICENSE blob to fetch from origin/master.
+
+    The repo root `LICENSE.md` is a symlink to
+    `defaults/license/LICENSE.en.md`. `git show origin/master:LICENSE.md`
+    on a symlink returns the SYMLINK TARGET (a path string), not the
+    pointed-to file's contents — the dialog ends up showing that path
+    instead of license text.
+
+    We read the active UI language and target the per-language blob
+    directly. Falls back to LICENSE.en.md if the active language has
+    no translation in origin/master yet.
+    """
+    from bterminal.i18n import current_language
+    lang = current_language() or "en"
+    return f"defaults/license/LICENSE.{lang}.md"
+
+
+def _git_show_origin(blob_path):
+    """`git show origin/master:<blob_path>` → str or None on any error."""
     if not REPO_DIR:
         return None
     try:
         result = subprocess.run(
-            ["git", "show", "origin/master:LICENSE.md"],
+            ["git", "show", f"origin/master:{blob_path}"],
             cwd=REPO_DIR, capture_output=True, text=True, timeout=10,
         )
         if result.returncode == 0:
@@ -317,12 +335,27 @@ def _fetch_remote_license():
     return None
 
 
+def _fetch_remote_license():
+    """Return remote LICENSE text from origin/master, or None on failure."""
+    blob = _remote_license_blob_path()
+    text = _git_show_origin(blob)
+    if text is None and not blob.endswith("LICENSE.en.md"):
+        text = _git_show_origin("defaults/license/LICENSE.en.md")
+    return text
+
+
 def _read_local_license():
-    """Return on-disk LICENSE.md (REPO_DIR), or None on failure."""
+    """Return on-disk LICENSE text (per-active-language), or None.
+
+    Uses license._resolve_license_path() so we read the actual
+    per-language file instead of dereferencing the root LICENSE.md
+    symlink ourselves.
+    """
     if not REPO_DIR:
         return None
     try:
-        with open(os.path.join(REPO_DIR, "LICENSE.md"), encoding="utf-8") as fh:
+        from bterminal.license import _resolve_license_path
+        with open(_resolve_license_path(), encoding="utf-8") as fh:
             return fh.read()
     except OSError:
         return None
@@ -394,6 +427,113 @@ def _restart_bterminal():
     os.execv(sys.executable, [sys.executable] + sys.argv)
 
 
+# ─── V1: dirty-tree-safe git pull (pure helpers, testable) ─────────────────
+
+
+def _git_repo_is_dirty(cwd: str) -> bool:
+    """True iff `git status --porcelain` reports any modified, staged
+    or untracked files. Used by `_do_update` to detect when an auto-
+    stash is needed before `git pull` (V1 fix — image bug 2026-05-06).
+    """
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=cwd, capture_output=True, text=True, timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    if result.returncode != 0:
+        return False
+    return bool(result.stdout.strip())
+
+
+def _git_pull_with_autostash(cwd: str, stash_msg: str = "bterminal-auto-update") -> dict:
+    """V1 — git pull that survives uncommitted local changes.
+
+    Flow:
+      1. If dirty → `git stash push -u -m <msg>` (untracked too).
+      2. `git pull origin master`.
+      3. If we stashed → `git stash pop`. Conflict during pop leaves
+         the stash intact so the user can resolve manually.
+
+    Returns dict:
+      ok            (bool)  — True iff pull succeeded AND stash pop
+                              succeeded (when applicable).
+      stashed       (bool)  — True iff we created a stash.
+      stash_popped  (bool)  — True iff the stash was successfully popped
+                              (False on conflict — stash kept for user).
+      error         (str|None) — diagnostic on failure.
+      pull_stdout   (str)   — captured pull output (status display).
+    """
+    dirty = _git_repo_is_dirty(cwd)
+
+    stashed = False
+    if dirty:
+        stash = subprocess.run(
+            ["git", "stash", "push", "-u", "-m", stash_msg],
+            cwd=cwd, capture_output=True, text=True, timeout=15,
+        )
+        if stash.returncode != 0:
+            return {
+                "ok": False, "stashed": False, "stash_popped": False,
+                "error": (
+                    "git stash push failed:\n"
+                    + (stash.stderr or stash.stdout)
+                ),
+                "pull_stdout": "",
+            }
+        stashed = True
+
+    pull = subprocess.run(
+        ["git", "pull", "origin", "master"],
+        cwd=cwd, capture_output=True, text=True, timeout=30,
+    )
+
+    if pull.returncode != 0:
+        # Pull failed — restore stash before bailing so user's tree
+        # comes back to its pre-update state.
+        if stashed:
+            subprocess.run(
+                ["git", "stash", "pop"], cwd=cwd,
+                capture_output=True, text=True, timeout=15,
+            )
+            stashed = False
+        return {
+            "ok": False, "stashed": False, "stash_popped": False,
+            "error": f"git pull failed:\n{pull.stderr or pull.stdout}",
+            "pull_stdout": pull.stdout,
+        }
+
+    if not stashed:
+        return {
+            "ok": True, "stashed": False, "stash_popped": False,
+            "error": None, "pull_stdout": pull.stdout,
+        }
+
+    # Pull succeeded — restore stash
+    pop = subprocess.run(
+        ["git", "stash", "pop"], cwd=cwd,
+        capture_output=True, text=True, timeout=15,
+    )
+    if pop.returncode != 0:
+        # Conflict on pop. Keep the stash; user resolves later via
+        # `git stash list` + manual merge.
+        return {
+            "ok": False, "stashed": True, "stash_popped": False,
+            "error": (
+                "git stash pop produced conflicts — stash kept for "
+                "manual resolution.\n"
+                + (pop.stderr or pop.stdout)
+            ),
+            "pull_stdout": pull.stdout,
+        }
+
+    return {
+        "ok": True, "stashed": True, "stash_popped": True,
+        "error": None, "pull_stdout": pull.stdout,
+    }
+
+
 def _do_update(window):
     """Pull changes and run install.sh in a background thread."""
     dialog = Gtk.Dialog(title=_("BTerminal update"), transient_for=window, modal=True)
@@ -444,16 +584,26 @@ def _do_update(window):
     def _run():
         stderr_buf: list[str] = []
         try:
-            result = subprocess.run(
-                ["git", "pull", "origin", "master"],
-                cwd=REPO_DIR, capture_output=True, text=True, timeout=30,
+            # V1: dirty-tree-safe pull. Stashes uncommitted changes
+            # before pull and restores them after; bails cleanly on
+            # any failure path (image bug from 2026-05-06).
+            pull_result = _git_pull_with_autostash(REPO_DIR)
+            if pull_result["stashed"]:
+                GLib.idle_add(_append_line,
+                              "stashed local changes (will restore after pull)")
+            GLib.idle_add(
+                _append_line,
+                "git pull: " + ("OK" if pull_result["ok"] else "failed"),
             )
-            GLib.idle_add(_append_line, "git pull: " + ("OK" if result.returncode == 0 else "failed"))
-            if result.returncode != 0:
+            if not pull_result["ok"]:
                 GLib.idle_add(GLib.source_remove, pulse_source)
                 GLib.idle_add(_update_done, window, dialog,
-                              f"git pull failed:\n{result.stderr}")
+                              pull_result["error"]
+                              or "git pull failed (unknown error)")
                 return
+            if pull_result["stashed"] and pull_result["stash_popped"]:
+                GLib.idle_add(_append_line,
+                              "restored local changes from stash")
 
             proc = subprocess.Popen(
                 ["bash", os.path.join(REPO_DIR, "install.sh"), "--no-sudo"],

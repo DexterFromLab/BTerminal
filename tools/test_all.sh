@@ -9,6 +9,8 @@
 # Tryby:
 #   ./tools/test_all.sh              — fast (bez slow E2E ~10s test_exploration)
 #   ./tools/test_all.sh --slow       — full inkluzyjnie z slow E2E
+#   ./tools/test_all.sh --slow-only  — TYLKO @pytest.mark.slow (3 testy, ~15s)
+#   ./tools/test_all.sh --e2e        — tylko tests/e2e/ (alias --layer e2e)
 #   ./tools/test_all.sh --quick      — tylko unit (bez subprocess BTerminal)
 #   ./tools/test_all.sh --layer e2e  — tylko tests/e2e/
 #   ./tools/test_all.sh --watch      — re-run on file change (wymaga pytest-watch)
@@ -57,6 +59,14 @@ case "$MODE" in
         echo "▶ Full suite + slow (random-walk exploration)"
         python3 -m pytest --tb=short
         ;;
+    --slow-only)
+        echo "▶ Slow tests only (3 expected): exploration + manifests + idle_timeout"
+        python3 -m pytest -m slow -v --tb=short
+        ;;
+    --e2e)
+        echo "▶ E2E layer (tests/e2e/) — bterminal_process subprocess fixture"
+        python3 -m pytest tests/e2e/ -m "not slow" -v --tb=short
+        ;;
     --quick)
         echo "▶ Quick — unit only (no subprocess) + i18n audit"
         python3 -m pytest tests/test_config.py tests/test_models.py \
@@ -81,7 +91,8 @@ case "$MODE" in
         ;;
     *)
         echo "✗ unknown mode: $MODE"
-        echo "  use: --fast | --slow | --quick | --layer <e2e|...>  | --watch | --help"
+        echo "  use: --fast | --slow | --slow-only | --e2e | --quick"
+        echo "       | --layer <e2e|...> | --watch | --help"
         exit 1
         ;;
 esac

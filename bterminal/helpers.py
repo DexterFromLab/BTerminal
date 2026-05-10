@@ -51,6 +51,46 @@ _BUNDLED_SKILLS_DIR = Path(__file__).parent.parent / "defaults" / "skills"
 _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg", ".tiff", ".ico"}
 
 
+def format_image_paste_hint(template, path: str) -> str:
+    """Format a per-provider image paste hint (task #69, 2026-05-07).
+
+    Used by terminal_tab._paste_clipboard_image_path to wrap a freshly-
+    saved image path with a vision-prompt hint before pasting it to
+    the AI CLI's stdin. Different providers need different cues:
+
+      - Claude Code: bare path is fine — Anthropic's Read dispatch
+        is aggressive enough that a naked path triggers vision
+        processing on its own. `template` is None for Claude.
+      - GitHub Copilot CLI: bare path lands as plain text in the
+        prompt; the model rarely calls Read on its own. We wrap the
+        path with an imperative hint ('User provided image: {path} —
+        Read it before responding.') so the model deterministically
+        dispatches its Read tool, which returns image bytes to the
+        vision-capable model behind Copilot routing.
+
+    Args:
+        template: provider's `argv.image_paste_template` from
+                  defaults.json. None / empty string → no wrapping.
+        path:     absolute filesystem path of the saved image.
+
+    Returns:
+        The formatted hint when `template` is truthy and contains
+        `{path}` (or any other format placeholder); the bare path
+        otherwise; the literal template if it has no `{path}`
+        placeholder (defensive, lets users disable substitution by
+        setting a static string).
+    """
+    if not template:
+        return path
+    try:
+        return template.format(path=path)
+    except (KeyError, IndexError):
+        # Template has placeholders other than {path} — return as-is
+        # rather than crashing. Defensive: lets users put a literal
+        # template without substitution, e.g. just "Read the image".
+        return template
+
+
 def _list_available_plugins(app) -> list[dict]:
     """Unified view of GTK plugins + sidecar manifests for per-tab UI
     (ClaudeCodeDialog checkbox list, /api endpoints, intro-prompt builder).
@@ -112,12 +152,25 @@ def _compute_intro_prompt_for_tab(app, tab) -> str:
     # cyrkular import (helpers ↔ ui.dialogs).
     from bterminal.ui.dialogs.claude_code import _build_intro_prompt
 
-    config = getattr(tab, "claude_config", None) or {}
+    config = getattr(tab, "ai_config", None) or {}
     custom_prompt = config.get("prompt", "")
     project_dir = config.get("project_dir", "")
+
+    # T1.9: pull provider's long_label from the registry so the intro
+    # prompt header reflects which AI CLI is running. Falls back to
+    # "Claude" if the registry isn't available or the provider name
+    # isn't registered (older tests, partial init, future-version
+    # configs that name an unknown provider).
+    provider_name = config.get("provider", "claude")
+    try:
+        from bterminal.providers import get_registry
+        provider_label = get_registry().get(provider_name).display.long_label
+    except (KeyError, RuntimeError, ImportError):
+        provider_label = "Claude"
+
     if project_dir:
         project_name = _resolve_ctx_project_name(project_dir)
-        prompt = _build_intro_prompt(project_name)
+        prompt = _build_intro_prompt(project_name, provider_label=provider_label)
         if custom_prompt:
             prompt += "\n\n" + custom_prompt
     else:

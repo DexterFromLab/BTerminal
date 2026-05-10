@@ -134,7 +134,7 @@ def test_smoke_open_claude_tab_seeded(bterminal_process, bt_stderr_watcher, seed
     bt_stderr_watcher.check("baseline")
 
     resp = bterminal_process.http_client.post(
-        "/api/tabs/claude", json={"config_name": "smoke_test"}
+        "/api/tabs/ai/claude", json={"config_name": "smoke_test"}
     )
     if resp.status_code == 404:
         pytest.skip(

@@ -36,6 +36,10 @@ def _server_responds(timeout=0.5) -> bool:
 @pytest.mark.slow
 def test_idle_watchdog_stops_server():
     home = tempfile.mkdtemp(prefix="bterminal-idle-test-")
+    # Pre-accept license so the subprocess doesn't open a modal GTK
+    # dialog (see tests/_subprocess_helpers.py).
+    from tests._subprocess_helpers import seed_license
+    seed_license(home)
     env = {
         **os.environ,
         "HOME": home,
