@@ -2,9 +2,66 @@
 
 A GTK 3 terminal emulator built for developers who work with SSH servers and Claude Code. Combines session management, macro automation, a persistent context database, multi-model AI consultation, task orchestration, git awareness, a skills library and a global rules system in a single window. Ships with Catppuccin Mocha (dark) and Latte (light) themes.
 
-**Current release: v1.3.0**
+**Current release: v1.3.1**
 
 ![BTerminal](screenshot.png)
+
+## What's new in v1.3.1
+
+Stability & UX bug-fix release driven by manual QA in Polish locale.
+All fixes verified end-to-end on real VM with semi-automatic UI driver
+(`tools/_e2e_ui_driver.sh` + `tools/_e2e_atspi_driver.py`).
+
+**Aider provider:**
+- Aider session now receives `--read AIDER.md` (or `CLAUDE.md` fallback)
+  at spawn, so the LLM sees project conventions from prompt #1 instead
+  of relying on auto-discovery (which aider 0.86.2 does not do).
+- Active ctx rules are materialized to a per-spawn temp file and
+  passed via `--read` — rules reach the LLM context immediately
+  rather than waiting for the periodic PTY-feed threshold.
+
+**Pull Ollama model dialog:**
+- Curated dropdown of 7 recommended tags (qwen2.5-coder, deepseek-coder-v2,
+  codellama, llama3.1, qwen2.5, llava) plus free-form Entry for new
+  releases.
+- "Browse all models on ollama.com →" link button.
+- Warning dialog before pulling models below 3 B parameters (qwen 0.5b
+  cannot follow Aider's edit format).
+- Pull failure messages now stripped of ANSI cursor sequences and
+  mapped to short Polish text (`Model 'X' nie istnieje w bibliotece
+  Ollama. Sprawdź pisownię na ollama.com/library.` etc.) instead of
+  multi-line stderr dumps.
+
+**Options dialog:**
+- Wider default size (720 × content) + min size 680 × 480 + resizable
+  so longer Polish (and other non-English) labels fit without left-edge
+  cropping.
+- Persistent vertical scrollbar (≥ 12 px) with overlay-scrolling off so
+  expanded `AI providers` + `Local Models` sections stay navigable.
+- Theme combo Save now applies the picked target directly via a new
+  idempotent `_set_theme(target)` setter — fixes the Light → Dark
+  regression after Dark → Light.
+
+**Polish locale completeness:**
+- `Diagnostyka…` / `Zainstaluj zależności…` Tools menu items.
+- `Dodaj wskazówkę vision przy wklejaniu obrazów do sesji Copilot`
+  Options checkbox.
+- `Pobierz model Ollama` / `Pobierz` / `Pobieranie nieudane` /
+  `Model pobrany` Pull dialog strings.
+- `Nowa sesja AI…` File menu (replaces `Nowa sesja Claude Code…` that
+  predated multi-provider work; clicking it opens the same
+  provider-picker the sidebar `Add ▾` uses).
+
+**Test infrastructure:**
+- `tools/_e2e_live_monitor.sh` rewritten to action-driven mode —
+  screenshots taken only on `tag <name>` instead of polling every
+  N seconds. Eliminates thousands of duplicate frames per test run.
+- New `tools/_e2e_atspi_driver.py` accessibility-tree driver lets pin
+  tests click GTK widgets by label (XPath-equivalent) instead of
+  flaky `xdotool mousemove` coordinates.
+- 14 new pytest pin tests under `tests/e2e/test_*` — one per fixed
+  bug — each combining structural source/catalog parsing with
+  behavioural xvfb-driven contract checks.
 
 ## Features
 
