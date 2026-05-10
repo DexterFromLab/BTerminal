@@ -5,6 +5,7 @@ target `bterminal/ui/dialogs/options.py` in a later migration etap.
 """
 
 import os
+import re
 
 import gi
 gi.require_version("Gtk", "3.0")
@@ -18,6 +19,30 @@ from bterminal.i18n import (
     init_locale,
     refresh_translatables,
 )
+
+# BUG#4: parse param count from common ollama tag suffixes.
+# Examples: "qwen2.5-coder:7b" → 7.0, "qwen2.5-coder:0.5b" → 0.5,
+# "model:500m" → 0.5, "custom:latest" → None.
+_TAG_SIZE_RE = re.compile(r":(\d+(?:\.\d+)?)([bm])$", re.IGNORECASE)
+
+
+def _model_param_count_b(tag: str) -> float | None:
+    """Return parameter count in billions, or None if tag has no
+    recognisable size suffix. The b/m suffix maps to billions/millions
+    (m → /1000)."""
+    if not isinstance(tag, str):
+        return None
+    m = _TAG_SIZE_RE.search(tag.strip().lower())
+    if not m:
+        return None
+    n = float(m.group(1))
+    if m.group(2) == "m":
+        n /= 1000.0
+    return n
+
+
+# Threshold below which models are flagged as too small for Aider.
+_SMALL_MODEL_THRESHOLD_B = 3.0
 
 
 class OptionsDialog(Gtk.Dialog):
@@ -40,13 +65,20 @@ class OptionsDialog(Gtk.Dialog):
                     screen_h = geom.height
         except Exception:
             pass
-        self.set_default_size(560, min(720, int(screen_h * 0.8)))
+        # BUG#5 fix: PL strings are 30-40% wider than EN. Bumping
+        # default size + min size from (560,…)/(560,480) to
+        # (720,…)/(680,480) accommodates the longer labels in PL/DE/FR
+        # locales without ucięcia (e.g. 'Sprawdzaj aktualizacje przy
+        # starcie:' ≈ 240px just for the label column).
+        self.set_default_size(720, min(720, int(screen_h * 0.8)))
         # #153: pin a floor on the dialog so expander collapse can't
         # shrink it below a usable height — otherwise Save/Cancel +
-        # the other expander vanish into a 1-line window. Width 560
-        # to keep entry/combo widgets readable; height 480 is the
-        # natural size of the always-visible top sections.
-        self.set_size_request(560, 480)
+        # the other expander vanish into a 1-line window. Width 680
+        # for PL fits; height 480 keeps top sections natural.
+        self.set_size_request(680, 480)
+        # BUG#5: allow user to expand wider if even 720 not enough
+        # for their locale (e.g. some German strings exceed Polish).
+        self.set_resizable(True)
         self.set_border_width(0)
         self._app = parent
 
@@ -59,11 +91,27 @@ class OptionsDialog(Gtk.Dialog):
         scrolled = Gtk.ScrolledWindow()
         scrolled.set_policy(Gtk.PolicyType.AUTOMATIC,
                             Gtk.PolicyType.AUTOMATIC)
-        scrolled.set_min_content_height(min(560, int(screen_h * 0.7)))
+        # BUG#7: lower min-content-height so PL+expanded reliably
+        # overflows → scrollbar visible. Was 560 which on 944px screen
+        # left enough room for some content layouts to fit naturally.
+        scrolled.set_min_content_height(min(440, int(screen_h * 0.55)))
         # propagate-natural-height=True would make the ScrolledWindow
         # grow to fit children → defeats the cap. Keep False so the
         # vertical scrollbar appears once content exceeds min height.
         scrolled.set_propagate_natural_height(False)
+        # BUG#7 fix: GTK overlay scrolling makes scrollbars disappear
+        # until hover, and the default GtkAdwaita "thin scrollbar" is
+        # only ~5px wide. Force a usable persistent gutter.
+        scrolled.set_overlay_scrolling(False)
+        _scrollbar_css = Gtk.CssProvider()
+        _scrollbar_css.load_from_data(
+            b"scrolledwindow scrollbar, "
+            b"scrolledwindow scrollbar slider { min-width: 12px; }"
+        )
+        scrolled.get_style_context().add_provider(
+            _scrollbar_css,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+        )
         outer_content.pack_start(scrolled, True, True, 0)
         # All section widgets get packed into `content` (a vertical
         # box) which lives inside the ScrolledWindow.
@@ -577,7 +625,7 @@ class OptionsDialog(Gtk.Dialog):
             title=_("Pull Ollama model"),
             transient_for=self, modal=True,
         )
-        dlg.set_default_size(400, -1)
+        dlg.set_default_size(440, -1)
         dlg.add_button(_("Cancel"), Gtk.ResponseType.CANCEL)
         dlg.add_button(_("Pull"), Gtk.ResponseType.OK)
         box = dlg.get_content_area()
@@ -587,22 +635,76 @@ class OptionsDialog(Gtk.Dialog):
         lbl = Gtk.Label(xalign=0, wrap=True, max_width_chars=50)
         recs = system_probe.recommend_models(system_probe.probe_system())
         rec_hint = (recs[0]["ollama_tag"] if recs
-                    else "qwen2.5-coder:0.5b")
+                    else "qwen2.5-coder:7b")
+        # BUG#4 fix: hint that models below 3B params don't work with
+        # aider's edit format. Helps the user pick before they hit Pull.
         lbl.set_markup(
-            f"Model name (e.g. <tt>{rec_hint}</tt>, "
-            f"<tt>llama3.1:8b</tt>):")
+            _("Pick a model from the list below or type a custom tag.")
+            + "\n<small>"
+            + _("Note: models below 3B parameters often fail with "
+                "Aider's edit format.")
+            + "</small>")
         box.pack_start(lbl, False, False, 0)
 
-        entry = Gtk.Entry()
+        # BUG#8 fix: ComboBoxText.new_with_entry() — dropdown with
+        # 7 curated tags + free-form Entry for new releases. User picks
+        # from list OR types custom tag.
+        _CURATED_OLLAMA_MODELS = [
+            "qwen2.5-coder:7b",       # primary aider recommendation
+            "qwen2.5-coder:3b",       # smallest still-usable for aider
+            "deepseek-coder-v2:16b",  # heavyweight, RAM-permitting
+            "codellama:7b",           # fallback general coder
+            "llama3.1:8b",            # general-purpose, multi-task
+            "qwen2.5:14b",            # general-purpose, larger
+            "llava:13b",              # vision-capable
+        ]
+        combo = Gtk.ComboBoxText.new_with_entry()
+        for tag in _CURATED_OLLAMA_MODELS:
+            combo.append_text(tag)
+        combo.set_active(0)  # default to first curated
+        # The internal Entry inherits placeholder/activates_default;
+        # set both so Enter triggers OK button.
+        entry = combo.get_child()
         entry.set_placeholder_text(rec_hint)
         entry.set_activates_default(True)
-        box.pack_start(entry, False, False, 0)
+        box.pack_start(combo, False, False, 0)
+
+        # BUG#8 fix: link to ollama.com/library for power users who
+        # want to browse the full catalog without leaving the dialog.
+        link_btn = Gtk.LinkButton.new_with_label(
+            "https://ollama.com/library",
+            _("Browse all models on ollama.com →"),
+        )
+        link_btn.set_halign(Gtk.Align.START)
+        box.pack_start(link_btn, False, False, 0)
+
         dlg.set_default_response(Gtk.ResponseType.OK)
         dlg.show_all()
 
         if dlg.run() == Gtk.ResponseType.OK:
-            name = entry.get_text().strip() or rec_hint
+            name = combo.get_active_text() or ""
+            name = name.strip() or rec_hint
             dlg.destroy()
+            # BUG#4: warn-and-confirm for sub-3B models. If user
+            # picks YES → fall through to pull. NO → bail out.
+            size = _model_param_count_b(name)
+            if size is not None and size < _SMALL_MODEL_THRESHOLD_B:
+                confirm = Gtk.MessageDialog(
+                    transient_for=self, modal=True,
+                    message_type=Gtk.MessageType.WARNING,
+                    buttons=Gtk.ButtonsType.YES_NO,
+                    text=_("{name} has only {size}B parameters").format(
+                        name=name, size=size),
+                    secondary_text=_(
+                        "Models below 3B parameters often fail to "
+                        "follow Aider's edit format and produce empty "
+                        "or repeated responses. Are you sure you want "
+                        "to pull this model?"),
+                )
+                response = confirm.run()
+                confirm.destroy()
+                if response != Gtk.ResponseType.YES:
+                    return
             self._pull_model_blocking(name, ollama_client)
         else:
             dlg.destroy()
@@ -635,7 +737,7 @@ class OptionsDialog(Gtk.Dialog):
             message_type=(Gtk.MessageType.INFO if ok
                            else Gtk.MessageType.ERROR),
             buttons=Gtk.ButtonsType.OK,
-            text=("Model pulled" if ok else "Pull failed"),
+            text=(_("Model pulled") if ok else _("Pull failed")),
             secondary_text=msg,
         )
         result.run()
@@ -779,9 +881,9 @@ class OptionsDialog(Gtk.Dialog):
         global FONT
         FONT = new_font
 
-        # Apply theme if changed
-        if new_theme != _current_theme:
-            self._app._toggle_theme()
+        # BUG#14 fix: target-driven setter so user's combo pick is
+        # honored exactly, regardless of `_current_theme` global state.
+        self._app._set_theme(new_theme)
 
         # Apply font to all open terminals
         self._app._apply_font(new_font)
