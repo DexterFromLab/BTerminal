@@ -30,9 +30,23 @@ def test_options_roundtrip(tmp_path, monkeypatch):
         "tell_ai_language": False,
     }
     config._save_options(payload)
+    # Disk file matches what we saved verbatim.
     assert json.loads(f.read_text()) == payload
+    # _load_options merges defaults for keys missing from disk
+    # (forward-compat for new options like image_paste_hint_enabled).
+    # Reloaded dict must contain every saved key with our value, plus
+    # default-filled keys for anything we didn't write.
     loaded = config._load_options()
-    assert loaded == payload
+    for k, v in payload.items():
+        assert loaded[k] == v, (
+            f"saved {k}={v!r} not preserved on reload; got {loaded.get(k)!r}"
+        )
+    for k, v in config._OPTIONS_DEFAULTS.items():
+        if k not in payload:
+            assert loaded[k] == v, (
+                f"default for newly-introduced option {k!r} should fill in; "
+                f"got {loaded.get(k)!r}"
+            )
 
 
 def test_options_corrupt_json_falls_back(tmp_path, monkeypatch):

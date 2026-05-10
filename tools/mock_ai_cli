@@ -13,8 +13,21 @@ Scenario format:
       ...
     ],
     "default_reply": "<text>",     // optional, when no rule matches
-    "exit_on": "<regex>"           // optional, exit cleanly on match
+    "exit_on": "<regex>",          // optional, exit cleanly on match
+    "emit_events_jsonl": {         // optional (T3.4) — Copilot tail-f
+      "path": "...",               // target events.jsonl (~ expanded)
+      "events": [
+        {"delay_ms": 100, "event": {"type": "session.start", ...}},
+        ...
+      ]
+    }
   }
+
+When `emit_events_jsonl` is present, a background thread starts that
+writes each scripted event to the target file after its `delay_ms`,
+with line-buffered flush so a tail-f reader sees events in real time.
+Mirrors the Copilot CLI behavior (events.jsonl produced incrementally)
+so E2E tests can verify CopilotStatsReader / T4.1 idle detection.
 
 Usage:
   MOCK_AI_CLI_SCENARIO=/path/to/scenario.json mock_ai_cli [args...]
@@ -29,6 +42,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 
 LOG_PATH = os.environ.get(
@@ -73,10 +87,72 @@ def _match_response(scenario, line):
     return None
 
 
+def _start_events_emitter(scenario):
+    """T3.4: spawn a background thread that writes scripted events to
+    the target events.jsonl with per-event `delay_ms` pauses.
+
+    Scenarios opt in by adding an `emit_events_jsonl` directive:
+      {"emit_events_jsonl": {
+          "path": "~/.copilot/session-state/<uuid>/events.jsonl",
+          "events": [
+              {"delay_ms": 100, "event": {"type": "session.start", ...}},
+              ...
+          ]}}
+
+    Returns the started Thread instance (or None if the directive is
+    absent / malformed). Daemon=True so the mock exits cleanly even
+    if the emitter is mid-sleep.
+    """
+    spec = scenario.get("emit_events_jsonl")
+    if not isinstance(spec, dict):
+        return None
+    path = os.path.expanduser(spec.get("path", "") or "")
+    events = spec.get("events") or []
+    if not path or not isinstance(events, list) or not events:
+        return None
+
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+
+    def _emit():
+        # Append-mode + line-buffered so a tail-f reader sees each
+        # event as it's written. Truncation is the caller's concern
+        # (test fixtures should ensure a clean dir before launch).
+        try:
+            with open(path, "a", buffering=1, encoding="utf-8") as fh:
+                for entry in events:
+                    if not isinstance(entry, dict):
+                        continue
+                    delay = entry.get("delay_ms", 0) / 1000.0
+                    event = entry.get("event")
+                    if delay > 0:
+                        time.sleep(delay)
+                    if event is None:
+                        continue
+                    line = json.dumps(event) + "\n"
+                    fh.write(line)
+                    fh.flush()
+                    _log("emit_event", line.rstrip("\n")[:200])
+        except OSError as exc:
+            _log("emit_error", str(exc))
+
+    thread = threading.Thread(
+        target=_emit, daemon=True, name="mock-events-emitter",
+    )
+    thread.start()
+    _log("emitter_started", f"path={path} count={len(events)}")
+    return thread
+
+
 def main():
     scenario = _load_scenario()
     _log("startup", f"argv={sys.argv} env_scenario={os.environ.get('MOCK_AI_CLI_SCENARIO')}")
     _log("scenario_loaded", json.dumps(scenario)[:500])
+
+    # T3.4: kick off the events.jsonl emitter (if scenario opts in).
+    # Runs in a daemon thread so the main stdin loop is not blocked.
+    _start_events_emitter(scenario)
 
     # If first positional arg is intro prompt (not a file), log it.
     # BTerminal passes it as `claude --resume 'long prompt text...'`.

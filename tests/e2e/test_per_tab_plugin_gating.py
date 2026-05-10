@@ -9,12 +9,25 @@ Fix: pass enabled_plugins przez TerminalTab constructor.
 
 Test: open Claude tab z enabled_plugins=[] → assert plugin context
 NIE JEST w intro prompt.
+
+T4.6.2 (2026-05-07): replaces the prior pytestmark.skipif gate with
+a fixture-injected stub claude binary (same pattern as
+test_provider_switching.py / test_dual_provider_workflow.py). The
+fixture copies tools/mock_ai_cli into a per-test fake_bin directory
+and prepends it to PATH, so spawn_ai_cli always finds an executable
+regardless of whether the host has Claude Code installed under /usr
+or under the user's ~/.local/bin. The intro prompt is computed and
+record_feed'ed by terminal_tab.py BEFORE the binary is exec'd, so
+once the spawn itself succeeds the intro_prompt feed event is emitted
+and the gating assertions can fire.
 """
 
 import base64
 import json
 import os
+import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -25,6 +38,8 @@ import urllib.request
 import pytest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+MOCK_SRC = os.path.join(REPO_ROOT, "tools", "mock_ai_cli")
+CLAUDE_SCENARIO = os.path.join(REPO_ROOT, "tests", "scenarios", "claude_basic.json")
 
 
 @pytest.fixture
@@ -53,17 +68,42 @@ def isolated_bterminal():
 
     test_proj = os.path.join(home, "test_proj")
     os.makedirs(test_proj, exist_ok=True)
-    sess_path = os.path.join(home, ".config/bterminal/claude_sessions.json")
+    # T4.6.1: canonical R4.2 schema (provider + provider_options).
+    # Pre-T4.6.1 fixture seeded legacy claude_sessions.json and relied
+    # on the T1.7 migration to add `provider="claude"`; that worked for
+    # the legacy /api/tabs/claude name-only endpoint but the new
+    # /api/tabs/ai/claude needs the field present from the start.
+    sess_path = os.path.join(home, ".config/bterminal/ai_sessions.json")
     with open(sess_path, "w") as f:
         json.dump([
-            {"id": "a", "name": "with_default", "project_dir": test_proj,
-             "prompt": "", "color": "#000", "resume": False,
-             "skip_permissions": True, "sudo": False, "folder": ""},
-            {"id": "b", "name": "with_empty", "project_dir": test_proj,
-             "prompt": "", "color": "#000", "resume": False,
-             "skip_permissions": True, "sudo": False, "folder": "",
-             "enabled_plugins": []},
+            {"id": "a", "name": "with_default", "provider": "claude",
+             "project_dir": test_proj, "prompt": "", "color": "#000",
+             "folder": "",
+             "provider_options": {"resume": False,
+                                  "skip_permissions": True, "sudo": False}},
+            {"id": "b", "name": "with_empty", "provider": "claude",
+             "project_dir": test_proj, "prompt": "", "color": "#000",
+             "folder": "", "enabled_plugins": [],
+             "provider_options": {"resume": False,
+                                  "skip_permissions": True, "sudo": False}},
         ], f)
+
+    # Pre-accept license so the subprocess doesn't open a modal GTK
+    # dialog (see tests/_subprocess_helpers.py).
+    from tests._subprocess_helpers import seed_license
+    seed_license(home)
+
+    # T4.6.2: stub claude binary in an isolated bin dir so spawn_ai_cli
+    # finds an executable even when the host has no system-wide claude
+    # install (e.g. VMs where Claude lives only under the dev user's
+    # ~/.local/bin and isn't visible to a subprocess with HOME=tmpdir).
+    fake_bin = os.path.join(home, "fake-bin")
+    os.makedirs(fake_bin, exist_ok=True)
+    fake_claude = os.path.join(fake_bin, "claude")
+    shutil.copy(MOCK_SRC, fake_claude)
+    st = os.stat(fake_claude)
+    os.chmod(fake_claude,
+             st.st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
     # Bind to ephemeral port (unique per test invocation) — pytest may
     # run testów równolegle albo tuż po sobie, fixed port collides
@@ -72,7 +112,13 @@ def isolated_bterminal():
     s.bind(("127.0.0.1", 0))
     port = str(s.getsockname()[1])
     s.close()
-    env = {**os.environ, "HOME": home, "BTERMINAL_DEBUG_REST_PORT": port}
+    env = {
+        **os.environ,
+        "HOME": home,
+        "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}",
+        "BTERMINAL_DEBUG_REST_PORT": port,
+        "MOCK_AI_CLI_SCENARIO": CLAUDE_SCENARIO,
+    }
     proc = subprocess.Popen(
         ["xvfb-run", "-a", sys.executable, "-m", "bterminal", "--debug-rest"],
         cwd=REPO_ROOT, env=env,
@@ -117,7 +163,6 @@ def isolated_bterminal():
             proc.wait(timeout=2)
         except subprocess.TimeoutExpired:
             pass
-    import shutil
     shutil.rmtree(home, ignore_errors=True)
 
 
@@ -135,7 +180,7 @@ def _fetch_last_intro(client):
 
 def _open_claude(client, config_name):
     req = urllib.request.Request(
-        f"{client['base']}/api/tabs/claude",
+        f"{client['base']}/api/tabs/ai/claude",
         data=json.dumps({"config_name": config_name}).encode(),
         headers={"Authorization": f"Bearer {client['token']}",
                  "Content-Type": "application/json"},

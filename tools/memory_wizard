@@ -21,9 +21,15 @@ Flow:
   5. Configure: set inject_every / refresh_every
   6. Summary: what changed, rollback instructions
 
-Usage: memory_wizard <project> [--project-dir <dir>]
+Usage: memory_wizard <project> [--project-dir <dir>] [--provider claude|copilot]
+
+T3.8: --provider chooses which AI CLI runs the wizard's analyze step.
+Without the flag, memory_wizard reads ~/.config/bterminal/ai_sessions.json
+to find a session matching <project> (by name or project_dir) and
+uses its `provider` field. Falls back to "claude" if no match.
 """
 
+import json
 import os
 import re
 import sqlite3
@@ -33,6 +39,14 @@ from pathlib import Path
 
 CTX_DB = Path.home() / ".claude-context" / "context.db"
 CLAUDE_GLOBAL = Path.home() / ".claude" / "CLAUDE.md"
+AI_SESSIONS_FILE = Path.home() / ".config" / "bterminal" / "ai_sessions.json"
+
+_SUPPORTED_PROVIDERS = ("claude", "copilot")
+
+# Module-level — set by main() after CLI arg parsing. Keeps the four
+# legacy `_claude_ask(...)` call sites unchanged; only the dispatch
+# happens in _ai_ask below.
+_ACTIVE_PROVIDER = "claude"
 
 
 def _run(cmd, **kw):
@@ -43,11 +57,94 @@ def _ctx(*args):
     return _run(["ctx"] + list(args))
 
 
-def _claude_ask(prompt: str) -> str:
+def _detect_provider_from_sessions(project, project_dir, ai_sessions_path):
+    """T3.8: read ai_sessions.json and return the provider for the
+    session whose `name` or `project_dir` matches.
+
+    Returns the matched provider name (str) or None when:
+      - the file doesn't exist (fresh install, no BTerminal config),
+      - the file is malformed,
+      - no session matches,
+      - the matched session declares an unsupported provider.
+    """
+    try:
+        path = Path(ai_sessions_path)
+    except TypeError:
+        return None
+    if not path.exists():
+        return None
+    try:
+        sessions = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(sessions, list):
+        return None
+    for s in sessions:
+        if not isinstance(s, dict):
+            continue
+        name_match = s.get("name") == project
+        dir_match = bool(project_dir) and s.get("project_dir") == project_dir
+        if not (name_match or dir_match):
+            continue
+        provider = s.get("provider", "claude")
+        if provider in _SUPPORTED_PROVIDERS:
+            return provider
+    return None
+
+
+def _resolve_provider(project, project_dir, explicit,
+                      ai_sessions_path=None):
+    """Pick the AI provider for this run.
+
+    Priority:
+      1. `explicit` (the --provider CLI flag) — if it's a supported name.
+      2. Auto-detect from ai_sessions.json (matching project name or dir).
+      3. Default: 'claude' (legacy behavior preserved for users who
+         haven't migrated to T1.7's ai_sessions.json yet).
+    """
+    if explicit and explicit in _SUPPORTED_PROVIDERS:
+        return explicit
+    if ai_sessions_path is None:
+        ai_sessions_path = AI_SESSIONS_FILE
+    detected = _detect_provider_from_sessions(
+        project, project_dir, ai_sessions_path,
+    )
+    return detected or "claude"
+
+
+def _build_ai_ask_argv(provider, prompt):
+    """Pure helper: argv + (input_for_stdin) tuple for invoking the
+    chosen provider's CLI in headless mode.
+
+    Claude: prompt arrives via stdin (matches legacy `_claude_ask`).
+    Copilot: prompt is `-p TEXT` arg (Copilot's spec), with TUI-safe
+             flags so output is plain text rather than rich TUI.
+    """
+    if provider == "copilot":
+        return (
+            ["copilot", "-p", prompt, "--no-banner", "--no-color",
+             "--plain-diff"],
+            None,
+        )
+    # default: claude
+    return (
+        ["claude", "--print", "--output-format", "text"],
+        prompt,
+    )
+
+
+def _ai_ask(prompt, provider="claude"):
+    """Send a prompt to the configured AI CLI; return its text reply.
+
+    Provider-aware dispatch (T3.8). Errors are returned as `[Error: …]`
+    strings so callers in the wizard's interactive flow display them
+    inline rather than crashing.
+    """
+    argv, stdin = _build_ai_ask_argv(provider, prompt)
     try:
         result = subprocess.run(
-            ["claude", "--print", "--output-format", "text"],
-            input=prompt,
+            argv,
+            input=stdin,
             text=True, capture_output=True, timeout=120,
         )
         out = result.stdout.strip()
@@ -55,9 +152,20 @@ def _claude_ask(prompt: str) -> str:
             return f"[Error: {result.stderr.strip()[:300]}]"
         return out
     except FileNotFoundError:
-        return "[Error: claude not found]"
+        binary = argv[0] if argv else provider
+        return f"[Error: {binary} not found]"
     except subprocess.TimeoutExpired:
-        return "[Error: Claude timed out]"
+        return f"[Error: {provider.title()} timed out]"
+
+
+def _claude_ask(prompt):
+    """Legacy alias — delegates to the active provider's CLI.
+
+    Kept so the four interactive call-sites in this script (analyze,
+    follow-up, revise, etc.) didn't have to change. main() sets
+    _ACTIVE_PROVIDER after parsing --provider / auto-detection.
+    """
+    return _ai_ask(prompt, _ACTIVE_PROVIDER)
 
 
 # ─── Context collection (read-only) ──────────────────────────────────────────
@@ -996,6 +1104,7 @@ def main():
     project_dir = None
     auto_mode = False
     dry_run = False
+    explicit_provider = None
     i = 2
     while i < len(sys.argv):
         if sys.argv[i] == "--project-dir" and i + 1 < len(sys.argv):
@@ -1007,11 +1116,29 @@ def main():
         elif sys.argv[i] == "--dry-run":
             dry_run = True
             i += 1
+        elif sys.argv[i] == "--provider" and i + 1 < len(sys.argv):
+            candidate = sys.argv[i + 1]
+            if candidate not in _SUPPORTED_PROVIDERS:
+                print(
+                    f"Error: --provider must be one of "
+                    f"{list(_SUPPORTED_PROVIDERS)}, got {candidate!r}",
+                    file=sys.stderr,
+                )
+                sys.exit(2)
+            explicit_provider = candidate
+            i += 2
         else:
             i += 1
 
+    # T3.8: pick the active provider (CLI flag > ai_sessions.json > claude).
+    global _ACTIVE_PROVIDER
+    _ACTIVE_PROVIDER = _resolve_provider(
+        project, project_dir, explicit_provider,
+    )
+
     mode_tag = " [DRY-RUN]" if dry_run else (" [AUTO]" if auto_mode else "")
-    print(f"=== Memory Wizard: {project}{mode_tag} ===\n")
+    provider_tag = f" via {_ACTIVE_PROVIDER}"
+    print(f"=== Memory Wizard: {project}{mode_tag}{provider_tag} ===\n")
 
     if not auto_mode and not dry_run:
         if not _preflight(project, project_dir):

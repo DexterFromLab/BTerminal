@@ -19,7 +19,7 @@ def test_app_module_imports_all_panels():
         "ConsultPanel", "TaskListPanel", "GitPanel", "MemoryPanel",
         "SkillsPanel", "FilesPanel", "PluginManagerPanel", "CtxManagerPanel",
         "OptionsDialog", "ClaudeCodeDialog", "CtxEditDialog",
-        "ConsultManager", "SessionManager", "ClaudeSessionManager",
+        "ConsultManager", "SessionManager", "AISessionManager",
         "SidecarRunner", "SidecarDiscovery", "BTerminalPlugin",
     )
     for name in expected:
@@ -52,7 +52,7 @@ def test_app_session_managers_classes_match_models():
     module — not accidentally duplicated."""
     from bterminal import models
     assert app.SessionManager is models.SessionManager
-    assert app.ClaudeSessionManager is models.ClaudeSessionManager
+    assert app.AISessionManager is models.AISessionManager
     assert app.ConsultManager is models.ConsultManager
 
 
