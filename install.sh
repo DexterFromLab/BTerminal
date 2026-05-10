@@ -846,6 +846,18 @@ _on_interrupt() {
         printf "    Run ./install.sh again to resume.\n"
     else
         printf "  \033[31m✗\033[0m Interrupted before backup created — partial state.\n"
+        # #112: phase [1/7] runs `mkdir -p "$INSTALL_DIR"` up-front (line
+        # ~940), so a SIGTERM anywhere between that and the file-copy in
+        # phase [5/7] (~line 1678) leaves an empty INSTALL_DIR turd. Walk
+        # any empty subdirs first (extensions/, locale/, …) then rmdir
+        # the parent. rmdir refuses non-empty dirs so a real partial
+        # install (some files copied) is never destroyed by this path.
+        if [[ -n "$INSTALL_DIR" && -d "$INSTALL_DIR" ]]; then
+            find "$INSTALL_DIR" -mindepth 1 -type d -empty -delete 2>/dev/null || true
+            if rmdir "$INSTALL_DIR" 2>/dev/null; then
+                echo "BTERMINAL_INTERRUPT_CLEANED_INSTALL_DIR" >&2
+            fi
+        fi
         printf "    Run ./install.sh again to retry from clean.\n"
         echo "BTERMINAL_INTERRUPT_NO_BACKUP" >&2
     fi
