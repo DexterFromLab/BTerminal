@@ -1,0 +1,190 @@
+{
+  "$schema": "1.0",
+  "default_provider": "claude",
+  "providers": {
+    "claude": {
+      "display": {
+        "icon": "✨",
+        "short_label": "Claude",
+        "long_label": "Claude Code",
+        "color": "#89b4fa",
+        "icon_path": "icons/claude.svg"
+      },
+      "binary": {
+        "search_paths": [
+          "~/.local/bin/claude",
+          "~/.npm-global/bin/claude",
+          "/usr/local/bin/claude",
+          "/usr/bin/claude",
+          "/opt/homebrew/bin/claude",
+          "~/.nvm/versions/node/*/bin/claude"
+        ],
+        "argv_prefix": []
+      },
+      "argv": {
+        "intro_prompt_mode": "positional",
+        "resume": ["--resume"],
+        "continue": ["--continue"],
+        "yolo": ["--dangerously-skip-permissions"],
+        "model": ["--model", "{model}"],
+        "output_format_json": ["--output-format", "stream-json"],
+        "image_paste_template": null
+      },
+      "capabilities": {
+        "intro_prompt": true,
+        "resume_flag": true,
+        "continue_flag": true,
+        "skip_permissions": true,
+        "granular_permissions": false,
+        "supports_sudo": true,
+        "session_log": true,
+        "session_log_path": "~/.claude/projects/{sanitized_cwd}/{session_id}.jsonl",
+        "session_index_db": false,
+        "session_index_db_path": null,
+        "usage_api": true,
+        "usage_api_url": "https://api.anthropic.com/api/oauth/usage",
+        "oauth_creds_file": "~/.claude/.credentials.json",
+        "cost_in_log": true,
+        "rules_inject": true,
+        "task_auto_trigger": true,
+        "stats_bar": true,
+        "stats_bar_no_plan_usage": false,
+        "plan_mode": false,
+        "autopilot": false,
+        "mcp_support": true,
+        "context_file": "CLAUDE.md",
+        "context_file_cumulative": true,
+        "ready_marker": "system.stop",
+        "default_model": "claude-sonnet-4-6"
+      },
+      "pricing": {
+        "claude-opus-4-7":   {"input": 15.0, "output": 75.0, "cache_read": 1.50, "cache_write": 18.75},
+        "claude-opus-4-6":   {"input": 15.0, "output": 75.0, "cache_read": 1.50, "cache_write": 18.75},
+        "claude-sonnet-4-6": {"input":  3.0, "output": 15.0, "cache_read": 0.30, "cache_write":  3.75},
+        "claude-sonnet-4-5": {"input":  3.0, "output": 15.0, "cache_read": 0.30, "cache_write":  3.75},
+        "claude-haiku-4-5":  {"input":  0.80, "output": 4.0, "cache_read": 0.08, "cache_write":  1.00}
+      }
+    },
+    "copilot": {
+      "display": {
+        "icon": "🤖",
+        "short_label": "Copilot",
+        "long_label": "GitHub Copilot CLI",
+        "color": "#a6e3a1",
+        "icon_path": "icons/copilot.svg"
+      },
+      "binary": {
+        "search_paths": [
+          "~/.local/bin/copilot",
+          "~/.npm-global/bin/copilot",
+          "/usr/local/bin/copilot",
+          "/usr/bin/copilot",
+          "/opt/homebrew/bin/copilot",
+          "~/.nvm/versions/node/*/bin/copilot"
+        ],
+        "argv_prefix": []
+      },
+      "argv": {
+        "intro_prompt_mode": "flag",
+        "intro_prompt_flag": "-p",
+        "intro_prompt_flag_interactive": "-i",
+        "resume": ["--resume"],
+        "continue": ["--continue"],
+        "yolo": ["--yolo"],
+        "model": ["--model", "{model}"],
+        "output_format_json": ["--output-format", "json"],
+        "plan": ["--plan"],
+        "tui_safe": ["--no-mouse", "--plain-diff", "--no-color"],
+        "image_paste_template": "User provided image: {path} — Read it before responding."
+      },
+      "capabilities": {
+        "intro_prompt": true,
+        "resume_flag": true,
+        "continue_flag": true,
+        "skip_permissions": true,
+        "granular_permissions": true,
+        "supports_sudo": false,
+        "session_log": true,
+        "session_log_path": "~/.copilot/session-state/{session_id}/events.jsonl",
+        "session_index_db": false,
+        "session_index_db_path": "~/.copilot/session-store.db",
+        "usage_api": false,
+        "usage_api_url": null,
+        "oauth_creds_file": null,
+        "cost_in_log": true,
+        "rules_inject": true,
+        "task_auto_trigger": true,
+        "stats_bar": true,
+        "stats_bar_no_plan_usage": true,
+        "plan_mode": true,
+        "autopilot": false,
+        "mcp_support": false,
+        "context_file": "AGENTS.md",
+        "context_file_cumulative": false,
+        "ready_marker": null,
+        "default_model": "claude-sonnet-4-5"
+      },
+      "auth": {
+        "env_vars": ["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"],
+        "interactive_command": "/login"
+      }
+    },
+    "aider": {
+      "display": {
+        "icon": "🦫",
+        "short_label": "Aider",
+        "long_label": "Aider",
+        "color": "#fab387",
+        "icon_path": "icons/aider.svg"
+      },
+      "binary": {
+        "search_paths": [
+          "~/.local/bin/aider",
+          "~/.local/pipx/venvs/aider-chat/bin/aider",
+          "/usr/local/bin/aider",
+          "/usr/bin/aider",
+          "/opt/homebrew/bin/aider"
+        ],
+        "argv_prefix": []
+      },
+      "argv": {
+        "intro_prompt_mode": "stdin_feed",
+        "model": ["--model", "{model}"],
+        "api_base": ["--openai-api-base", "{url}"],
+        "api_key": ["--openai-api-key", "{key}"],
+        "tui_safe": ["--no-stream", "--no-show-model-warnings"],
+        "resume": ["--restore-chat-history"],
+        "yolo": ["--yes-always"],
+        "image_paste_template": "User provided image: {path} — describe what you see before editing any code."
+      },
+      "capabilities": {
+        "intro_prompt": true,
+        "resume_flag": true,
+        "continue_flag": false,
+        "skip_permissions": true,
+        "granular_permissions": false,
+        "supports_sudo": false,
+        "session_log": true,
+        "session_log_path": "{project_dir}/.aider.chat.history.md",
+        "session_index_db": false,
+        "session_index_db_path": null,
+        "usage_api": false,
+        "usage_api_url": null,
+        "oauth_creds_file": null,
+        "cost_in_log": false,
+        "rules_inject": true,
+        "task_auto_trigger": true,
+        "stats_bar": true,
+        "stats_bar_no_plan_usage": true,
+        "plan_mode": false,
+        "autopilot": false,
+        "mcp_support": false,
+        "context_file": "AIDER.md",
+        "context_file_cumulative": false,
+        "ready_marker": null,
+        "default_model": "openai/qwen2.5-coder:0.5b",
+        "local_endpoint_url": "http://localhost:11434/v1"
+      }
+    }
+  }
+}
