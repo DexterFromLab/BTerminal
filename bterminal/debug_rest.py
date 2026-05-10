@@ -976,6 +976,22 @@ def _route_session_add_ai(h: BTerminalDebugHandler) -> None:
         return app.ai_manager.add(entry)
 
     saved = _via_glib_idle(_add)
+    # #113: parity with sidebar.py's UI flow — when the user adds an AI
+    # session through Add ▼ → Claude Code → OK, sidebar.py:701 runs
+    # _run_ctx_wizard_if_needed which materializes CLAUDE.md and the
+    # per-provider mirrors (AGENTS.md, AIDER.md). REST callers (test
+    # fixtures, automation) deserve the same on-disk scaffolding.
+    # Headless: skip the GUI wizard, write the default template +
+    # mirror via bootstrap_provider_context_files.
+    if entry["project_dir"]:
+        try:
+            from bterminal.ctx.helpers import (
+                bootstrap_provider_context_files,
+            )
+            bootstrap_provider_context_files(entry["project_dir"])
+        except Exception:
+            pass  # non-fatal; session itself was saved successfully
+
     h._send_json(200, {"ok": True, "id": saved.get("id"), "kind": "ai"})
 
 

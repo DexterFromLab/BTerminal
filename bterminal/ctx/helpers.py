@@ -103,6 +103,99 @@ def ensure_agents_md_alongside_claude(project_dir) -> str:
     return ensure_context_file_alongside_claude(project_dir, "AGENTS.md")
 
 
+def _render_claude_md(project_name: str) -> str:
+    """Default CLAUDE.md content for a freshly-bootstrapped project.
+
+    Single source of truth used by both the GUI ctx wizard
+    (CtxSetupWizard._execute) and the REST add_ai handler so UI and
+    REST sessions get identical context scaffolding.
+    """
+    return (
+        f"# {project_name}\n\n"
+        f"Context is loaded automatically via intro prompt. "
+        f"No need to run `ctx get` manually.\n\n"
+        f"During work:\n"
+        f"- Save important discoveries: `ctx set {project_name} <key> <value>`\n"
+        f"- Append to existing: `ctx append {project_name} <key> <value>`\n"
+        f'- Before ending session: `ctx summary {project_name} "<what was done>"`\n'
+        f"\n"
+        f"## Consult & Tribunal (CLI tools)\n\n"
+        f'Consult external AI models: `consult "question"`\n'
+        f'Specific model: `consult -m <model_id> "question"` '
+        f"— ALWAYS check available models first: `consult models`\n"
+        f"Model names are FULL IDs with provider prefix, "
+        f"e.g. `google/gemini-2.5-pro`, `openai/gpt-5-codex`, "
+        f"`deepseek/deepseek-r1` — DO NOT abbreviate.\n"
+        f'Attach a file as context: `consult -f file.py "question"`\n'
+        f'Tribunal — multi-model AI debate: `consult debate "problem"`\n'
+        f'  File context: `consult debate -f file.py "problem"`\n'
+        f"  Default roles: `--analyst claude-code/opus "
+        f"--arbiter claude-code/opus`\n"
+        f"  Pick Advocate and Critic as needed from: "
+        f"`openai/gpt-5-codex`, `deepseek/deepseek-r1`, "
+        f"`google/gemini-2.5-pro`\n"
+        f'  Example: `consult debate "problem" '
+        f"--analyst claude-code/opus --advocate openai/gpt-5-codex "
+        f"--critic deepseek/deepseek-r1 --arbiter claude-code/opus`\n"
+        f"\n"
+        f"## Task management (CLI tool)\n\n"
+        f"IMPORTANT: Use the `tasks` CLI tool via Bash — NOT the "
+        f"built-in TaskCreate/TaskUpdate/TaskList tools.\n"
+        f"The built-in task tools are a different system. "
+        f"Always use `tasks` in Bash.\n\n"
+        f"```bash\n"
+        f"tasks list {project_name}                           # show all tasks\n"
+        f"tasks context {project_name}                        # show tasks + next task instructions\n"
+        f'tasks add {project_name} "description"              # add a task\n'
+        f"tasks done {project_name} <task_id>                 # mark task as done\n"
+        f"tasks --help                                # full help\n"
+        f"```\n\n"
+        f"Do NOT pick up tasks on your own. Only execute tasks "
+        f"when the auto-trigger system sends you a command.\n"
+    )
+
+
+def bootstrap_provider_context_files(
+    project_dir, project_name: str = "",
+) -> dict:
+    """Headless equivalent of CtxSetupWizard's CLAUDE.md generation +
+    per-provider mirroring. Used by REST `POST /api/sessions/ai` (#113)
+    so test-driven session creation produces the same on-disk artefacts
+    as the GUI wizard does.
+
+    Steps:
+      1. Resolve project_name from project_dir basename if not provided.
+      2. Write CLAUDE.md with the default template iff it doesn't exist.
+      3. Mirror to every registered provider's context_file (AGENTS.md,
+         AIDER.md, …) via ensure_context_files_for_all_providers.
+
+    Skips ctx-DB registration on purpose — that requires user-supplied
+    description/key/value which the GUI wizard collects but REST cannot.
+    The user can register later via `ctx init` or by re-opening the
+    sidebar Edit dialog (which triggers the full wizard).
+
+    Returns the mirror result dict (filename → status), or {} on no-op
+    (invalid path) / failure.
+    """
+    if not project_dir:
+        return {}
+    project_dir = os.fspath(project_dir)
+    if not os.path.isdir(project_dir):
+        return {}
+    if not project_name:
+        project_name = _smart_project_name(project_dir) or os.path.basename(
+            project_dir.rstrip("/")
+        )
+    claude_md = os.path.join(project_dir, "CLAUDE.md")
+    if not os.path.exists(claude_md):
+        try:
+            with open(claude_md, "w") as f:
+                f.write(_render_claude_md(project_name))
+        except OSError:
+            return {}
+    return ensure_context_files_for_all_providers(project_dir)
+
+
 def ensure_context_files_for_all_providers(project_dir) -> dict:
     """Walk the provider registry and run the mirror logic for each
     provider that declares a `capabilities.context_file`. Returns a
