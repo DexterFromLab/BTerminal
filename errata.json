@@ -1,5 +1,27 @@
 [
   {
+    "date": "2026-05-10",
+    "message": "BTerminal v1.3.1 — stability + Polish locale bug-fix bundle driven by manual QA. 14 user-visible fixes across the Aider provider, Pull Ollama dialog, Options layout and theme toggle, plus Polish catalog completeness. All fixes verified end-to-end on a real VM with a new semi-automatic UI driver (AT-SPI accessibility tree). Recommended: run install.sh to recompile locale catalogs and pick up the helper scripts; no schema changes, no manual migration needed.",
+    "changes": [
+      "fix(aider): inject --read AIDER.md (or CLAUDE.md fallback) at spawn so the LLM sees project conventions from prompt #1 — aider 0.86.2 does NOT auto-discover the conventions file (BUG#2)",
+      "fix(aider): active ctx rules materialised to a per-spawn temp file and passed via --read; rules reach the model context immediately instead of waiting for the periodic PTY-feed threshold (BUG#3)",
+      "feat(ollama): Pull Ollama model dialog now uses ComboBoxText with 7 curated tags + free-form Entry + a 'Browse all models on ollama.com →' link button (BUG#8)",
+      "feat(ollama): warning dialog before pulling models below 3 B parameters — qwen 0.5b cannot follow Aider's edit format (BUG#4)",
+      "fix(ollama): Pull failed dialog strips ANSI cursor-control sequences from stderr (no more `?2026h ?25l ?1Gpulling manifest ?K` mojibake) (BUG#10)",
+      "fix(ollama): Pull failed dialog maps known errors to short Polish messages ('Model X nie istnieje w bibliotece Ollama. Sprawdź pisownię.') instead of multi-line stderr dumps (BUG#11)",
+      "fix(options): wider default size + min size + resizable so longer Polish labels fit without left-edge cropping (BUG#5)",
+      "fix(options): persistent vertical scrollbar (≥12 px, overlay-scrolling off) when AI providers + Local Models sections are expanded (BUG#7)",
+      "fix(options): theme combo Save uses a new idempotent _set_theme(target) setter — Light → Dark now works regardless of prior state (BUG#14)",
+      "fix(i18n,PL): Diagnostyka… / Zainstaluj zależności… in the Tools menu (BUG#1)",
+      "fix(i18n,PL): 'Dodaj wskazówkę vision przy wklejaniu obrazów do sesji Copilot' Options checkbox (BUG#6)",
+      "fix(i18n,PL): Pobierz model Ollama / Pobierz / Pobieranie nieudane / Model pobrany Pull dialog strings (BUG#9 + BUG#12)",
+      "fix(menu): File menu item renamed from 'Nowa sesja Claude Code…' to 'Nowa sesja AI…' — opens the same provider-picker dialog the sidebar Add ▾ uses, not Claude-only (BUG#13)",
+      "test(e2e): _e2e_live_monitor.sh rewritten to action-driven mode — snapshots taken only on tag <name>, no time-based polling",
+      "test(e2e): new tools/_e2e_atspi_driver.py accessibility-tree driver (pyatspi) — click widgets by LABEL (XPath-equivalent for GTK) instead of flaky mouse coordinates",
+      "test(e2e): 14 new pin tests under tests/e2e/test_*.py covering every fix above with structural + behavioural contract checks"
+    ]
+  },
+  {
     "date": "2026-05-05",
     "message": "BTerminal v1.3.0 — multi-language UI in 13 languages (English, Polski, Deutsch, Español, Français, Italiano, Português, Русский, Українська, Čeština, 中文, 日本語, 한국어), license-acceptance dialog enforced at first launch and before each update, and live language switching from Options without restart. The user can also opt the AI agent into responding in their language. Recommended: run install.sh to compile the new translation catalogs, then accept the localised license on next launch.",
     "changes": [
