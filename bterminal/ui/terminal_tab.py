@@ -47,11 +47,191 @@ from bterminal.config import (
 from bterminal.ui.stats import SessionStatsBar
 
 
+# ─── R7a visual marker helpers (T2.7) ───────────────────────────────────────
+#
+# Per R7a (REQUIREMENTS.md): every tab carries a visual marker that
+# tells the user at a glance which kind of session is running.
+#   AI tabs  → provider.display.icon ("✨", "🤖", ...) + tooltip with
+#              long_label, optional underline in provider.display.color.
+#   SSH tabs → 🔐
+#   local    → 💻
+#
+# compute_tab_label() is a pure function — testable without GTK — so
+# tests can verify the icon/tooltip/color combinations directly.
+
+_DEFAULT_AI_FALLBACK_ICON = "🤖"
+_SSH_TAB_ICON = "🔐"
+_LOCAL_TAB_ICON = "💻"
+
+
+def compute_tab_label(
+    ai_config: dict | None,
+    session_name: str,
+    count: int = 0,
+    registry=None,
+    kind: str = "ai",
+) -> dict:
+    """Compute display text / tooltip / color for a tab label.
+
+    ai_config:    AI session config dict (with `provider` field) or None.
+    session_name: base name of the session.
+    count:        how many sibling tabs already share this name; >0
+                  appends ` #{count+1}` suffix to disambiguate.
+    registry:     ProviderRegistry instance — looked up to fetch the
+                  provider's display metadata. None or unknown name
+                  → fallback to generic AI icon.
+    kind:         "ai" (default), "ssh", "local". When ai_config is
+                  None, this picks SSH/local-specific icons.
+
+    Returns dict with keys: "display", "tooltip", "color".
+    """
+    suffix = f" #{count + 1}" if count > 0 else ""
+
+    if kind == "ssh" or (ai_config is None and kind == "ssh"):
+        return {
+            "display": f"{_SSH_TAB_ICON} {session_name}{suffix}",
+            "tooltip": f"SSH: {session_name}",
+            "color": None,
+        }
+    if kind == "local" or (ai_config is None and kind == "local"):
+        return {
+            "display": f"{_LOCAL_TAB_ICON} {session_name}",
+            "tooltip": f"Local terminal: {session_name}",
+            "color": None,
+        }
+
+    # AI session (default)
+    provider_name = (ai_config or {}).get("provider", "claude")
+    icon = _DEFAULT_AI_FALLBACK_ICON
+    long_label = "AI session"
+    provider_color: str | None = None
+    if registry is not None and registry.has(provider_name):
+        provider = registry.get(provider_name)
+        icon = provider.display.icon
+        long_label = provider.display.long_label
+        provider_color = provider.display.color
+
+    # session.color overrides provider.display.color
+    color = (ai_config or {}).get("color") or provider_color
+    return {
+        "display": f"{icon} {session_name}{suffix}",
+        "tooltip": f"{long_label}: {session_name}",
+        "color": color,
+    }
+
+
+# #124 (audit § 6.6 #25): cap rules block size at 50 MB. PTY feed
+# of multi-megabyte writes blocks the GTK main loop on the kernel
+# pipe writes (PIPE_BUF=4 KB → 50 MB chunks into ~12 800 syscalls).
+# Above that, BT's UI freezes for seconds — `ctx rules inject` is
+# expected to produce O(KB) bytes, not O(MB). Anything beyond this
+# threshold is almost certainly a corrupt context or an accidental
+# `ctx set` of file contents — refuse loudly so the user notices.
+_RULES_INJECT_MAX_BYTES = 50 * 1024 * 1024  # 50 MB hard cap
+
+
+def extract_rules_inject_bytes(
+        provider_name: str, project_name: str, rules_stdout: str) -> bytes:
+    """Compose the EXACT bytes BT feeds via VTE feed_child during a
+    rules_inject pass.
+
+    R7b (pinned by #93): the rules block format MUST be identical
+    across all AI providers — Claude/Copilot/Aider all receive the
+    same bytes. The format is whatever `ctx rules inject <project>`
+    produces, stripped of trailing whitespace, encoded as UTF-8. The
+    `provider_name` argument is kept in the signature on purpose:
+    it documents that this function MUST stay provider-agnostic, and
+    tests pass all 3 providers through it to assert byte equality.
+
+    Used by:
+      - _do_inject_rules at the rules_inject feed site (production)
+      - test_rules_inject_provider_parity.py (asserts parity)
+
+    The carriage-return ('\\r') feed that follows is sent separately
+    via GLib.timeout_add(100, …); it's not included here because it's
+    universal across all feed paths (rules, ctx_refresh, intro, …),
+    not specific to rules_inject.
+
+    #124: bytes exceeding `_RULES_INJECT_MAX_BYTES` (50 MB) return
+    empty `b""` + a stderr warning. Caller (`_do_inject_rules`) sees
+    the empty bytes and treats it as 'no rules to inject', avoiding
+    a multi-second main loop block.
+    """
+    # Intentionally NOT branching on provider_name — the contract is
+    # 'same bytes for everyone'. If a future provider ever needs a
+    # different format, reify a per-provider hook in capabilities and
+    # invalidate this docstring.
+    del provider_name  # marker that this function ignores it
+    encoded = rules_stdout.strip().encode()
+    if len(encoded) > _RULES_INJECT_MAX_BYTES:
+        import sys as _sys
+        print(
+            f"[bterminal] WARN: rules_inject block for project "
+            f"{project_name!r} is {len(encoded)} bytes "
+            f"(> {_RULES_INJECT_MAX_BYTES}-byte cap) — refusing to "
+            f"feed. Check `ctx rules inject {project_name}` output "
+            f"for accidental file content.",
+            file=_sys.stderr,
+        )
+        return b""
+    return encoded
+
+
+def should_inject_rules(ai_config: dict | None, registry) -> bool:
+    """T3.7 capability dispatch — periodic rules re-injection runs only
+    for providers that declare `rules_inject: true` in their capabilities.
+
+    PTY feed_child works identically across providers (any TTY-backed
+    CLI receives the bytes), so this is essentially an opt-out flag —
+    a future provider that wants its own injection format flips the
+    capability off and registers a custom hook.
+
+    Returns False (skip) when:
+      - ai_config is empty (SSH / local tabs).
+      - provider isn't registered.
+      - capabilities.rules_inject is False.
+    """
+    if not ai_config:
+        return False
+    provider_name = ai_config.get("provider", "claude")
+    try:
+        provider = registry.get(provider_name)
+    except (KeyError, AttributeError):
+        return False
+    return bool(provider.capabilities.rules_inject)
+
+
+def should_run_auto_trigger(ai_config: dict | None, registry) -> bool:
+    """T3.6 capability dispatch — auto-trigger runs only for providers
+    that declare `task_auto_trigger: true` in their capabilities.
+
+    Returns False (skip auto-trigger) when:
+      - ai_config is empty (SSH / local tabs — never had this feature).
+      - provider isn't in the registry (unknown future-version provider).
+      - capabilities.task_auto_trigger is False (Copilot at T3 baseline;
+        T4.1 wires up events.jsonl tail-f and flips this True).
+    """
+    if not ai_config:
+        return False
+    provider_name = ai_config.get("provider", "claude")
+    try:
+        provider = registry.get(provider_name)
+    except (KeyError, AttributeError):
+        return False
+    return bool(provider.capabilities.task_auto_trigger)
+
+
 class TerminalTab(Gtk.Box):
     """Zakładka terminala — lokalny shell lub SSH."""
 
-    def __init__(self, app, session=None, claude_config=None, enabled_plugins=None):
-        """Construct tab + spawn child process per session/claude_config.
+    def __init__(self, app, session=None, ai_config=None, enabled_plugins=None,
+                 claude_config=None):
+        """Construct tab + spawn child process per session/ai_config.
+
+        `ai_config`: AI CLI session config dict (R4.2 schema, with
+        `provider` field). Replaces the legacy `claude_config` kwarg —
+        the old name is still accepted for one release as a backward-
+        compat alias (T1.8 → cleanup in T4.6).
 
         `enabled_plugins`: per-tab plugin gating. Must be passed PRZED
         spawn_claude() bo intro prompt computer woła _list_available_plugins
@@ -61,7 +241,9 @@ class TerminalTab(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.app = app
         self.session = session
-        self.claude_config = claude_config
+        # T1.8: ai_config is the new canonical name. claude_config kwarg is
+        # the deprecated alias (kept until T4.6 cleanup).
+        self.ai_config = ai_config if ai_config is not None else claude_config
 
         self.terminal = Vte.Terminal()
         self.terminal.set_font(Pango.FontDescription(FONT))
@@ -127,21 +309,45 @@ class TerminalTab(Gtk.Box):
         self.enabled_plugins: set[str] | None = (
             set(enabled_plugins) if isinstance(enabled_plugins, list) else None
         )
-        if claude_config:
-            project_dir = claude_config.get("project_dir", "")
+        if self.ai_config:
+            project_dir = self.ai_config.get("project_dir", "")
             if project_dir:
                 # lazy: helpers still in bterminal.py (move in Etap 7)
                 from bterminal import _claude_log_dir, _resolve_ctx_project_name
                 self._task_project = _resolve_ctx_project_name(project_dir)
-                self._stats_bar = SessionStatsBar(project_dir)
-                self.pack_end(self._stats_bar, False, False, 0)
+
+                # T3.5: capability dispatch — bar is mounted only if
+                # the provider declares stats_bar=true; the matching
+                # reader (Claude JSONL / Copilot events.jsonl / ...)
+                # is wired in by the factory.
+                # T3.9: stats_widget_options_for_ai_config supplies
+                # `hide_plan_usage` for providers without a usage API
+                # (Copilot — no public plan-usage endpoint).
+                from bterminal.providers import get_registry
+                from bterminal.ui.stats import (
+                    create_stats_reader_for_ai_config,
+                    stats_widget_options_for_ai_config,
+                )
+                _reg = get_registry()
+                reader = create_stats_reader_for_ai_config(
+                    self.ai_config, _reg,
+                )
+                if reader is not None:
+                    widget_opts = stats_widget_options_for_ai_config(
+                        self.ai_config, _reg,
+                    )
+                    self._stats_bar = SessionStatsBar(
+                        project_dir, reader=reader, **widget_opts,
+                    )
+                    self.pack_end(self._stats_bar, False, False, 0)
+
                 _claude_log_dir(project_dir).mkdir(parents=True, exist_ok=True)
             self.terminal.connect("contents-changed", self._on_contents_changed_tasks)
 
         self.show_all()
 
-        if claude_config:
-            self.spawn_claude(claude_config)
+        if self.ai_config:
+            self.spawn_ai_cli(self.ai_config)
         elif session:
             self.spawn_ssh(
                 session["host"],
@@ -151,6 +357,29 @@ class TerminalTab(Gtk.Box):
             )
         else:
             self.spawn_local_shell()
+
+    # ─── Backward-compat property (T1.8 → cleanup T4.6) ─────────────────────
+
+    @property
+    def claude_config(self):
+        """Deprecated alias for ai_config (T1.8).
+
+        Returns ai_config when the tab's provider == "claude" so legacy
+        readers (panels, plugins, REST consumers) continue to work for
+        Claude tabs. Returns None for non-Claude providers — that way
+        Claude-specific code paths (auto-trigger, rules inject, stats
+        bar in pre-T3 dispatch) silently skip Copilot tabs instead of
+        treating their config as a Claude config. Cleanup in T4.6.
+        """
+        cfg = self.ai_config
+        if cfg and cfg.get("provider", "claude") == "claude":
+            return cfg
+        return None
+
+    @claude_config.setter
+    def claude_config(self, value):
+        """Setter for legacy callers — assigns through to ai_config."""
+        self.ai_config = value
 
     def spawn_local_shell(self):
         shell = _OPTIONS.get("shell") or os.environ.get("SHELL", "/bin/bash")
@@ -186,90 +415,124 @@ class TerminalTab(Gtk.Box):
             None,
         )
 
-    def spawn_claude(self, config):
-        """Spawn Claude Code session — with sudo askpass helper or direct.
+    # T2.1: Sudo askpass prologue extracted as a constant so the pure
+    # build_spawn_script function below stays simple to test. Runs
+    # before the CLI binary, captures user's sudo password into a
+    # tempfile, and exports SUDO_ASKPASS so the CLI's sudo invocations
+    # don't prompt mid-session.
+    _SUDO_ASKPASS_PROLOGUE = (
+        'while true; do\n'
+        '  read -rsp "Enter sudo password: " SUDO_PW\n'
+        '  echo\n'
+        '  ASKPASS=$(mktemp /tmp/claude-askpass.XXXXXX)\n'
+        '  chmod 700 "$ASKPASS"\n'
+        '  printf \'#!/bin/bash\\necho "\'"%s"\'"\\n\' "$SUDO_PW" > "$ASKPASS"\n'
+        '  export SUDO_ASKPASS="$ASKPASS"\n'
+        '  if sudo -A true 2>/dev/null; then\n'
+        '    unset SUDO_PW\n'
+        '    break\n'
+        '  fi\n'
+        '  rm -f "$ASKPASS"\n'
+        '  unset SUDO_PW\n'
+        '  echo "Incorrect password. Please try again."\n'
+        'done\n'
+        'trap \'rm -f "$ASKPASS"\' EXIT\n'
+    )
 
-        Always runs inside bash so that when claude exits, the shell
-        stays alive and the tab doesn't auto-close.
+    @staticmethod
+    def _build_binary_not_found_script(provider):
+        """Generic 'binary not found' error message for any provider.
+
+        Generalized from the Claude-only printf in pre-T2.1 spawn_claude:
+        reads search paths from provider.binary spec and renders them
+        in the terminal so the user knows which locations were checked.
         """
-        # lazy: helpers still in bterminal.py (move in Etap 7/10)
-        from bterminal import CLAUDE_PATH, _find_claude_path
-        claude_path = CLAUDE_PATH or _find_claude_path()
-        if not claude_path:
-            work_dir = config.get("project_dir") or os.environ.get("HOME", "/")
-            msg = (
-                'printf "\\n\\033[1;31m━━━ Claude Code not found ━━━\\033[0m\\n\\n"\n'
-                'printf "Locations checked:\\n"\n'
-                'printf "  ~/.local/bin/claude\\n"\n'
-                'printf "  ~/.npm-global/bin/claude\\n"\n'
-                'printf "  /usr/local/bin/claude\\n"\n'
-                'printf "  /usr/bin/claude\\n"\n'
-                'printf "  /opt/homebrew/bin/claude\\n"\n'
-                'printf "  ~/.nvm/versions/node/*/bin/claude\\n\\n"\n'
-                'printf "To fix:\\n"\n'
-                'printf "  1. Re-run the installer: ./install.sh\\n"\n'
-                'printf "  2. Or install manually: npm install -g @anthropic-ai/claude-code\\n"\n'
-                'printf "  3. Make sure ~/.npm-global/bin is in PATH (~/.bashrc)\\n\\n"\n'
-                'exec bash\n'
-            )
-            self.terminal.spawn_async(
-                Vte.PtyFlags.DEFAULT,
-                work_dir,
-                ["/bin/bash", "-c", msg],
-                None,
-                GLib.SpawnFlags.DEFAULT,
-                None,
-                None,
-                -1,
-                None,
-                None,
-            )
-            return
+        name = provider.display.long_label
+        search_paths = (
+            getattr(provider, "_binary_spec", {}) or {}
+        ).get("search_paths", [])
+        paths_lines = "".join(
+            f'printf "  {shlex.quote(p)[1:-1]}\\n"\n' if "'" in p
+            else f'printf "  {p}\\n"\n'
+            for p in search_paths
+        )
+        return (
+            f'printf "\\n\\033[1;31m━━━ {name} not found ━━━\\033[0m\\n\\n"\n'
+            'printf "Locations checked:\\n"\n'
+            f'{paths_lines}'
+            'printf "\\n"\n'
+            'printf "To fix:\\n"\n'
+            'printf "  1. Re-run the installer: ./install.sh\\n"\n'
+            'printf "  2. Or install the CLI manually for your provider\\n"\n'
+            'printf "  3. Make sure ~/.npm-global/bin is in PATH (~/.bashrc)\\n\\n"\n'
+            'exec bash\n'
+        )
 
-        flags = []
-        if config.get("resume"):
-            flags.append("--resume")
-        if config.get("skip_permissions"):
-            flags.append("--dangerously-skip-permissions")
+    @staticmethod
+    def _build_spawn_script(provider, config, intro_prompt):
+        """Pure function: bash -c script for spawning an AI CLI binary.
 
-        from bterminal import _compute_intro_prompt_for_tab  # lazy: still in bterminal.py
-        prompt = _compute_intro_prompt_for_tab(self.app, self)
-        # Record intro prompt for testing — prompt jest argumentem CLI, nie
-        # feed_child, ale logicznie to "co BTerminal wysyła do AI CLI".
-        from bterminal.debug_rest import record_feed
-        record_feed("intro_prompt", (prompt or "").encode())
-        prompt_arg = ""
-        if prompt:
-            escaped = prompt.replace("'", "'\\''")
-            prompt_arg = f" '{escaped}'"
+        argv comes from provider.build_argv(); we shlex-quote each
+        element so prompts containing quotes/spaces stay safe. The
+        trailing `exec bash` keeps the shell alive when the CLI exits
+        (so users can inspect output / open another tool in the same tab).
 
-        flags_str = " ".join(flags)
+        Sudo wrapping fires only when (a) the session config requests
+        sudo (legacy top-level OR provider_options.sudo) AND (b) the
+        provider declares supports_sudo capability.
+        """
+        argv = provider.build_argv(config, intro_prompt)
+        if not argv:
+            # Provider couldn't build argv (typically: binary missing).
+            # Caller should already have routed to the not-found script
+            # via find_binary() check; this is a defensive fallback.
+            return TerminalTab._build_binary_not_found_script(provider)
 
-        if config.get("sudo"):
-            script = (
-                'while true; do\n'
-                '  read -rsp "Enter sudo password: " SUDO_PW\n'
-                '  echo\n'
-                '  ASKPASS=$(mktemp /tmp/claude-askpass.XXXXXX)\n'
-                '  chmod 700 "$ASKPASS"\n'
-                '  printf \'#!/bin/bash\\necho "\'"%s"\'"\\n\' "$SUDO_PW" > "$ASKPASS"\n'
-                '  export SUDO_ASKPASS="$ASKPASS"\n'
-                '  if sudo -A true 2>/dev/null; then\n'
-                '    unset SUDO_PW\n'
-                '    break\n'
-                '  fi\n'
-                '  rm -f "$ASKPASS"\n'
-                '  unset SUDO_PW\n'
-                '  echo "Incorrect password. Please try again."\n'
-                'done\n'
-                'trap \'rm -f "$ASKPASS"\' EXIT\n'
-                f'{claude_path} {flags_str}{prompt_arg}\n'
-                'exec bash\n'
-            )
-        else:
-            script = f'{claude_path} {flags_str}{prompt_arg}\nexec bash\n'
+        cmd_str = " ".join(shlex.quote(x) for x in argv)
+        opts = config.get("provider_options") or config
+        if opts.get("sudo") and provider.capabilities.supports_sudo:
+            return TerminalTab._SUDO_ASKPASS_PROLOGUE + f"{cmd_str}\nexec bash\n"
+        return f"{cmd_str}\nexec bash\n"
 
+    def spawn_ai_cli(self, config):
+        """Spawn an AI CLI session — provider-aware dispatch (T2.1).
+
+        Reads `config["provider"]` (default "claude") and routes to
+        the matching AIProvider via the registry. Falls back to a
+        Claude session when the field is absent so legacy session
+        files keep working.
+
+        Always runs inside bash so the shell survives the CLI's exit
+        (the tab doesn't auto-close). Sudo askpass prologue is added
+        only when both the session requests it and the provider
+        capability supports_sudo is True.
+
+        Raises KeyError if the named provider isn't registered. The
+        caller (TerminalTab.__init__) shows a fallback error in the
+        terminal rather than crashing the GTK main loop.
+        """
+        from bterminal.providers import get_registry
+
+        provider_name = config.get("provider", "claude")
+        try:
+            provider = get_registry().get(provider_name)
+        except KeyError:
+            # Re-raise with a friendlier message so callers can decide
+            # whether to surface in-terminal or in the GTK statusbar.
+            raise
+
+        binary = provider.find_binary()
         work_dir = config.get("project_dir") or os.environ.get("HOME", "/")
+
+        if not binary:
+            script = self._build_binary_not_found_script(provider)
+        else:
+            from bterminal.helpers import _compute_intro_prompt_for_tab
+            intro_prompt = _compute_intro_prompt_for_tab(self.app, self) or ""
+            from bterminal.debug_rest import record_feed
+            record_feed("intro_prompt", intro_prompt.encode())
+            script = self._build_spawn_script(provider, config, intro_prompt)
+
         self.terminal.spawn_async(
             Vte.PtyFlags.DEFAULT,
             work_dir,
@@ -282,6 +545,11 @@ class TerminalTab(Gtk.Box):
             None,
             None,
         )
+
+    # T4.6.1 (2026-05-07): the `spawn_claude` legacy alias was removed.
+    # Callers must use spawn_ai_cli(config) directly. Sessions whose
+    # config lacks a `provider` key still default to "claude" inside
+    # spawn_ai_cli — backward-compat for legacy session data.
 
     def run_macro(self, macro):
         """Execute macro steps chained via GLib.timeout_add."""
@@ -351,7 +619,7 @@ class TerminalTab(Gtk.Box):
 
         # Ctrl+G: toggle git panel (only for Claude Code tabs)
         if mod == ctrl and event.keyval == Gdk.KEY_g:
-            if self.claude_config:
+            if self.ai_config:
                 self.app.toggle_git_panel()
             return True
 
@@ -365,12 +633,21 @@ class TerminalTab(Gtk.Box):
     def _maybe_inject_rules(self):
         """After each prompt, check if it's time to inject rules or refresh CTX.
 
-        Sets a pending flag — actual injection happens after Claude goes idle,
-        so the message arrives at the next free prompt (not mid-processing).
+        Sets a pending flag — actual injection happens after the AI CLI
+        goes idle, so the message arrives at the next free prompt
+        (not mid-processing).
+
+        T3.7: capability gate — providers without `rules_inject` skip
+        the entire flow. Both Claude and Copilot opt in by default
+        (PTY feed_child works identically); future providers can opt
+        out via `providers.json` override.
         """
-        if not self._stats_bar or not self.claude_config:
+        if not self._stats_bar or not self.ai_config:
             return
-        project_dir = self.claude_config.get("project_dir", "")
+        from bterminal.providers import get_registry
+        if not should_inject_rules(self.ai_config, get_registry()):
+            return
+        project_dir = self.ai_config.get("project_dir", "")
         if not project_dir:
             return
         project = self._task_project or os.path.basename(project_dir.rstrip("/"))
@@ -438,12 +715,20 @@ class TerminalTab(Gtk.Box):
         if not project_block:
             return
 
+        # #93: use the shared extract_rules_inject_bytes helper so the
+        # bytes flowing into VTE here are identical to what the parity
+        # test asserts. Provider name pulled from ai_config for the
+        # documentation contract — the helper is required to ignore it.
+        provider_name = (self.ai_config or {}).get("provider", "claude")
+        rules_bytes = extract_rules_inject_bytes(
+            provider_name, project, project_block)
+
         import datetime
         with open("/tmp/bterminal_inject.log", "a") as f:
             f.write(f"{datetime.datetime.now()}: injecting {len(project_block)} chars (rules) for {project}\n")
         from bterminal.debug_rest import record_feed
-        record_feed("rules_inject", project_block.encode())
-        self.terminal.feed_child(project_block.encode())
+        record_feed("rules_inject", rules_bytes)
+        self.terminal.feed_child(rules_bytes)
         GLib.timeout_add(100, lambda: self.terminal.feed_child(b"\r") or False)
 
         if count % refresh_every == 0:
@@ -530,9 +815,9 @@ class TerminalTab(Gtk.Box):
             if self.session:
                 # SSH tab: keep session name, show VTE title in window title only
                 self.app.update_tab_title(self, self.session.get("name", "SSH"))
-            elif self.claude_config:
+            elif self.ai_config:
                 # Claude Code tab: keep decorated tab name with number + emoji
-                display = getattr(self, "_claude_tab_display", self.claude_config.get("name", "Claude Code"))
+                display = getattr(self, "_claude_tab_display", self.ai_config.get("name", "Claude Code"))
                 self.app.update_tab_title(self, display)
             else:
                 self.app.update_tab_title(self, title)
@@ -585,23 +870,29 @@ class TerminalTab(Gtk.Box):
         return False
 
     def _on_task_idle_timeout(self):
-        """Called when Claude has been idle for 10 seconds — check for pending tasks and rule injections."""
-        # TODO(provider-abstraction): generalize for multi-CLI (Copilot/Aider/...).
-        # Currently hardcoded to Claude (requires self._stats_bar + self.claude_config).
-        # Per REQUIREMENTS.md Q21.3 — Claude-only for now. Future refactor:
-        #   1. Provider capability flag `task_auto_trigger: bool` w providers.json
-        #      (Aider TAK — terminal-based; Copilot NIE — different invocation model).
-        #   2. Move logic from TerminalTab.{_on_task_idle_timeout, _claim_next_task}
-        #      to generic AISessionMixin or Provider.handle_idle().
-        #   3. Decouple from _stats_bar (use tab.provider zamiast claude_config check).
-        #   4. Test contract: mock provider with capability=true + scenario z 3 zadaniami,
-        #      assert że trigger fires na każdym idle.
+        """Called when the AI CLI has been idle for ~10s — fire pending
+        rule injection or auto-trigger the next task.
+
+        T3.6: capability dispatch — providers with
+        `task_auto_trigger=false` (Copilot at T3 baseline) skip the
+        auto-trigger flow entirely. Rules injection runs regardless
+        because it's gated separately by `_inject_pending` + the
+        `rules_inject` capability (T3.7).
+        """
         self._task_idle_timer = None
 
-        # Inject rules if due (only when no task is about to fire)
+        # Inject rules if due (only when no task is about to fire).
+        # Gated by T3.7's rules_inject capability inside _do_inject_rules.
         if self._inject_pending:
             project, count, refresh_every = self._inject_pending
             self._do_inject_rules(project, count, refresh_every)
+            return False
+
+        # T3.6: capability gate — skip auto-trigger for non-supporting
+        # providers. Pure-helper `should_run_auto_trigger` is exported
+        # for unit tests without GTK.
+        from bterminal.providers import get_registry
+        if not should_run_auto_trigger(self.ai_config, get_registry()):
             return False
 
         if not self._task_project:
@@ -651,7 +942,29 @@ class TerminalTab(Gtk.Box):
 
     @staticmethod
     def _claim_next_task(db, project, session_id):
-        """Atomically find and claim the next open unclaimed task. Returns task dict or None."""
+        """Atomically find and claim the next open unclaimed task. Returns task dict or None.
+
+        #109 / audit § 6.2 #10: wraps the SELECT-then-INSERT window
+        in `BEGIN IMMEDIATE` so concurrent callers serialize at the
+        SQL layer. Pre-#109, two threads' SELECTs both saw the same
+        task as 'unclaimed' and both INSERT'd per-session rows
+        (PRIMARY KEY shape allows it), producing duplicate claims
+        for the same task.
+
+        With BEGIN IMMEDIATE, the second caller either waits for the
+        first's COMMIT (then sees the claim and skips the task) or
+        hits SQLITE_BUSY → OperationalError (caught upstream by
+        _on_task_idle_timeout's bare except).
+        """
+        # If the connection is already inside a transaction (e.g.
+        # caller seeded an INSERT first), BEGIN IMMEDIATE raises
+        # OperationalError — the existing implicit txn already
+        # provides serialization, so we fall through silently.
+        try:
+            db.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError:
+            pass
+
         # First check if this session already has a claimed open task
         existing = db.execute(
             """SELECT t.task_id, t.description FROM tasks t
@@ -661,6 +974,7 @@ class TerminalTab(Gtk.Box):
             (project, session_id),
         ).fetchone()
         if existing:
+            db.commit()
             return existing
 
         # Find next open task not claimed by anyone
@@ -671,6 +985,7 @@ class TerminalTab(Gtk.Box):
             (project,),
         ).fetchall()
         if not rows:
+            db.commit()
             return None
 
         # Sort by task_id naturally and pick the first
@@ -697,6 +1012,7 @@ class TerminalTab(Gtk.Box):
             return task
         except sqlite3.IntegrityError:
             # Race condition — another session claimed it between SELECT and INSERT
+            db.rollback()
             return None
 
     def _paste_clipboard_image_path(self):
@@ -724,8 +1040,8 @@ class TerminalTab(Gtk.Box):
 
         # Determine target directory
         base_dir = None
-        if self.claude_config:
-            proj_dir = self.claude_config.get("project_dir", "")
+        if self.ai_config:
+            proj_dir = self.ai_config.get("project_dir", "")
             if proj_dir and os.path.isdir(proj_dir):
                 base_dir = proj_dir
         if not base_dir:
@@ -735,8 +1051,14 @@ class TerminalTab(Gtk.Box):
         filename = f"{uuid.uuid4().hex[:12]}.png"
         dest = os.path.join(images_dir, filename)
         pixbuf.savev(dest, "png", [], [])
-        # Replace clipboard with path text and use native VTE paste
-        clipboard.set_text(dest, -1)
+
+        # Task #69 (2026-05-07): provider-aware vision hint. AI tabs
+        # whose provider sets `argv.image_paste_template` get a
+        # wrapped hint instead of the bare path so the model
+        # deterministically calls Read on the image (Copilot needs
+        # this; Claude doesn't, so its template is null).
+        paste_text = self._format_image_paste_for_provider(dest)
+        clipboard.set_text(paste_text, -1)
         clipboard.store()
         self.terminal.paste_clipboard()
         # Also register in ctx if available
@@ -747,13 +1069,62 @@ class TerminalTab(Gtk.Box):
                 self.app.ctx_panel.refresh()
         return True
 
+    def _format_image_paste_for_provider(self, image_path: str) -> str:
+        """Resolve the highest-priority image-paste template available
+        for this tab and format `image_path` with it.
+
+        Priority chain (first match wins):
+          1. Session override (#71) — non-empty
+             `ai_config.provider_options.image_paste_template`. User
+             set a custom phrasing in AISessionDialog; takes precedence
+             over EVERYTHING (even when the global toggle is off, the
+             session-level explicit choice wins).
+          2. Tab has no ai_config (SSH / local) → bare path.
+          3. Global toggle `image_paste_hint_enabled` (#70) is False
+             → bare path. Kill-switch from Options.
+          4. Provider unknown (forward-compat) → bare path.
+          5. Provider's `argv.image_paste_template` (#69) — null/empty
+             → bare path; non-empty → format with `{path}`.
+        """
+        from bterminal.helpers import format_image_paste_hint
+
+        # 1. Session-level override: highest priority. Empty string
+        # is treated as "no override" (lets users clear the Entry to
+        # fall back to provider default without deleting the JSON key).
+        if self.ai_config:
+            opts = self.ai_config.get("provider_options") or {}
+            session_template = opts.get("image_paste_template")
+            if session_template:
+                return format_image_paste_hint(session_template, image_path)
+
+        # 2. SSH / local tabs — no provider, no template.
+        if not self.ai_config:
+            return image_path
+
+        # 3. Global kill-switch.
+        from bterminal.config import _OPTIONS
+        if not _OPTIONS.get("image_paste_hint_enabled", True):
+            return image_path
+
+        # 4. Provider lookup (forward-compat).
+        from bterminal.providers import get_registry
+        try:
+            provider = get_registry().get(
+                self.ai_config.get("provider", "claude"))
+        except (KeyError, AttributeError):
+            return image_path
+
+        # 5. Provider default.
+        template = (provider._argv_spec or {}).get("image_paste_template")
+        return format_image_paste_hint(template, image_path)
+
     def _detect_ctx_project(self):
         """Auto-detect ctx project from tab config, or ask user."""
         if not os.path.exists(CTX_DB):
             return None
         # Try auto-detect from claude config
-        if self.claude_config:
-            proj_dir = self.claude_config.get("project_dir", "")
+        if self.ai_config:
+            proj_dir = self.ai_config.get("project_dir", "")
             if proj_dir:
                 candidate = os.path.basename(proj_dir.rstrip("/"))
                 db = sqlite3.connect(CTX_DB)
@@ -794,8 +1165,8 @@ class TerminalTab(Gtk.Box):
             combo.append_text(p)
         # Pre-select project matching current Claude session
         preselect = 0
-        if self.claude_config:
-            proj_dir = self.claude_config.get("project_dir", "")
+        if self.ai_config:
+            proj_dir = self.ai_config.get("project_dir", "")
             if proj_dir:
                 basename = os.path.basename(proj_dir.rstrip("/"))
                 for i, p in enumerate(projects):
@@ -866,8 +1237,8 @@ class TerminalTab(Gtk.Box):
             combo.append_text(p)
         # Pre-select project matching current Claude session
         preselect = 0
-        if self.claude_config:
-            proj_dir = self.claude_config.get("project_dir", "")
+        if self.ai_config:
+            proj_dir = self.ai_config.get("project_dir", "")
             if proj_dir:
                 basename = os.path.basename(proj_dir.rstrip("/"))
                 for i, p in enumerate(projects):
@@ -887,8 +1258,8 @@ class TerminalTab(Gtk.Box):
         dlg.destroy()
 
     def get_label(self):
-        if self.claude_config:
-            return getattr(self, "_claude_tab_display", self.claude_config.get("name", "Claude Code"))
+        if self.ai_config:
+            return getattr(self, "_claude_tab_display", self.ai_config.get("name", "Claude Code"))
         if self.session:
             return self.session.get("name", "SSH")
         return "Terminal"

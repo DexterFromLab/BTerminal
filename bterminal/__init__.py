@@ -48,7 +48,7 @@ from bterminal.sidecar_runtime import (
 from bterminal.plugin_runtime import BTerminalPlugin
 
 from bterminal.models import (
-    ClaudeSessionManager, ConsultManager, JsonListManager, SessionManager,
+    AISessionManager, ConsultManager, JsonListManager, SessionManager,
     SessionPasswordCache,
 )
 

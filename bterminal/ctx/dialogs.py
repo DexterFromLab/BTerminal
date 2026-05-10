@@ -347,6 +347,17 @@ class CtxSetupWizard(Gtk.Dialog):
                 )
                 return False
 
+        # T2.9 + #92: mirror CLAUDE.md to every provider's context file
+        # (Copilot's AGENTS.md, Aider's AIDER.md, …). Driven by each
+        # provider's capabilities.context_file — adding a new provider
+        # auto-extends this without touching the wizard. Symlink first;
+        # falls back to a copy on filesystems that don't support links.
+        # Failures are non-fatal — the project still works for Claude.
+        from bterminal.ctx.helpers import (
+            ensure_context_files_for_all_providers,
+        )
+        ensure_context_files_for_all_providers(self.project_dir)
+
         self.project_name = name
         self.result_prompt = _build_intro_prompt(name)
         self.success = True
