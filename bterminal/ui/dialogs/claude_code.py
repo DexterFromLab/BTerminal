@@ -35,10 +35,15 @@ from bterminal.ctx.helpers import _resolve_ctx_project_name, _smart_project_name
 from bterminal.i18n import current_language, language_english_name
 
 
-def _build_intro_prompt(project_name):
-    """Build the standard intro prompt for a Claude Code session.
+def _build_intro_prompt(project_name, provider_label="Claude"):
+    """Build the standard intro prompt for an AI CLI session.
 
     Embeds ctx context directly + tool instructions for ctx, consult and tasks.
+
+    provider_label: human-readable AI CLI name shown in the header
+    sentence (e.g. "Claude Code", "GitHub Copilot CLI"). Default
+    "Claude" preserves the pre-T1.9 wording so legacy callers (any
+    that don't pass the new kwarg) keep their existing prompt text.
     """
     ctx_output = _fetch_ctx_output(project_name)
     tools = _tools_help(project_name)
@@ -47,7 +52,11 @@ def _build_intro_prompt(project_name):
 
     readme_path = Path(__file__).parent / "README.md"
     readme_hint = f" README: {readme_path}" if readme_path.exists() else ""
-    header = f"You are working inside BTerminal — an SSH/Claude terminal with built-in tools (ctx, consult, tasks, memory_wizard, skills).{readme_hint}"
+    header = (
+        f"You are working inside BTerminal — an SSH/{provider_label} "
+        f"terminal with built-in tools (ctx, consult, tasks, "
+        f"memory_wizard, skills).{readme_hint}"
+    )
 
     if ctx_output:
         base = f"{header}\n\nProject context ({project_name}):\n{ctx_output}\n\n--- Tools ---\n\n{tools}"
@@ -89,14 +98,47 @@ class ClaudeCodeDialog(Gtk.Dialog):
             modal=True,
             destroy_with_parent=True,
         )
+        # Stash for validate() — needed for duplicate-name check (#108).
+        # Edit mode: skip self when checking duplicates by id; Add mode:
+        # check against all existing sessions.
+        self._editing_session = session
+        self._parent_app = parent
         self.add_buttons(
             Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
             Gtk.STOCK_OK, Gtk.ResponseType.OK,
         )
-        self.set_default_size(460, -1)
+        # Bug #53 (2026-05-07): with auto-fit (-1) the dialog grew to
+        # ~700px on Copilot edit because the schema container + custom
+        # prompt textview + plugin checkboxes pile up. On 768px laptop
+        # screens this pushed the action area (Cancel/OK) off-screen
+        # so users couldn't save. Cap the initial height + wrap content
+        # in a ScrolledWindow so excess content scrolls instead of
+        # pushing the buttons below the fold.
+        self.set_default_size(460, 600)
+        self.set_resizable(True)
         self.set_default_response(Gtk.ResponseType.OK)
 
-        box = self.get_content_area()
+        # Outer = real content_area (GtkBox above action_area).
+        # Inner = scrollable VBox where all child widgets actually pack.
+        # We override get_content_area() so existing pack_start calls
+        # in this class and AISessionDialog land inside the scroll.
+        outer = Gtk.Dialog.get_content_area(self)
+        outer.set_border_width(0)
+        outer.set_spacing(0)
+
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        outer.pack_start(scrolled, True, True, 0)
+
+        inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        inner.set_border_width(12)
+        scrolled.add(inner)
+
+        # Stash so the override below can return it. Subclasses calling
+        # self.get_content_area() get this inner box.
+        self._content_inner = inner
+
+        box = self._content_inner
         box.set_border_width(12)
         box.set_spacing(10)
 
@@ -233,6 +275,19 @@ class ClaudeCodeDialog(Gtk.Dialog):
         self.show_all()
         self._update_ctx_status()
 
+    def get_content_area(self):  # noqa: D401 — Gtk override
+        """Return the scrollable inner box (bug #53 wrap). Subclasses
+        call self.get_content_area() to add their widgets — those
+        land inside the scroll, so the dialog never pushes its
+        action area off-screen on tall content."""
+        # During base __init__ self._content_inner doesn't exist yet —
+        # fall through to the real Gtk content area for that early
+        # call (we only set up self._content_inner after that point).
+        inner = getattr(self, "_content_inner", None)
+        if inner is not None:
+            return inner
+        return Gtk.Dialog.get_content_area(self)
+
     def get_data(self):
         buf = self.textview.get_buffer()
         start, end = buf.get_bounds()
@@ -252,9 +307,28 @@ class ClaudeCodeDialog(Gtk.Dialog):
 
     def validate(self):
         data = self.get_data()
+        # Clear any previous error highlight from the name entry
+        # (so re-attempting after fixing the name removes the red border).
+        self.entry_name.get_style_context().remove_class("error")
         if not data["name"]:
+            self.entry_name.get_style_context().add_class("error")
             self._show_error("Name is required.")
             return False
+        # #108: duplicate-name check. New session must NOT share name
+        # with any existing saved session (across providers — names
+        # are global). Edit mode: skip self by id.
+        if self._parent_app and hasattr(self._parent_app, "claude_manager"):
+            editing_id = (self._editing_session or {}).get("id")
+            for s in self._parent_app.claude_manager.all():
+                if s.get("id") == editing_id:
+                    continue  # skip self when editing
+                if s.get("name", "").strip() == data["name"]:
+                    self.entry_name.get_style_context().add_class("error")
+                    self._show_error(
+                        f"Session name '{data['name']}' is already in use. "
+                        f"Choose a unique name."
+                    )
+                    return False
         if not data["project_dir"]:
             self._show_error("Project directory is required.")
             return False

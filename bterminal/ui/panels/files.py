@@ -90,6 +90,13 @@ class FilesPanel(Gtk.Box):
         self._tv.connect("button-press-event", self._on_button_press)
         self._tv.get_selection().connect("changed", self._on_selection_changed)
 
+        # Task #8 (#80) / #9 (#81): re-evaluate meld button sensitivity
+        # after install completes. invalidate_cache → listener fires
+        # → we re-trigger _on_selection_changed (which now re-checks
+        # is_feature_available). No-op when no selection yet.
+        from bterminal.diagnostics import subscribe_invalidation
+        subscribe_invalidation(self._on_deps_changed)
+
         tv_scroll = Gtk.ScrolledWindow()
         tv_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         tv_scroll.set_vexpand(True)
@@ -156,15 +163,15 @@ class FilesPanel(Gtk.Box):
         # Auto: active Claude tab first
         nb = self.app.notebook
         page = nb.get_nth_page(nb.get_current_page())
-        if page and getattr(page, "claude_config", None):
-            d = page.claude_config.get("project_dir", "")
+        if page and getattr(page, "ai_config", None):
+            d = page.ai_config.get("project_dir", "")
             if d and os.path.isdir(d):
                 return self._find_project_root(d)
         # Fallback: first Claude tab with a valid project dir
         for i in range(nb.get_n_pages()):
             tab = nb.get_nth_page(i)
-            if getattr(tab, "claude_config", None):
-                d = tab.claude_config.get("project_dir", "")
+            if getattr(tab, "ai_config", None):
+                d = tab.ai_config.get("project_dir", "")
                 if d and os.path.isdir(d):
                     return self._find_project_root(d)
         return ""
@@ -189,8 +196,8 @@ class FilesPanel(Gtk.Box):
         nb = self.app.notebook
         for i in range(nb.get_n_pages()):
             tab = nb.get_nth_page(i)
-            if getattr(tab, "claude_config", None):
-                d = tab.claude_config.get("project_dir", "").rstrip("/")
+            if getattr(tab, "ai_config", None):
+                d = tab.ai_config.get("project_dir", "").rstrip("/")
                 if d and d not in seen and os.path.isdir(d):
                     seen.add(d)
                     self._proj_store.append([os.path.basename(d) + "  (tab)", d])
@@ -263,6 +270,13 @@ class FilesPanel(Gtk.Box):
 
     # ── Callbacks ─────────────────────────────────────────────────────────────
 
+    def _on_deps_changed(self):
+        """Re-evaluate widget sensitivity after diagnostics.invalidate_cache
+        (task #9 / #81 — typically fired by InstallerWizard on success).
+        Triggers _on_selection_changed via the existing GTK signal so we
+        don't have to duplicate the meld-availability logic."""
+        self._on_selection_changed(self._tv.get_selection())
+
     def _on_selection_changed(self, sel):
         model, it = sel.get_selected()
         if it:
@@ -270,7 +284,13 @@ class FilesPanel(Gtk.Box):
             self._selected_path = path if path != "__dummy__" else ""
         else:
             self._selected_path = ""
-        self._btn_meld.set_sensitive(bool(self._selected_path))
+        # Task #8: button sensitive iff selection AND meld actually
+        # available — used to be just selection-based which left a
+        # dead button visible on hosts without meld.
+        from bterminal.diagnostics import is_feature_available
+        self._btn_meld.set_sensitive(
+            bool(self._selected_path) and is_feature_available("meld"),
+        )
 
     def _on_row_activated(self, tv, path, col):
         it = self._store.get_iter(path)
@@ -289,7 +309,10 @@ class FilesPanel(Gtk.Box):
             self._show_diff_dialog(self._selected_path)
 
     def _open_with_meld(self, path: str):
-        if not shutil.which("meld"):
+        # Task #8 (#80): centralized feature gating via diagnostics
+        # cache; cuts shutil.which() spam on rapid panel refresh.
+        from bterminal.diagnostics import is_feature_available
+        if not is_feature_available("meld"):
             show_error_dialog(self.app, "meld not found.\nInstall it: sudo apt install meld")
             return
         try:
@@ -326,7 +349,8 @@ class FilesPanel(Gtk.Box):
             return []
 
     def _show_diff_dialog(self, fpath: str):
-        if not shutil.which("meld"):
+        from bterminal.diagnostics import is_feature_available
+        if not is_feature_available("meld"):
             show_error_dialog(self.app, "meld not found.\nInstall it: sudo apt install meld")
             return
 
@@ -494,10 +518,11 @@ class FilesPanel(Gtk.Box):
 
         submenu.append(Gtk.SeparatorMenuItem())
 
+        from bterminal.diagnostics import is_feature_available
         for label, cmd in [("VS Code", "code"), ("Zed", "zed"),
                             ("gedit", "gedit"), ("kate", "kate"),
                             ("File Manager", "xdg-open")]:
-            if cmd == "xdg-open" or shutil.which(cmd):
+            if cmd == "xdg-open" or is_feature_available(cmd):
                 it2 = Gtk.MenuItem(label=label)
                 it2.connect("activate", lambda _, c=cmd, p=path: self._launch([c, p]))
                 submenu.append(it2)

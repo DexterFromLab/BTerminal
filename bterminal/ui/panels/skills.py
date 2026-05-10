@@ -159,8 +159,8 @@ class SkillsPanel(Gtk.Box):
         if nb is None:
             return None
         page = nb.get_nth_page(nb.get_current_page())
-        if page and getattr(page, "claude_config", None):
-            pd = page.claude_config.get("project_dir", "")
+        if page and getattr(page, "ai_config", None):
+            pd = page.ai_config.get("project_dir", "")
             return pd or None
         return None
 
