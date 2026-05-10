@@ -449,7 +449,7 @@ class BTerminalApp(Gtk.Window):
         file_menu = Gtk.Menu()
         file_menu.append(_item(N_("New local tab"), self.add_local_tab))
         file_menu.append(_item(N_("New SSH session…"), lambda: self.sidebar._on_add(None)))
-        file_menu.append(_item(N_("New Claude Code session…"), lambda: self.sidebar._on_add_claude()))
+        file_menu.append(_item(N_("New AI session…"), lambda: self.sidebar._on_add_ai_session()))
         file_menu.append(_sep())
         file_menu.append(_item(N_("Options…"), lambda: OptionsDialog(self).run_and_apply()))
         file_menu.append(_sep())
@@ -1110,21 +1110,35 @@ class BTerminalApp(Gtk.Window):
         dialog.run()
         dialog.destroy()
 
-    def _toggle_theme(self):
-        """Switch between Catppuccin Mocha (dark) and Latte (light)."""
+    def _set_theme(self, target: str):
+        """BUG#14 fix: target-driven idempotent theme setter. Apply
+        the requested theme regardless of `_current_theme` state.
+        Calling with current target is a no-op (does NOT flip).
+
+        The legacy `_toggle_theme` (now a thin wrapper) flipped
+        based on the global, which broke when state drifted between
+        OptionsDialog combo state and `_current_theme` global —
+        users picking Dark would sometimes flip to Light and vice
+        versa.
+        """
         global _current_theme, CSS
-        if _current_theme == "dark":
-            _current_theme = "light"
+        if target == _current_theme:
+            return
+        if target == "light":
             CATPPUCCIN.update(CATPPUCCIN_LATTE)
             TERMINAL_PALETTE[:] = TERMINAL_PALETTE_LATTE
-            self._gtk_settings.set_property("gtk-application-prefer-dark-theme", False)
+            self._gtk_settings.set_property(
+                "gtk-application-prefer-dark-theme", False)
             self._theme_btn.set_label("☾")
-        else:
-            _current_theme = "dark"
+        elif target == "dark":
             CATPPUCCIN.update(CATPPUCCIN_MOCHA)
             TERMINAL_PALETTE[:] = TERMINAL_PALETTE_MOCHA
-            self._gtk_settings.set_property("gtk-application-prefer-dark-theme", True)
+            self._gtk_settings.set_property(
+                "gtk-application-prefer-dark-theme", True)
             self._theme_btn.set_label("☀")
+        else:
+            raise ValueError(f"unknown theme: {target!r}")
+        _current_theme = target
         _OPTIONS["theme"] = _current_theme
         _save_options(_OPTIONS)
         # Reload CSS
@@ -1149,6 +1163,14 @@ class BTerminalApp(Gtk.Window):
         # Refresh git panel if visible
         if self._git_visible:
             self.git_panel.refresh()
+
+    def _toggle_theme(self, *_):
+        """Legacy headerbar / View-menu callback: flip dark↔light.
+        Delegates to the target-driven _set_theme so callers picking
+        a specific value (OptionsDialog) and callers wanting flip
+        (toggle button) share the same code path."""
+        opposite = "light" if _current_theme == "dark" else "dark"
+        self._set_theme(opposite)
 
     def toggle_git_panel(self):
         """Show/hide the right-side Git panel (mirror of toggle_sidebar)."""

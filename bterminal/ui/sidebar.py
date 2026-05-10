@@ -704,6 +704,12 @@ class SessionSidebar(Gtk.Box):
                 break
         dlg.destroy()
 
+    # BUG#13 fix: public name for the same provider-picker dialog.
+    # The legacy `_on_add_claude` predates the multi-provider work;
+    # the dialog itself is already provider-agnostic.
+    def _on_add_ai_session(self):
+        self._on_add_claude()
+
     def _on_edit(self, button):
         sel = self.tree.get_selection()
         model, it = sel.get_selected()
