@@ -7,15 +7,15 @@ msgid ""
 msgstr ""
 "Project-Id-Version:  bterminal\n"
 "Report-Msgid-Bugs-To: bartoszczarnota1@gmail.com\n"
-"POT-Creation-Date: 2026-05-05 13:51+0200\n"
+"POT-Creation-Date: 2026-05-10 21:39+0200\n"
 "PO-Revision-Date: 2026-05-05 13:39+0200\n"
 "Last-Translator: Automatically generated\n"
-"Language: ko\n"
 "Language-Team: none\n"
-"Plural-Forms: nplurals=1; plural=0;\n"
+"Language: ko\n"
 "MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
+"Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
 "Generated-By: Babel 2.10.3\n"
 
 #: bterminal/license.py:109
@@ -68,7 +68,8 @@ msgstr "업데이트 확인 중"
 msgid "Connecting to server... ({seconds}s)"
 msgstr "서버에 연결 중… ({seconds}초)"
 
-#: bterminal/ui/dialogs/options.py:154 bterminal/updater.py:131
+#: bterminal/updater.py:131 bterminal/ui/dialogs/options.py:298
+#: bterminal/ui/dialogs/options.py:629 bterminal/ui/dialogs/options.py:809
 msgid "Cancel"
 msgstr "취소"
 
@@ -77,7 +78,7 @@ msgid "Cannot check for updates — timed out."
 msgstr "확인할 수 없습니다 — 시간 초과."
 
 #: bterminal/updater.py:143 bterminal/updater.py:160 bterminal/updater.py:165
-#: bterminal/updater.py:339
+#: bterminal/updater.py:372
 msgid "Close"
 msgstr "닫기"
 
@@ -109,33 +110,34 @@ msgstr "나중에"
 msgid "Update and restart"
 msgstr "업데이트 후 재시작"
 
-#: bterminal/updater.py:334
+#: bterminal/updater.py:367
 msgid "BTerminal errata"
 msgstr "BTerminal 업데이트 내역"
 
-#: bterminal/updater.py:349
+#: bterminal/updater.py:382
 msgid "No errata entries."
 msgstr "업데이트 내역이 없습니다."
 
-#: bterminal/updater.py:399
+#: bterminal/updater.py:539
 msgid "BTerminal update"
 msgstr "BTerminal 업데이트"
 
-#: bterminal/updater.py:408
+#: bterminal/updater.py:548
 msgid "Update in progress…"
 msgstr "업데이트 진행 중…"
 
-#: bterminal/updater.py:488
+#: bterminal/updater.py:638
 msgid ""
 "The new version of BTerminal could not be installed.\n"
 "\n"
-"The previous version was restored automatically — BTerminal continues to work normally."
+"The previous version was restored automatically — BTerminal continues to "
+"work normally."
 msgstr ""
 "BTerminal 새 버전을 설치할 수 없습니다.\n"
 "\n"
 "이전 버전이 자동으로 복원되었습니다 — BTerminal은 정상적으로 작동합니다."
 
-#: bterminal/updater.py:494
+#: bterminal/updater.py:644
 #, python-brace-format
 msgid ""
 "Installation failed and no previous version is available to restore.\n"
@@ -148,7 +150,7 @@ msgstr ""
 "세부 정보:\n"
 "{details}"
 
-#: bterminal/ui/sidebar.py:75
+#: bterminal/ui/sidebar.py:165
 #, python-brace-format
 msgid "{app} Sessions"
 msgstr "{app} 세션"
@@ -163,183 +165,288 @@ msgstr[0] "{n}개 파일"
 msgid "Working tree clean"
 msgstr "작업 트리 깨끗함"
 
-#: bterminal/ui/dialogs/options.py:40
+#: bterminal/ui/dialogs/options.py:128
 msgid "Appearance"
 msgstr "모양"
 
-#: bterminal/ui/dialogs/options.py:45
+#: bterminal/ui/dialogs/options.py:133
 msgid "Theme:"
 msgstr "테마:"
 
-#: bterminal/ui/dialogs/options.py:47
+#: bterminal/ui/dialogs/options.py:135
 msgid "Dark (Mocha)"
 msgstr "어두움 (Mocha)"
 
-#: bterminal/ui/dialogs/options.py:48
+#: bterminal/ui/dialogs/options.py:136
 msgid "Light (Latte)"
 msgstr "밝음 (Latte)"
 
-#: bterminal/ui/dialogs/options.py:53
+#: bterminal/ui/dialogs/options.py:141
 msgid "Terminal font:"
 msgstr "터미널 글꼴:"
 
-#: bterminal/ui/dialogs/options.py:65
+#: bterminal/ui/dialogs/options.py:153
 msgid "Terminal"
 msgstr "터미널"
 
-#: bterminal/ui/dialogs/options.py:70
+#: bterminal/ui/dialogs/options.py:158
 msgid "Default shell:"
 msgstr "기본 셸:"
 
-#: bterminal/ui/dialogs/options.py:73
+#: bterminal/ui/dialogs/options.py:161
 #, python-brace-format
 msgid "default ({shell})"
 msgstr "기본 ({shell})"
 
-#: bterminal/ui/dialogs/options.py:84
+#: bterminal/ui/dialogs/options.py:172
 msgid "General"
 msgstr "일반"
 
-#: bterminal/ui/dialogs/options.py:90
+#: bterminal/ui/dialogs/options.py:178
 msgid "Check for updates at startup:"
 msgstr "시작 시 업데이트 확인:"
 
-#: bterminal/ui/dialogs/options.py:104
+#: bterminal/ui/dialogs/options.py:192
 msgid "Language"
 msgstr "언어"
 
-#: bterminal/ui/dialogs/options.py:110
+#: bterminal/ui/dialogs/options.py:198
 msgid "Interface language:"
 msgstr "인터페이스 언어:"
 
-#: bterminal/ui/dialogs/options.py:115
+#: bterminal/ui/dialogs/options.py:203
 msgid "Auto-detect"
 msgstr "자동 감지"
 
-#: bterminal/ui/dialogs/options.py:130
+#: bterminal/ui/dialogs/options.py:218
 msgid "Restart BTerminal to apply language change."
 msgstr "언어 변경을 적용하려면 BTerminal을 재시작하세요."
 
-#: bterminal/ui/dialogs/options.py:145
+#: bterminal/ui/dialogs/options.py:233
 msgid "Tell the AI agent which language I speak"
 msgstr "AI 에이전트에게 사용 언어 알리기"
 
-#: bterminal/ui/dialogs/options.py:155
+#: bterminal/ui/dialogs/options.py:244
+msgid "Auto-add vision hint when pasting images into Copilot sessions"
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:258
+msgid "AI Providers"
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:276
+msgid "Local Models (Ollama)"
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:299
 msgid "Save"
 msgstr "저장"
 
-#: bterminal/ctx/dialogs.py:163
-msgid "Project context has not been collected yet. Gather context as you work and save important findings: ctx set <project> <key> <value>"
-msgstr "프로젝트 컨텍스트가 아직 수집되지 않았습니다. 작업하면서 컨텍스트를 수집하고 중요한 발견을 저장하세요: ctx set <project> <key> <value>"
+#: bterminal/ui/dialogs/options.py:432
+msgid "Start daemon"
+msgstr ""
 
-#: bterminal/app.py:189 bterminal/app.py:221 bterminal/app.py:462
+#: bterminal/ui/dialogs/options.py:433
+msgid "Stop daemon"
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:434 bterminal/ui/dialogs/options.py:522
+msgid "Refresh"
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:454
+msgid "Recommendations for this machine:"
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:487
+msgid "Installed models:"
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:509
+msgid "Pull…"
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:513
+msgid "Delete"
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:517
+msgid "Set as default for…"
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:625
+msgid "Pull Ollama model"
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:630
+msgid "Pull"
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:642
+msgid "Pick a model from the list below or type a custom tag."
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:644
+msgid "Note: models below 3B parameters often fail with Aider's edit format."
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:676
+msgid "Browse all models on ollama.com →"
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:696
+#, python-brace-format
+msgid "{name} has only {size}B parameters"
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:699
+msgid ""
+"Models below 3B parameters often fail to follow Aider's edit format and "
+"produce empty or repeated responses. Are you sure you want to pull this "
+"model?"
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:740
+msgid "Model pulled"
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:740
+msgid "Pull failed"
+msgstr ""
+
+#: bterminal/ui/dialogs/options.py:810
+msgid "Apply"
+msgstr ""
+
+#: bterminal/ctx/dialogs.py:163
+msgid ""
+"Project context has not been collected yet. Gather context as you work and "
+"save important findings: ctx set <project> <key> <value>"
+msgstr ""
+"프로젝트 컨텍스트가 아직 수집되지 않았습니다. 작업하면서 컨텍스트를 수집하고 "
+"중요한 발견을 저장하세요: ctx set <project> <key> <value>"
+
+#: bterminal/app.py:193 bterminal/app.py:225 bterminal/app.py:466
 msgid "Sessions"
 msgstr "세션"
 
-#: bterminal/app.py:192 bterminal/app.py:221 bterminal/app.py:463
+#: bterminal/app.py:196 bterminal/app.py:225 bterminal/app.py:467
 msgid "Ctx"
 msgstr "Ctx"
 
-#: bterminal/app.py:195 bterminal/app.py:222 bterminal/app.py:464
+#: bterminal/app.py:199 bterminal/app.py:226 bterminal/app.py:468
 msgid "Consult"
 msgstr "Consult"
 
-#: bterminal/app.py:198 bterminal/app.py:222 bterminal/app.py:465
+#: bterminal/app.py:202 bterminal/app.py:226 bterminal/app.py:469
 msgid "Tasks"
 msgstr "작업"
 
-#: bterminal/app.py:201 bterminal/app.py:223
+#: bterminal/app.py:205 bterminal/app.py:227
 msgid "Memory"
 msgstr "메모리"
 
-#: bterminal/app.py:204 bterminal/app.py:223
+#: bterminal/app.py:208 bterminal/app.py:227
 msgid "Skills"
 msgstr "Skills"
 
-#: bterminal/app.py:207 bterminal/app.py:224
+#: bterminal/app.py:211 bterminal/app.py:228
 msgid "Files"
 msgstr "파일"
 
-#: bterminal/app.py:210 bterminal/app.py:224 bterminal/app.py:466
+#: bterminal/app.py:214 bterminal/app.py:228 bterminal/app.py:470
 msgid "Plugins"
 msgstr "플러그인"
 
-#: bterminal/app.py:242
+#: bterminal/app.py:246
 msgid "Hide sidebar (Ctrl+B)"
 msgstr "사이드바 숨기기 (Ctrl+B)"
 
-#: bterminal/app.py:319
+#: bterminal/app.py:323
 msgid "Show sidebar (Ctrl+B)"
 msgstr "사이드바 표시 (Ctrl+B)"
 
-#: bterminal/app.py:329
+#: bterminal/app.py:333
 msgid "Toggle light/dark theme"
 msgstr "밝은/어두운 테마 전환"
 
-#: bterminal/app.py:335
+#: bterminal/app.py:339
 msgid "Show Git panel (Ctrl+G)"
 msgstr "Git 패널 표시 (Ctrl+G)"
 
-#: bterminal/app.py:384
+#: bterminal/app.py:388
 #, python-brace-format
 msgid ""
-"The file ~/.config/bterminal/options.json was corrupted — default settings have been restored.\n"
+"The file ~/.config/bterminal/options.json was corrupted — default settings "
+"have been restored.\n"
 "\n"
 "Cause: {exc_type}: {exc}"
 msgstr ""
-"~/.config/bterminal/options.json 파일이 손상되었습니다 — 기본 설정이 복원되었습니다.\n"
+"~/.config/bterminal/options.json 파일이 손상되었습니다 — 기본 설정이 복원되었"
+"습니다.\n"
 "\n"
 "원인: {exc_type}: {exc}"
 
-#: bterminal/app.py:446
+#: bterminal/app.py:450
 msgid "New local tab"
 msgstr "새 로컬 탭"
 
-#: bterminal/app.py:447
+#: bterminal/app.py:451
 msgid "New SSH session…"
 msgstr "새 SSH 세션…"
 
-#: bterminal/app.py:448
-msgid "New Claude Code session…"
-msgstr "새 Claude Code 세션…"
+#: bterminal/app.py:452
+#, fuzzy
+msgid "New AI session…"
+msgstr "새 SSH 세션…"
 
-#: bterminal/app.py:450
+#: bterminal/app.py:454
 msgid "Options…"
 msgstr "옵션…"
 
-#: bterminal/app.py:452
+#: bterminal/app.py:456
 msgid "Quit"
 msgstr "종료"
 
-#: bterminal/app.py:453
+#: bterminal/app.py:457
 msgid "File"
 msgstr "파일"
 
-#: bterminal/app.py:457
+#: bterminal/app.py:461
 msgid "Toggle sidebar (Ctrl+B)"
 msgstr "사이드바 전환 (Ctrl+B)"
 
-#: bterminal/app.py:458
+#: bterminal/app.py:462
 msgid "Toggle Git panel (Ctrl+G)"
 msgstr "Git 패널 전환 (Ctrl+G)"
 
-#: bterminal/app.py:459
+#: bterminal/app.py:463
 msgid "Toggle theme ☀/🌙"
 msgstr "테마 전환 ☀/🌙"
 
-#: bterminal/app.py:475
+#: bterminal/app.py:479
 msgid "View"
 msgstr "보기"
 
-#: bterminal/app.py:479
+#: bterminal/app.py:483
 msgid "Check for updates"
 msgstr "업데이트 확인"
 
-#: bterminal/app.py:480
+#: bterminal/app.py:484
 msgid "Errata…"
 msgstr "업데이트 내역…"
 
-#: bterminal/app.py:482
+#: bterminal/app.py:487
+msgid "Diagnostics…"
+msgstr ""
+
+#: bterminal/app.py:494
+msgid "Install dependencies…"
+msgstr ""
+
+#: bterminal/app.py:498
 msgid "Tools"
 msgstr "도구"
 
+#~ msgid "New Claude Code session…"
+#~ msgstr "새 Claude Code 세션…"
