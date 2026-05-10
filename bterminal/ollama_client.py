@@ -18,10 +18,69 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import urllib.error
 import urllib.request
+
+
+# BUG#10 fix: ollama emits CSI cursor-control sequences in its
+# progress output even when stdout is not a TTY. Strip them before
+# surfacing to the UI dialog so users see plain text instead of
+# `?2026h ?25l ?1Gpulling manifest ?K` mojibake.
+_ANSI_RE = re.compile(r"\x1b\[[\d;?]*[a-zA-Z]")
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove CSI escape sequences from ollama progress output.
+    Covers ?2026h/l (synchronized output), ?25l/h (cursor hide/show),
+    1G (cursor move), K (erase line)."""
+    if not text:
+        return text
+    return _ANSI_RE.sub("", text)
+
+
+def _friendly_pull_error(stderr: str, model_name: str) -> str:
+    """BUG#11 fix: map known ollama failure patterns to short,
+    actionable PL messages. Falls back to the LAST `Error:` line
+    (trimmed to 180 chars) for unknown errors so users still see
+    something meaningful."""
+    cleaned = _strip_ansi(stderr or "").strip()
+    cleaned_lower = cleaned.lower()
+
+    # Pattern 1: model not found (typo / nonexistent name)
+    if "pull model manifest: file does not exist" in cleaned_lower \
+       or "manifest unknown" in cleaned_lower \
+       or "no such manifest" in cleaned_lower:
+        return (f"Model {model_name!r} nie istnieje w bibliotece "
+                f"Ollama. Sprawdź pisownię na ollama.com/library.")
+
+    # Pattern 2: daemon offline
+    if ("connection refused" in cleaned_lower
+            or ("dial tcp" in cleaned_lower and "11434" in cleaned)):
+        return ("Daemon Ollama nie jest uruchomiony. "
+                "Wykonaj: systemctl --user start ollama")
+
+    # Pattern 3: out of disk
+    if "no space left on device" in cleaned_lower:
+        return ("Brak miejsca na dysku. Zwolnij miejsce w "
+                "~/.ollama/models/ przed kolejnym pull.")
+
+    # Pattern 4: timeout / network failure
+    if ("context deadline exceeded" in cleaned_lower
+            or "i/o timeout" in cleaned_lower):
+        return (f"Timeout pobierania {model_name!r}. Sprawdź "
+                f"połączenie internetowe.")
+
+    # Fallback: extract the LAST `Error:` line, trimmed.
+    error_lines = [l for l in cleaned.splitlines()
+                   if l.strip().lower().startswith("error:")]
+    if error_lines:
+        return error_lines[-1].strip()[:180]
+
+    # Last-resort fallback
+    return cleaned[:180] if cleaned else "Pull failed (no output)"
 from dataclasses import dataclass
 from typing import Optional
 
@@ -284,7 +343,10 @@ def pull_model(name: str, timeout: float = 600.0) -> tuple[bool, str]:
         return False, f"subprocess failed: {exc}"
     if result.returncode == 0:
         return True, "pulled successfully"
-    return False, (result.stderr or result.stdout).strip()
+    # BUG#10/#11 fix: strip ANSI + map to friendly PL message,
+    # falling back to last `Error:` line for unknown failures.
+    raw = (result.stderr or result.stdout)
+    return False, _friendly_pull_error(raw, name)
 
 
 __all__ = [
