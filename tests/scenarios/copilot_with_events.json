@@ -1,0 +1,20 @@
+{
+  "_doc": "T3.4 — Copilot scenario that ALSO emits events.jsonl in real time. Tests can point emit_events_jsonl.path at a tmp_path/session-state/<uuid>/events.jsonl and verify CopilotStatsReader / T4.1 tail-f see the events. Stdin handling identical to copilot_basic.json.",
+  "responses": [
+    {"trigger": "(?i)^hello", "reply": "Hi! GitHub Copilot CLI ready."},
+    {"trigger": "(?i)\\bping\\b", "reply": "pong"}
+  ],
+  "default_reply": "> {input}",
+  "exit_on": "^/exit$|^/quit$",
+  "emit_events_jsonl": {
+    "path": "/tmp/mock-copilot-default/events.jsonl",
+    "events": [
+      {"delay_ms": 50,  "event": {"type": "session.start",            "timestamp": "2026-05-06T10:00:00Z", "data": {"sessionId": "01JTZ-MOCK-EMIT-001", "model": "claude-sonnet-4-5", "cwd": "/tmp/proj"}}},
+      {"delay_ms": 100, "event": {"type": "tool.execution_start",     "timestamp": "2026-05-06T10:00:01Z", "data": {"toolName": "shell", "args": ["ls"]}}},
+      {"delay_ms": 100, "event": {"type": "tool.execution_complete",  "timestamp": "2026-05-06T10:00:02Z", "data": {"toolName": "shell", "exitCode": 0, "usage": {"inputTokens": 80, "outputTokens": 20}}}},
+      {"delay_ms": 100, "event": {"type": "tool.execution_start",     "timestamp": "2026-05-06T10:00:03Z", "data": {"toolName": "file.read", "path": "README.md"}}},
+      {"delay_ms": 100, "event": {"type": "tool.execution_complete",  "timestamp": "2026-05-06T10:00:04Z", "data": {"toolName": "file.read", "exitCode": 0, "usage": {"inputTokens": 200, "outputTokens": 80, "cacheReadTokens": 30}}}},
+      {"delay_ms": 200, "event": {"type": "session.shutdown",         "timestamp": "2026-05-06T10:00:06Z", "data": {"modelMetrics": {"claude-sonnet-4-5": {"requests": {"count": 2, "cost": 0.0034}}}}}}
+    ]
+  }
+}

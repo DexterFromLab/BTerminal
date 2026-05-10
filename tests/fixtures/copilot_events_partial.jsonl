@@ -1,0 +1,7 @@
+{"type":"session.start","timestamp":"2026-05-06T11:00:00.000Z","data":{"sessionId":"01JTZ-PARTIAL-002","model":"claude-sonnet-4-5","cwd":"/home/me/myrepo","args":["--no-banner","--no-mouse"]}}
+{"type":"prompt.user","timestamp":"2026-05-06T11:00:01.000Z","data":{"text":"Help me debug the failing test"}}
+{"type":"tool.execution_start","timestamp":"2026-05-06T11:00:02.000Z","data":{"toolName":"shell","args":["pytest","tests/test_x.py","-v"]}}
+{"type":"tool.execution_complete","timestamp":"2026-05-06T11:00:08.500Z","data":{"toolName":"shell","exitCode":1,"duration":6500,"usage":{"inputTokens":250,"outputTokens":180}}}
+{"type":"tool.execution_start","timestamp":"2026-05-06T11:00:10.000Z","data":{"toolName":"file.read","path":"src/buggy.py"}}
+{"type":"tool.execution_complete","timestamp":"2026-05-06T11:00:10.220Z","data":{"toolName":"file.read","exitCode":0,"duration":220,"usage":{"inputTokens":180,"outputTokens":50,"cacheReadTokens":40}}}
+{"type":"prompt.assistant","timestamp":"2026-05-06T11:00:15.000Z","data":{"text":"The bug is in line 42 — type mismatch.","model":"claude-sonnet-4-5"}}

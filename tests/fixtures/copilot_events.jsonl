@@ -1,0 +1,30 @@
+{"type":"session.start","timestamp":"2026-05-06T10:00:00.000Z","data":{"sessionId":"01JTZ-ABCDEF-MOCK-COPILOT-001","model":"claude-sonnet-4-5","cwd":"/home/me/myrepo","args":["--no-banner","--no-mouse","--plain-diff","-i","Refactor the user service"]}}
+{"type":"prompt.user","timestamp":"2026-05-06T10:00:01.120Z","data":{"text":"Refactor the user service"}}
+{"type":"tool.execution_start","timestamp":"2026-05-06T10:00:01.500Z","data":{"toolName":"shell","args":["ls","-la"]}}
+{"type":"tool.execution_complete","timestamp":"2026-05-06T10:00:02.100Z","data":{"toolName":"shell","exitCode":0,"duration":600,"usage":{"inputTokens":120,"outputTokens":40}}}
+{"type":"tool.execution_start","timestamp":"2026-05-06T10:00:03.000Z","data":{"toolName":"file.read","path":"src/users/service.py"}}
+{"type":"tool.execution_complete","timestamp":"2026-05-06T10:00:03.420Z","data":{"toolName":"file.read","exitCode":0,"duration":420,"usage":{"inputTokens":400,"outputTokens":150,"cacheReadTokens":80,"cacheWriteTokens":100}}}
+{"type":"tool.execution_start","timestamp":"2026-05-06T10:00:05.200Z","data":{"toolName":"shell","args":["pwd"]}}
+{"type":"tool.execution_complete","timestamp":"2026-05-06T10:00:05.260Z","data":{"toolName":"shell","exitCode":0,"duration":60,"usage":{"inputTokens":80,"outputTokens":30}}}
+{"type":"prompt.assistant","timestamp":"2026-05-06T10:00:08.000Z","data":{"text":"I'll start by reading the existing service implementation.","model":"claude-sonnet-4-5"}}
+{"type":"tool.execution_start","timestamp":"2026-05-06T10:00:10.000Z","data":{"toolName":"file.edit","path":"tests/test_users.py","operation":"create"}}
+{"type":"tool.execution_complete","timestamp":"2026-05-06T10:00:12.500Z","data":{"toolName":"file.edit","exitCode":0,"duration":2500,"usage":{"inputTokens":600,"outputTokens":250,"cacheReadTokens":200,"cacheWriteTokens":180}}}
+{"type":"tool.execution_start","timestamp":"2026-05-06T10:00:14.000Z","data":{"toolName":"web.fetch","url":"https://example.com/api/docs"}}
+{"type":"tool.execution_complete","timestamp":"2026-05-06T10:00:15.300Z","data":{"toolName":"web.fetch","exitCode":0,"duration":1300,"usage":{"inputTokens":300,"outputTokens":180}}}
+{"type":"tool.execution_start","timestamp":"2026-05-06T10:00:17.000Z","data":{"toolName":"file.read","path":"README.md"}}
+{"type":"tool.execution_complete","timestamp":"2026-05-06T10:00:17.250Z","data":{"toolName":"file.read","exitCode":0,"duration":250,"usage":{"inputTokens":150,"outputTokens":60,"cacheReadTokens":100}}}
+{"type":"prompt.user","timestamp":"2026-05-06T10:00:25.000Z","data":{"text":"Now apply the refactor and run the tests"}}
+{"type":"tool.execution_start","timestamp":"2026-05-06T10:00:26.000Z","data":{"toolName":"search.code","query":"def get_user","scope":"src/"}}
+{"type":"tool.execution_complete","timestamp":"2026-05-06T10:00:26.450Z","data":{"toolName":"search.code","exitCode":0,"duration":450,"usage":{"inputTokens":220,"outputTokens":90,"cacheReadTokens":50}}}
+{"type":"tool.execution_start","timestamp":"2026-05-06T10:00:28.000Z","data":{"toolName":"shell","args":["pytest","tests/test_users.py","-v"]}}
+{"type":"tool.execution_complete","timestamp":"2026-05-06T10:00:33.800Z","data":{"toolName":"shell","exitCode":0,"duration":5800,"usage":{"inputTokens":180,"outputTokens":70}}}
+{"type":"tool.execution_start","timestamp":"2026-05-06T10:00:35.000Z","data":{"toolName":"shell","args":["git","diff","--stat"]}}
+{"type":"tool.execution_failed","timestamp":"2026-05-06T10:00:35.120Z","data":{"toolName":"shell","exitCode":1,"error":"fatal: not a git repository","duration":120}}
+{"type":"tool.execution_start","timestamp":"2026-05-06T10:00:38.000Z","data":{"toolName":"file.edit","path":"src/users/service.py","operation":"modify"}}
+{"type":"tool.execution_complete","timestamp":"2026-05-06T10:00:41.500Z","data":{"toolName":"file.edit","exitCode":0,"duration":3500,"usage":{"inputTokens":400,"outputTokens":200,"cacheReadTokens":300,"cacheWriteTokens":120}}}
+{"type":"tool.execution_start","timestamp":"2026-05-06T10:00:43.000Z","data":{"toolName":"shell","args":["git","status"]}}
+{"type":"tool.execution_complete","timestamp":"2026-05-06T10:00:43.090Z","data":{"toolName":"shell","exitCode":0,"duration":90,"usage":{"inputTokens":90,"outputTokens":40}}}
+{"type":"tool.execution_start","timestamp":"2026-05-06T10:00:45.000Z","data":{"toolName":"file.read","path":"docs/Plan.md"}}
+{"type":"tool.execution_complete","timestamp":"2026-05-06T10:00:45.180Z","data":{"toolName":"file.read","exitCode":0,"duration":180,"usage":{"inputTokens":250,"outputTokens":120,"cacheReadTokens":150}}}
+{"type":"prompt.assistant","timestamp":"2026-05-06T10:00:50.000Z","data":{"text":"Refactor complete. All tests pass.","model":"claude-sonnet-4-5"}}
+{"type":"session.shutdown","timestamp":"2026-05-06T10:01:00.000Z","data":{"modelMetrics":{"claude-sonnet-4-5":{"requests":{"count":11,"cost":0.0875},"tokens":{"input":2790,"output":1230,"cacheRead":880,"cacheWrite":400}}}}}
