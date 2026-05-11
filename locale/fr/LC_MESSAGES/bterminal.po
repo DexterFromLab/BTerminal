@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version:  bterminal\n"
 "Report-Msgid-Bugs-To: bartoszczarnota1@gmail.com\n"
-"POT-Creation-Date: 2026-05-10 21:39+0200\n"
+"POT-Creation-Date: 2026-05-11 10:56+0200\n"
 "PO-Revision-Date: 2026-05-05 13:39+0200\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -119,15 +119,15 @@ msgstr "Errata de BTerminal"
 msgid "No errata entries."
 msgstr "Aucune entrée d'errata."
 
-#: bterminal/updater.py:539
+#: bterminal/updater.py:568
 msgid "BTerminal update"
 msgstr "Mise à jour de BTerminal"
 
-#: bterminal/updater.py:548
+#: bterminal/updater.py:577
 msgid "Update in progress…"
 msgstr "Mise à jour en cours…"
 
-#: bterminal/updater.py:638
+#: bterminal/updater.py:667
 msgid ""
 "The new version of BTerminal could not be installed.\n"
 "\n"
@@ -139,7 +139,7 @@ msgstr ""
 "La version précédente a été restaurée automatiquement — BTerminal continue "
 "de fonctionner normalement."
 
-#: bterminal/updater.py:644
+#: bterminal/updater.py:673
 #, python-brace-format
 msgid ""
 "Installation failed and no previous version is available to restore.\n"
@@ -152,6 +152,45 @@ msgstr ""
 "\n"
 "Détails :\n"
 "{details}"
+
+#: bterminal/ui/terminal_tab.py:607
+msgid "Brakuje modelu lokalnego dla aidera"
+msgstr ""
+
+#: bterminal/ui/terminal_tab.py:609
+#, python-format
+msgid ""
+"Model '%s' nie jest pobrany w Ollamie. Aider wystartuje, ale przy pierwszym "
+"promptcie wypisze litellm.NotFoundError. Co chcesz zrobić?"
+msgstr ""
+
+#: bterminal/ui/terminal_tab.py:622
+msgid "Uruchom wizarda"
+msgstr ""
+
+#: bterminal/ui/terminal_tab.py:624
+msgid "Wybierz inny model"
+msgstr ""
+
+#: bterminal/ui/terminal_tab.py:625
+msgid "Pomiń (uruchom mimo to)"
+msgstr ""
+
+#: bterminal/ui/terminal_tab.py:626 bterminal/ui/terminal_tab.py:654
+msgid "Anuluj"
+msgstr ""
+
+#: bterminal/ui/terminal_tab.py:648
+msgid "Wybierz model lokalny"
+msgstr ""
+
+#: bterminal/ui/terminal_tab.py:655
+msgid "OK"
+msgstr ""
+
+#: bterminal/ui/terminal_tab.py:663
+msgid "Dostępne modele Ollama:"
+msgstr ""
 
 #: bterminal/ui/sidebar.py:165
 #, python-brace-format
@@ -449,7 +488,11 @@ msgstr ""
 msgid "Install dependencies…"
 msgstr ""
 
-#: bterminal/app.py:498
+#: bterminal/app.py:503
+msgid "Configure local model (aider)…"
+msgstr ""
+
+#: bterminal/app.py:507
 msgid "Tools"
 msgstr "Outils"
 
