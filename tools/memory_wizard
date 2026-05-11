@@ -33,6 +33,26 @@ import json
 import os
 import re
 import sqlite3
+import sys
+from pathlib import Path as _Path
+
+# BUG#29: pull DEFAULT_INJECT_EVERY / DEFAULT_REFRESH_EVERY from the
+# canonical module so this wizard agrees with Memory panel, terminal_tab
+# and tools/ctx. Same path-bootstrap pattern as tools/ctx: try repo
+# layout, then flat install layout. Hardcoded fallback only if both
+# fail (degraded install where the package isn't on disk).
+try:
+    _HERE = _Path(__file__).resolve().parent
+    for _candidate in (_HERE.parent, _HERE):
+        if (_candidate / "bterminal" / "providers" / "ctx_defaults.py").is_file():
+            sys.path.insert(0, str(_candidate))
+            break
+    from bterminal.providers.ctx_defaults import (  # type: ignore
+        DEFAULT_INJECT_EVERY, DEFAULT_REFRESH_EVERY,
+    )
+except Exception:
+    DEFAULT_INJECT_EVERY = 100
+    DEFAULT_REFRESH_EVERY = 200
 import subprocess
 import sys
 from pathlib import Path
@@ -853,7 +873,7 @@ def _confirm_all(proposals: dict, session_log: str = "") -> dict:
 # ─── Interval configuration ───────────────────────────────────────────────────
 
 def _configure_intervals(project: str) -> tuple[int, int]:
-    cur_inj, cur_ref = 20, 50
+    cur_inj, cur_ref = DEFAULT_INJECT_EVERY, DEFAULT_REFRESH_EVERY
     try:
         if CTX_DB.exists():
             db = sqlite3.connect(str(CTX_DB))
@@ -1076,10 +1096,15 @@ def _auto_accept(proposals: dict) -> dict:
 
 
 def _read_inject_config(project: str) -> tuple[int, int]:
-    """Read current inject_every / refresh_every from DB, return defaults if missing."""
+    """Read current inject_every / refresh_every from DB, return defaults if missing.
+
+    BUG#29: both fallback paths used to disagree (one returned 100/200,
+    another 20/50). Now both delegate to the canonical
+    DEFAULT_INJECT_EVERY / DEFAULT_REFRESH_EVERY constants.
+    """
     try:
         if not CTX_DB.exists():
-            return 100, 200
+            return DEFAULT_INJECT_EVERY, DEFAULT_REFRESH_EVERY
         db = sqlite3.connect(str(CTX_DB))
         row = db.execute(
             "SELECT inject_every, refresh_every FROM rules_config WHERE project = ?",
@@ -1090,7 +1115,7 @@ def _read_inject_config(project: str) -> tuple[int, int]:
             return row[0], row[1]
     except Exception:
         pass
-    return 100, 200
+    return DEFAULT_INJECT_EVERY, DEFAULT_REFRESH_EVERY
 
 
 def main():

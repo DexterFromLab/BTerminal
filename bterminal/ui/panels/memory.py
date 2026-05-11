@@ -14,10 +14,14 @@ import sqlite3
 import subprocess
 import threading
 
+from bterminal.providers.ctx_defaults import (
+    DEFAULT_INJECT_EVERY, DEFAULT_REFRESH_EVERY,
+)
+
 import gi
 gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
-from gi.repository import Gdk, GdkPixbuf, GLib, Gtk, Pango
+from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk, Pango
 
 from bterminal.config import (
     CATPPUCCIN,
@@ -46,6 +50,7 @@ class MemoryPanel(Gtk.Box):
         self.app = app
         self._current_project = None
         self._rules_store = None
+        self._db_monitor = None  # set up in _setup_db_monitor below
 
         header = Gtk.Label(label="Memory")
         header.get_style_context().add_class("sidebar-header")
@@ -93,7 +98,7 @@ class MemoryPanel(Gtk.Box):
         inj_lbl = Gtk.Label(label="Inject rules every:")
         inj_lbl.set_halign(Gtk.Align.START)
         self._spin_inject = Gtk.SpinButton.new_with_range(1, 500, 1)
-        self._spin_inject.set_value(100)
+        self._spin_inject.set_value(DEFAULT_INJECT_EVERY)
         self._spin_inject.set_width_chars(4)
         inj_row.pack_start(inj_lbl, True, True, 0)
         inj_row.pack_start(self._spin_inject, False, False, 0)
@@ -104,7 +109,7 @@ class MemoryPanel(Gtk.Box):
         ref_lbl = Gtk.Label(label="Refresh CTX every:")
         ref_lbl.set_halign(Gtk.Align.START)
         self._spin_refresh = Gtk.SpinButton.new_with_range(1, 1000, 1)
-        self._spin_refresh.set_value(200)
+        self._spin_refresh.set_value(DEFAULT_REFRESH_EVERY)
         self._spin_refresh.set_width_chars(4)
         ref_row.pack_start(ref_lbl, True, True, 0)
         ref_row.pack_start(self._spin_refresh, False, False, 0)
@@ -282,6 +287,10 @@ class MemoryPanel(Gtk.Box):
         # leaves the spinners and rules list showing stale values.
         self.connect("map", lambda *_: self._refresh_for_current_project())
 
+        # BUG#30: watch CTX_DB for external mutations (memory_wizard,
+        # second BT window, `ctx rules config` from the shell).
+        self._setup_db_monitor()
+
     def _refresh_for_current_project(self):
         """Re-read rules + rules_config + logs for the active project.
         Called from map-event so the panel reflects DB truth on every show.
@@ -362,6 +371,47 @@ class MemoryPanel(Gtk.Box):
         except Exception:
             pass
 
+    def _setup_db_monitor(self):
+        """BUG#30: watch CTX_DB so external mutations (other BT window's
+        Apply, `memory_wizard` saving config, `ctx rules config` from
+        the shell) re-flow into the open Memory panel. Without this
+        the spinner could show stale values for the rest of the
+        session.
+
+        Idempotent: called from _on_project_changed; replaces any
+        previous monitor so we don't accumulate listeners.
+        """
+        if self._db_monitor is not None:
+            try:
+                self._db_monitor.cancel()
+            except Exception:
+                pass
+            self._db_monitor = None
+        try:
+            gfile = Gio.File.new_for_path(str(CTX_DB))
+            monitor = gfile.monitor_file(Gio.FileMonitorFlags.NONE, None)
+            monitor.connect("changed", self._on_db_changed)
+            self._db_monitor = monitor
+        except Exception:
+            # Best-effort — the panel still works without live refresh;
+            # next _refresh_config trigger (e.g. project switch) picks
+            # up the new values.
+            self._db_monitor = None
+
+    def _on_db_changed(self, _monitor, _file, _other, event):
+        """File monitor callback — re-read rules_config for the current
+        project. Filter to CHANGED / CHANGES_DONE_HINT so we don't
+        thrash on every sqlite WAL touch."""
+        if event not in (
+            Gio.FileMonitorEvent.CHANGED,
+            Gio.FileMonitorEvent.CHANGES_DONE_HINT,
+            Gio.FileMonitorEvent.CREATED,
+        ):
+            return
+        # Defer to idle so SQLite has finished its commit before we read.
+        GLib.idle_add(self._refresh_config)
+        GLib.idle_add(self._refresh_rules)
+
     def _refresh_config(self):
         project = self._get_project()
         if not project:
@@ -377,8 +427,8 @@ class MemoryPanel(Gtk.Box):
                 self._spin_inject.set_value(row[0])
                 self._spin_refresh.set_value(row[1])
             else:
-                self._spin_inject.set_value(100)
-                self._spin_refresh.set_value(200)
+                self._spin_inject.set_value(DEFAULT_INJECT_EVERY)
+                self._spin_refresh.set_value(DEFAULT_REFRESH_EVERY)
         except Exception:
             pass
 
