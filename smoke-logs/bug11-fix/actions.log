@@ -1,0 +1,4 @@
+[21:27:28] step=1 action=file_options png=01_file_options_zoom.png (zoom 0,60-900,510)
+[21:27:32] step=2 action=click_pull png=02_click_pull_zoom.png (zoom 0,60-900,510)
+[21:29:39] step=4 action=file_options_after png=04_file_options_after_zoom.png (zoom 0,60-900,510)
+[21:29:43] step=5 action=click_pull_after png=05_click_pull_after_zoom.png (zoom 0,60-900,510)

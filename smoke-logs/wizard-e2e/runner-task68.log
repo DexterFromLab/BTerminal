@@ -1,0 +1,28 @@
+=== wizard E2E with screenshots (2026-05-08T12:06:22Z) ===
+VM: vm-test  Path: /home/michal/BTerminal  Modes: uninstall
+Screenshots: /home/bartek/workspace/ssh_client/smoke-logs/wizard-e2e/screenshots
+
+=== uninstall mode (5 sub-tests for task #140) ===
+  [32m✓[0m uninstall: preflight OK (BT present)
+  [32m✓[0m uninstall: pre-test desktop shortcut planted
+  • Running ./install.sh --uninstall (no --purge)
+  [32m✓[0m screenshot: uninstall-01-after-no-purge → 140623-uninstall-01-after-no-purge.png
+  [32m✓[0m (a) uninstall: BT files + launcher removed
+  [32m✓[0m (a) uninstall: configs + ctx DB preserved (no --purge)
+  [32m✓[0m (c) uninstall: XDG desktop shortcut removed
+  [32m✓[0m (d) uninstall: claude + copilot npm packages removed
+  • Re-installing for --purge sub-test
+  [32m✓[0m uninstall: re-install OK (preparing --purge test)
+  • Running ./install.sh --uninstall --purge
+  [32m✓[0m (b) --purge: BT files + configs + ctx DB all removed
+  • Re-installing for wizard-mode uninstall test
+  [32m✓[0m screenshot: uninstall-02-radio-uninstall-selected → 140840-uninstall-02-radio-uninstall-selected.png
+  [32m✓[0m screenshot: uninstall-03-confirm-page → 140844-uninstall-03-confirm-page.png
+  [32m✓[0m screenshot: uninstall-04-summary → 140854-uninstall-04-summary.png
+  [31m✗[0m (e) wizard uninstall: completion marker missing
+
+=== Summary ===
+Total: 13   passed: 12   failed: 1
+Screenshots: /home/bartek/workspace/ssh_client/smoke-logs/wizard-e2e/screenshots (116 files)
+Failed:
+  - (e) wizard uninstall: completion marker missing

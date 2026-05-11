@@ -1,0 +1,6 @@
+ssh: Could not resolve hostname vm-test: Name or service not known
+ssh: Could not resolve hostname vm-test: Name or service not known
+[18:25:27] tag baseline_desktop: ssh+gnome-screenshot failed
+ssh: Could not resolve hostname vm-test: Name or service not known
+[18:27:09] tag after_pytest_run: ssh+gnome-screenshot failed
+[18:27:09] monitor stopped cleanly

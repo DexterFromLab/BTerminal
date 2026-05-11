@@ -1,0 +1,7 @@
+[22:57:18] step=1 action=baseline_bt_running png=01_baseline_bt_running.png
+[22:57:35] step=2 action=check_updates png=02_check_updates_zoom.png (zoom 0,60-900,510)
+[22:57:39] step=3 action=update_prompt_shown png=03_update_prompt_shown.png
+[22:57:59] step=4 action=check_updates_v2 png=04_check_updates_v2_zoom.png (zoom 0,60-900,510)
+[22:58:05] step=5 action=update_prompt_v2 png=05_update_prompt_v2.png
+[22:59:10] step=7 action=click_aktualizuj png=07_click_aktualizuj_zoom.png (zoom 0,60-900,510)
+[22:59:16] step=8 action=update_progress_running png=08_update_progress_running.png

@@ -1,0 +1,46 @@
+2026-05-08T07:53:30Z [OK] python3 3.12.3 (>= 3.10 required)
+2026-05-08T07:53:30Z [OK] node v22.22.1 (>= 22.0 required)
+2026-05-08T07:53:30Z [OK] npm 10.99.0-mock (>= 10.0 required)
+2026-05-08T07:53:30Z [INFO] Installing Claude Code via npm...
+2026-05-08T07:53:30Z [VALIDATE] Claude Code: OK (claude 1.2.3-mock)
+2026-05-08T07:53:30Z [OK] claude claude 1.2.3-mock (installed)
+2026-05-08T07:53:30Z [INFO] Linked /home/michal/bterm-fullchain/.local/bin/claude -> /home/michal/bterm-fullchain/.npm-global/bin/claude
+2026-05-08T07:53:30Z [INFO] Installing Copilot CLI via npm...
+2026-05-08T07:53:30Z [VALIDATE] Copilot CLI: OK (copilot 4.5.6-mock)
+2026-05-08T07:53:30Z [OK] copilot copilot 4.5.6-mock (installed)
+2026-05-08T07:53:30Z [INFO] First Copilot session will prompt for /login (device-flow,
+2026-05-08T07:53:30Z [INFO]   requires active GitHub Copilot subscription)
+2026-05-08T07:53:30Z [INFO] Linked /home/michal/bterm-fullchain/.local/bin/copilot -> /home/michal/bterm-fullchain/.npm-global/bin/copilot
+2026-05-08T07:53:30Z [INFO] Installing Ollama via curl ollama.com/install.sh...
+2026-05-08T07:53:33Z [WARN] Ollama install failed — install manually: curl -fsSL https://ollama.com/install.sh | sh
+2026-05-08T07:53:33Z [OK] git
+2026-05-08T07:53:33Z [WARN] git-lfs not found (optional) — apt install git-lfs
+2026-05-08T07:53:33Z [OK] ssh
+2026-05-08T07:53:33Z [OK] xdg-open
+2026-05-08T07:53:33Z [INFO] meld not found — installing meld...
+2026-05-08T07:53:33Z [WARN] meld could not be installed — apt install meld
+2026-05-08T07:53:33Z [INFO] pdflatex (LaTeX) not found — installing texlive-latex-extra...
+2026-05-08T07:53:33Z [WARN] pdflatex (LaTeX) could not be installed — apt install texlive-latex-extra
+2026-05-08T07:53:33Z [INFO] latexmk not found — installing latexmk...
+2026-05-08T07:53:33Z [WARN] latexmk could not be installed — apt install latexmk
+2026-05-08T07:53:33Z [OK] poppler-utils (PDF preview)
+2026-05-08T07:53:33Z [INFO] pandoc not found — installing pandoc...
+2026-05-08T07:53:33Z [WARN] pandoc could not be installed — apt install pandoc
+2026-05-08T07:53:33Z [OK] python3-gi
+2026-05-08T07:53:33Z [OK] GTK 3.0
+2026-05-08T07:53:33Z [OK] VTE 2.91
+2026-05-08T07:53:33Z [INFO] Live symlinks: defaults/ README.md VERSION
+2026-05-08T07:53:33Z [INFO] Compiled 12 translation catalog(s)
+2026-05-08T07:53:33Z [INFO] Repo path: /home/michal/BTerminal
+2026-05-08T07:53:33Z [INFO] Skill installed: check-deps.md
+2026-05-08T07:53:33Z [INFO] Skill installed: reflect.md
+2026-05-08T07:53:33Z [OK] Skills: 2 installed, 0 already present
+2026-05-08T07:53:33Z [INFO] latex-document-skill: cloning...
+2026-05-08T07:54:02Z [OK] latex-document-skill (cloned)
+2026-05-08T07:54:02Z [INFO] latex-document-skill: switching a0037ed → 3cd9f27
+2026-05-08T07:54:04Z [OK] latex-document-skill @ 3cd9f27
+2026-05-08T07:54:04Z [INFO] Skill linked: latex.md
+2026-05-08T07:54:04Z [OK] /latex skill available
+2026-05-08T07:54:04Z [OK] Symlinks in /home/michal/bterm-fullchain/.local/bin
+2026-05-08T07:54:04Z [INFO] Created /home/michal/bterm-fullchain/.claude-context/context.db
+2026-05-08T07:54:04Z [OK] Desktop entry created

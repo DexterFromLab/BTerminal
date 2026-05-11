@@ -1,0 +1,9 @@
+....F................................................................... [ 54%]
+..........................................s................F.            [100%]
+=================================== FAILURES ===================================
+/home/michal/BTerminal/tests/e2e/test_aider_full_session.py:473: AssertionError: no rules_inject events after force_idle. State: {'ok': True, 'had_pending': True, 'still_pending': False}
+/home/michal/BTerminal/tests/e2e/test_tier3_acceptance.py:326: AssertionError: assert {'cost_unavai..._usage': True} == {'hide_plan_usage': True}
+=========================== short test summary info ============================
+FAILED tests/e2e/test_aider_full_session.py::test_aider_rules_inject_fires_after_inject_every_threshold
+FAILED tests/e2e/test_tier3_acceptance.py::test_widget_options_hide_plan_usage_for_copilot_tab
+2 failed, 130 passed, 1 skipped in 69.99s (0:01:09)

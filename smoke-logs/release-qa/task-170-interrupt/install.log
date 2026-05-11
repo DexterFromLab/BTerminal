@@ -1,0 +1,17 @@
+=== BTerminal Installer v1.3.0 ===
+
+{"phase": "runtime", "status": "installing", "progress": 5, "label": "Checking runtime"}
+[1/7] Checking runtime...
+  [32m✓[0m python3 3.12.3 (>= 3.10 required)
+  [32m✓[0m node v22.22.1 (>= 22.0 required)
+  [32m✓[0m npm 10.9.4 (>= 10.0 required)
+{"phase": "claude", "status": "installing", "progress": 15, "label": "Checking Claude Code CLI"}
+[2/7] Checking Claude Code...
+  [32m✓[0m claude 2.1.136 (Claude Code) (/home/michal/.npm-global/bin/claude)
+    Updating to latest...
+
+changed 2 packages in 2s
+
+  [31m✗[0m Interrupted before backup created — partial state.
+    Run ./install.sh again to retry from clean.
+BTERMINAL_INTERRUPT_NO_BACKUP

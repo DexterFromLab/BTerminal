@@ -1,0 +1,6 @@
+────────────────────────────────────────────────────────────────────────────────
+Aider v0.86.2
+Model: openai/qwen2.5-coder:0.5b with whole edit format
+Git repo: .git with 0 files
+Repo-map: using 1024 tokens, auto refresh
+

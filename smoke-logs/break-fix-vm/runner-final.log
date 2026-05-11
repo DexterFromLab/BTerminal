@@ -1,0 +1,41 @@
+=== break + fix VM e2e (5 scenarios) (2026-05-08T12:46:20Z) ===
+VM: vm-test  Scenarios: a,b,c,d,e
+Logs: /home/bartek/workspace/ssh_client/smoke-logs/break-fix-vm
+
+=== (a) Remove launcher symlink ===
+  [32m✓[0m (a) preflight: state=installed
+  [32m✓[0m (a) post-break: detect_install_state = 'broken'
+  [32m✓[0m (a) post-fix: state restored to 'installed'
+  [32m✓[0m (a) install.log: 10 [FIX] entries
+  [32m✓[0m (a) screenshot saved
+
+=== (b) Remove bterminal/__init__.py ===
+  [32m✓[0m (b) preflight: state=installed
+  [32m✓[0m (b) post-break: detect_install_state = 'broken'
+  [32m✓[0m (b) post-fix: state restored to 'installed'
+  [32m✓[0m (b) install.log: 16 [FIX] entries
+  [32m✓[0m (b) screenshot saved
+
+=== (c) Stub claude.exe (no +x) ===
+  [32m✓[0m (c) preflight: state=installed
+  [32m✓[0m (c) post-break: detect_install_state = 'broken'
+  [32m✓[0m (c) post-fix: state restored to 'installed'
+  [32m✓[0m (c) install.log: 20 [FIX] entries
+  [32m✓[0m (c) screenshot saved
+
+=== (d) Stale install.lock (PID 999999) ===
+  [32m✓[0m (d) preflight: state=installed
+  [32m✓[0m (d) post-break: detect_install_state = 'broken'
+  [32m✓[0m (d) post-fix: state restored to 'installed'
+  [32m✓[0m (d) install.log: 26 [FIX] entries
+  [32m✓[0m (d) screenshot saved
+
+=== (e) Remove ~/.local/bin/{ctx,tasks} ===
+  [32m✓[0m (e) preflight: state=installed
+  [32m✓[0m (e) post-break: detect_install_state = 'broken'
+  [32m✓[0m (e) post-fix: state restored to 'installed'
+  [32m✓[0m (e) install.log: 34 [FIX] entries
+  [32m✓[0m (e) screenshot saved
+
+=== Summary ===
+Total: 25   passed: 25   failed: 0

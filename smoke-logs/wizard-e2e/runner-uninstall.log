@@ -1,0 +1,15 @@
+=== wizard E2E with screenshots (2026-05-08T11:29:05Z) ===
+VM: vm-test  Path: /home/michal/BTerminal  Modes: uninstall
+Screenshots: /home/bartek/workspace/ssh_client/smoke-logs/wizard-e2e/screenshots
+
+=== uninstall mode ===
+  [32m✓[0m uninstall: preflight OK (BT present)
+  [32m✓[0m uninstall: wizard window appeared
+  [32m✓[0m screenshot: uninstall-01-welcome → 132908-uninstall-01-welcome.png
+  [32m✓[0m screenshot: uninstall-99-end → 132938-uninstall-99-end.png
+  [32m✓[0m uninstall: launcher + install dir removed
+  [32m✓[0m uninstall: config dir preserved (no --purge)
+
+=== Summary ===
+Total: 6   passed: 6   failed: 0
+Screenshots: /home/bartek/workspace/ssh_client/smoke-logs/wizard-e2e/screenshots (59 files)

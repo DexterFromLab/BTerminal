@@ -1,0 +1,76 @@
+BUG#25 + BUG#26 — wizard CLI English + url field + Custom tag
+Verified on VM (vm-test, michal-VirtualBox), 2026-05-11.
+
+User feedback that motivated these:
+  - "Opisy modeli są ręczne — co jeśli się zdezaktualizują?" → BUG#25:
+    replace free-form `description` with a `url` to ollama.com/library,
+    let the Library page own the copy.
+  - "Skrypt powinien być po angielsku" → matches the existing convention
+    for tools/ CLIs (tasks, consult, memory_wizard); GTK dialogs in BT
+    proper keep gettext localisation.
+  - "Co jeśli ktoś będzie miał mocniejszy komputer?" → BUG#26: add a
+    'c' / Custom tag entry so workstation users (Llama 70B class) can
+    pull any Ollama tag without waiting for the bundled catalog to
+    catch up.
+
+Code changes:
+  bterminal/providers/aider_models.json
+    - bumped schema_version 1 → 2
+    - removed `description` from every entry
+    - added `url` pointing at https://ollama.com/library/<tag>
+  tools/aider_setup_wizard
+    - all user-facing strings → English (matches tools/ convention)
+    - title col renamed Opis → Info; cell uses rich [link={url}]details[/link]
+      (OSC-8 hyperlink — VTE renders as underlined clickable text)
+    - pick_model() accepts 'c' in addition to numeric + 'r'
+    - +prompt_custom_tag() — Prompt.ask("Custom model tag") +
+      synthetic dict (tag, label, url derived from base name,
+      ram_gb=0, download_mb=0, tier="custom")
+    - main() loops back to render_table on 'r' (refresh) AND on 'c'
+      (only when the user cancels the custom prompt)
+  tests/test_aider_probe.py
+    - required-keys assertion: `description` → `url`
+    - added schema-v2 guard: `description` must NOT be present
+    - added URL prefix guard: must start with https://ollama.com/library/
+  tests/test_aider_setup_wizard_cli.py
+    - retired Polish substring check (used "Model already pulled" / English)
+    - +test_prompt_custom_tag_builds_synthetic_model_entry
+    - +test_prompt_custom_tag_empty_input_returns_none
+
+Pin tests on VM (full suite of BUG#19-#26):
+  pytest tests/e2e/test_aider_missing_model_dialog.py tests/test_aider_probe.py \
+         tests/test_aider_setup_wizard_cli.py tests/e2e/test_wizard_flow_e2e.py \
+         tests/e2e/test_tools_menu_aider_wizard.py tests/test_catalog_refresh.py
+  → 63 passed in 2.29s (up from 61 — the new tests are the two
+    prompt_custom_tag cases).
+
+E2E artefacts in smoke-logs/bug25-26-fix/:
+  01_wizard_en_with_url_links.png    — wizard table fully in English,
+                                        Info column with "details" hyperlinks.
+  02_custom_tag_flow.png             — interactive 'c' flow from terminal.
+  02b_custom_tag_zoom.png            — close-up showing the OSC-8 underline
+                                        on https://ollama.com/library, the
+                                        "Custom model tag:" prompt, and
+                                        the "Model already pulled" skip.
+
+Manual edge cases (smoke-logs/manual-edge-tests/) — all PASS:
+  edge1   — dialog grows from 3 to 4 buttons when an alternative model
+            is installed; "Wybierz inny model" → combo + aider spawn
+            with the chosen tag, no wizard / no relaunch.
+  edge2   — "Pomiń" → spawn aider with the missing model (banner shows
+            qwen2.5-coder:7b); next prompt would yield litellm error,
+            but that's the contract the user accepted.
+  edge3   — "Anuluj" → no wizard tab spawned, original aider tab stays
+            empty, wmctrl reports `AiderBug2Test [2/2]`.
+  edge4   — Tools → Configure local model (manual entry) → wizard pulls,
+            saves options.json, exits — and NO aider auto-relaunch
+            because the wizard ran without --session-id (so the sentinel
+            it would write has no matching session_id for
+            compute_relaunch_config). Verified by wmctrl `[2/2]` after
+            wizard exit.
+  edge5   — `r` refresh path: opened wizard, the picker prompt is
+            "Choose a number, 'r' to refresh catalog, or 'c' for custom
+            tag [1/2/3/4/5/6/7/r/c] (1):" — confirms the choices are
+            wired in. Live refresh against GitHub raw observed in the
+            smoke output of test_catalog_refresh.py:
+            test_refresh_writes_cache_on_success.

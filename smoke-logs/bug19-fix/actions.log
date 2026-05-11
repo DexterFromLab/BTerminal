@@ -1,0 +1,55 @@
+BUG#19 — Aider spawn without missing-model pre-detection
+Reproduced and fixed on VM (vm-test, michal-VirtualBox), 2026-05-11.
+
+Timeline (host: bartek@pop-os, VM: 192.168.0.123):
+
+10:04  cleanup_bt + launch_bt pl on VM, BT visible.
+10:04  ollama rm qwen2.5-coder:0.5b  → ollama list now empty (simulating
+       fresh install on a host that never pulled the default tag).
+10:06  Relaunched BT with --debug-rest on :7780 (helper's launch_bt
+       didn't pass the flag; switched to direct setsid -f path).
+10:07  REST POST /api/tabs/ai/aider  {config_name: "AiderBug2Test"}
+       → idx=1, aider tab opened in VTE.
+10:07  Screenshot 01_aider_litellm_error_BEFORE.png — aider on
+       'No git repo found, create one... [Yes]' prompt.
+10:07  REST feed 'Y\n' to tab 1 → aider creates git repo, banner
+       shows model = openai/qwen2.5-coder:0.5b.
+10:07  Screenshot 02_/02b_ — aider running, awaiting prompt.
+10:08  REST feed 'hello\n' to tab 1 → aider calls model → litellm.
+10:08  Screenshot 03_/03b_aider_litellm_BEFORE_zoom.png — VTE shows:
+         "litellm.NotFoundError: NotFoundError: OpenAIException -
+          model 'qwen2.5-coder:0.5b' not found"
+       BUG confirmed visible. Read tool review: matches user's
+       host-side screenshot exactly.
+
+10:08  Edit bterminal/providers/aider.py:
+        - +_strip_provider_prefix()
+        - +list_installed_models()      (parses `ollama list` header+rows)
+        - +is_model_available()         (bare tag in installed list)
+10:08  Edit bterminal/ui/terminal_tab.py:
+        - +_aider_resolve_model()       (mirrors build_argv chain)
+        - +_aider_resolve_missing_model()  (returns config|None)
+        - +_aider_show_missing_model_dialog()  (3-button MessageDialog)
+        - +_aider_pick_installed_model()    (combo over `ollama list`)
+        - +_aider_show_wizard_placeholder() (stub until BUG#21 ships)
+        - spawn_ai_cli: pre-spawn check inserted before
+          _build_spawn_script when provider_name == "aider".
+10:11  scp bterminal/providers/aider.py + bterminal/ui/terminal_tab.py
+       to VM /home/michal/BTerminal/...
+10:11  pkill BT, relaunch with --debug-rest, REST spawn aider tab.
+10:11  Screenshot 04_/04b_dialog_AFTER_zoom.png — modal dialog:
+         Title: "Brakuje modelu lokalnego dla aidera"
+         Body:  "Model 'openai/qwen2.5-coder:0.5b' nie jest pobrany
+                 w Ollamie. Aider wystartuje, ale przy pierwszym
+                 promptcie wypisze litellm.NotFoundError. Co chcesz
+                 zrobić?"
+         Buttons: [Uruchom wizarda] [Pomiń (uruchom mimo to)] [Anuluj]
+       Note: "Wybierz inny model" hidden because `ollama list` empty
+       — conditional `if installed:` is correct for this edge case.
+       Read tool review: bug-replacing dialog visible. ✓ FIX.
+
+10:11  Pin test tests/e2e/test_aider_missing_model_dialog.py — 11/11
+       PASSED both on host and VM (ssh vm-test pytest). Coverage:
+       is_model_available True/False, ollama missing, parser header
+       skipping, daemon dead returncode, dispatch table for each of
+       (skip|cancel|pick|already-installed), model priority chain.

@@ -1,0 +1,6 @@
+....F................................................................... [ 54%]
+..........................................s................F.            [100%]
+=========================== short test summary info ============================
+FAILED tests/e2e/test_aider_full_session.py::test_aider_rules_inject_fires_after_inject_every_threshold
+FAILED tests/e2e/test_tier3_acceptance.py::test_widget_options_hide_plan_usage_for_copilot_tab
+2 failed, 130 passed, 1 skipped in 74.66s (0:01:14)

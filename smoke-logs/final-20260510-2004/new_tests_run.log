@@ -1,0 +1,90 @@
+tests/e2e/test_pull_ollama_dialog_dropdown.py::test_behavioural_dialog_has_library_link_button FAILED [ 55%]
+tests/e2e/test_pull_ollama_dialog_pl_translation.py::test_pull_msgids_present_in_pot FAILED [ 57%]
+tests/e2e/test_pull_ollama_dialog_pl_translation.py::test_pull_msgstrs_translated_in_pl_po FAILED [ 58%]
+tests/e2e/test_pull_ollama_dialog_pl_translation.py::test_pull_pl_msgstrs_are_actually_polish PASSED [ 59%]
+tests/e2e/test_pull_ollama_dialog_pl_translation.py::test_label_uses_translation_function_not_bare_f_string FAILED [ 61%]
+tests/e2e/test_pull_ollama_dialog_pl_translation.py::test_behavioural_dialog_title_is_polish FAILED [ 62%]
+tests/e2e/test_pull_ollama_dialog_pl_translation.py::test_behavioural_pull_button_label_is_polish FAILED [ 63%]
+tests/e2e/test_pull_ollama_dialog_pl_translation.py::test_behavioural_label_does_not_contain_english_model_name FAILED [ 64%]
+tests/e2e/test_pull_failed_no_ansi_codes.py::test_ollama_client_has_ansi_strip_helper FAILED [ 66%]
+tests/e2e/test_pull_failed_no_ansi_codes.py::test_pull_model_strips_ansi_before_return FAILED [ 67%]
+tests/e2e/test_pull_failed_no_ansi_codes.py::test_strip_helper_removes_all_known_escape_patterns SKIPPED [ 68%]
+tests/e2e/test_pull_failed_no_ansi_codes.py::test_pull_model_returns_clean_message_on_simulated_failure FAILED [ 70%]
+tests/e2e/test_pull_failed_no_ansi_codes.py::test_pull_model_preserves_meaningful_error_line PASSED [ 71%]
+tests/e2e/test_pull_failed_friendly_message.py::test_friendly_error_helper_exists FAILED [ 72%]
+tests/e2e/test_pull_failed_friendly_message.py::test_pull_model_uses_friendly_error_helper FAILED [ 74%]
+tests/e2e/test_pull_failed_friendly_message.py::test_model_not_found_message_mentions_model_name_and_is_short FAILED [ 75%]
+tests/e2e/test_pull_failed_friendly_message.py::test_message_does_not_contain_full_progress_dump FAILED [ 76%]
+tests/e2e/test_pull_failed_friendly_message.py::test_daemon_not_running_message_is_actionable PASSED [ 77%]
+tests/e2e/test_pull_failed_friendly_message.py::test_disk_full_message_mentions_space PASSED [ 79%]
+tests/e2e/test_pull_failed_friendly_message.py::test_unknown_error_falls_back_to_last_error_line FAILED [ 80%]
+tests/e2e/test_pull_failed_dialog_pl_title.py::test_pull_result_dialog_text_uses_translation_function FAILED [ 81%]
+tests/e2e/test_pull_failed_dialog_pl_title.py::test_pot_contains_pull_result_msgids FAILED [ 83%]
+tests/e2e/test_pull_failed_dialog_pl_title.py::test_pl_catalog_translates_pull_result_msgids FAILED [ 84%]
+tests/e2e/test_pull_failed_dialog_pl_title.py::test_pl_msgstrs_actually_polish PASSED [ 85%]
+tests/e2e/test_pull_failed_dialog_pl_title.py::test_visual_evidence_from_bug11_capture_shows_english_title FAILED [ 87%]
+tests/e2e/test_file_menu_generic_ai_session.py::test_file_menu_does_not_hardcode_claude_in_label FAILED [ 88%]
+tests/e2e/test_file_menu_generic_ai_session.py::test_file_menu_has_generic_new_ai_session_label FAILED [ 89%]
+tests/e2e/test_file_menu_generic_ai_session.py::test_file_menu_callback_does_not_hardcode_on_add_claude FAILED [ 90%]
+tests/e2e/test_file_menu_generic_ai_session.py::test_pl_catalog_translates_new_ai_session_msgid SKIPPED [ 92%]
+tests/e2e/test_file_menu_generic_ai_session.py::test_existing_claude_specific_msgstr_can_be_removed_after_fix SKIPPED [ 93%]
+tests/e2e/test_theme_toggle_light_to_dark.py::test_app_has_target_driven_set_theme_method FAILED [ 94%]
+tests/e2e/test_theme_toggle_light_to_dark.py::test_options_dialog_save_calls_set_theme_with_picked_target FAILED [ 96%]
+tests/e2e/test_theme_toggle_light_to_dark.py::test_set_theme_idempotent_for_same_target SKIPPED [ 97%]
+tests/e2e/test_theme_toggle_light_to_dark.py::test_set_theme_applies_target_regardless_of_current SKIPPED [ 98%]
+tests/e2e/test_theme_toggle_light_to_dark.py::test_vm_load_path_screenshots_exist_for_visual_review FAILED [100%]
+
+=============================== warnings summary ===============================
+tests/e2e/test_pull_failed_no_ansi_codes.py:1
+  /home/michal/BTerminal/tests/e2e/test_pull_failed_no_ansi_codes.py:1: SyntaxWarning: invalid escape sequence '\['
+    """E2E test for BUG#10 — Pull failed dialog leaks raw ANSI escape
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/e2e/test_tools_menu_pl_translation.py::test_pot_contains_every_menu_msgid
+FAILED tests/e2e/test_tools_menu_pl_translation.py::test_pl_catalog_translates_every_menu_msgid
+FAILED tests/e2e/test_tools_menu_pl_translation.py::test_install_dependencies_msgstr_is_polish_not_english
+FAILED tests/e2e/test_tools_menu_pl_translation.py::test_diagnostics_msgstr_is_polish_not_english
+FAILED tests/e2e/test_aider_context_read_flag.py::test_build_argv_adds_read_flag_when_AIDER_md_in_project_dir
+FAILED tests/e2e/test_aider_context_read_flag.py::test_build_argv_falls_back_to_CLAUDE_md_when_no_AIDER_md
+FAILED tests/e2e/test_aider_context_read_flag.py::test_real_aider_banner_includes_added_AIDER_md_with_read_flag
+FAILED tests/e2e/test_aider_context_read_flag.py::test_real_aider_banner_LACKS_added_AIDER_md_without_read_flag
+FAILED tests/e2e/test_aider_rules_at_spawn.py::test_build_argv_adds_read_for_rules_file_in_provider_options
+FAILED tests/e2e/test_aider_rules_at_spawn.py::test_spawn_pipeline_materializes_rules_and_passes_to_argv
+FAILED tests/e2e/test_ollama_pull_small_model_guard.py::test_helper_function_parses_common_ollama_tag_sizes
+FAILED tests/e2e/test_ollama_pull_small_model_guard.py::test_on_pull_model_consults_size_helper_before_pulling
+FAILED tests/e2e/test_ollama_pull_small_model_guard.py::test_pull_dialog_label_warns_about_small_models
+FAILED tests/e2e/test_options_dialog_pl_no_overflow.py::test_no_label_overflows_left_edge_of_dialog
+FAILED tests/e2e/test_options_image_hint_pl_translation.py::test_pot_contains_image_hint_msgid
+FAILED tests/e2e/test_options_image_hint_pl_translation.py::test_pl_catalog_has_image_hint_msgstr
+FAILED tests/e2e/test_options_scrollbar_when_expanded.py::test_pl_locale_both_expanded_produces_visible_scrollbar
+FAILED tests/e2e/test_pull_ollama_dialog_dropdown.py::test_dialog_constructs_combobox_for_model_selection
+FAILED tests/e2e/test_pull_ollama_dialog_dropdown.py::test_dialog_combobox_has_at_least_5_curated_options
+FAILED tests/e2e/test_pull_ollama_dialog_dropdown.py::test_dialog_includes_link_button_to_ollama_library
+FAILED tests/e2e/test_pull_ollama_dialog_dropdown.py::test_behavioural_dialog_has_combobox_with_5plus_entries
+FAILED tests/e2e/test_pull_ollama_dialog_dropdown.py::test_behavioural_dialog_has_library_link_button
+FAILED tests/e2e/test_pull_ollama_dialog_pl_translation.py::test_pull_msgids_present_in_pot
+FAILED tests/e2e/test_pull_ollama_dialog_pl_translation.py::test_pull_msgstrs_translated_in_pl_po
+FAILED tests/e2e/test_pull_ollama_dialog_pl_translation.py::test_label_uses_translation_function_not_bare_f_string
+FAILED tests/e2e/test_pull_ollama_dialog_pl_translation.py::test_behavioural_dialog_title_is_polish
+FAILED tests/e2e/test_pull_ollama_dialog_pl_translation.py::test_behavioural_pull_button_label_is_polish
+FAILED tests/e2e/test_pull_ollama_dialog_pl_translation.py::test_behavioural_label_does_not_contain_english_model_name
+FAILED tests/e2e/test_pull_failed_no_ansi_codes.py::test_ollama_client_has_ansi_strip_helper
+FAILED tests/e2e/test_pull_failed_no_ansi_codes.py::test_pull_model_strips_ansi_before_return
+FAILED tests/e2e/test_pull_failed_no_ansi_codes.py::test_pull_model_returns_clean_message_on_simulated_failure
+FAILED tests/e2e/test_pull_failed_friendly_message.py::test_friendly_error_helper_exists
+FAILED tests/e2e/test_pull_failed_friendly_message.py::test_pull_model_uses_friendly_error_helper
+FAILED tests/e2e/test_pull_failed_friendly_message.py::test_model_not_found_message_mentions_model_name_and_is_short
+FAILED tests/e2e/test_pull_failed_friendly_message.py::test_message_does_not_contain_full_progress_dump
+FAILED tests/e2e/test_pull_failed_friendly_message.py::test_unknown_error_falls_back_to_last_error_line
+FAILED tests/e2e/test_pull_failed_dialog_pl_title.py::test_pull_result_dialog_text_uses_translation_function
+FAILED tests/e2e/test_pull_failed_dialog_pl_title.py::test_pot_contains_pull_result_msgids
+FAILED tests/e2e/test_pull_failed_dialog_pl_title.py::test_pl_catalog_translates_pull_result_msgids
+FAILED tests/e2e/test_pull_failed_dialog_pl_title.py::test_visual_evidence_from_bug11_capture_shows_english_title
+FAILED tests/e2e/test_file_menu_generic_ai_session.py::test_file_menu_does_not_hardcode_claude_in_label
+FAILED tests/e2e/test_file_menu_generic_ai_session.py::test_file_menu_has_generic_new_ai_session_label
+FAILED tests/e2e/test_file_menu_generic_ai_session.py::test_file_menu_callback_does_not_hardcode_on_add_claude
+FAILED tests/e2e/test_theme_toggle_light_to_dark.py::test_app_has_target_driven_set_theme_method
+FAILED tests/e2e/test_theme_toggle_light_to_dark.py::test_options_dialog_save_calls_set_theme_with_picked_target
+FAILED tests/e2e/test_theme_toggle_light_to_dark.py::test_vm_load_path_screenshots_exist_for_visual_review
+============ 46 failed, 21 passed, 10 skipped, 1 warning in 33.86s =============

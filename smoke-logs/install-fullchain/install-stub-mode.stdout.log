@@ -1,0 +1,91 @@
+=== BTerminal Installer v1.3.0 ===
+
+[1/7] Checking runtime...
+  [32m✓[0m python3 3.12.3 (>= 3.10 required)
+  [32m✓[0m node v22.22.1 (>= 22.0 required)
+  [32m✓[0m npm 10.9.4 (>= 10.0 required)
+[2/7] Checking Claude Code...
+  [33m⚠[0m Existing Claude binary at /home/michal/bterm-fullchain/.npm-global/bin/claude is broken — binary present but not executable (chmod +x missing — broken npm install); will reinstall
+    Installing Claude Code via npm...
+
+added 2 packages in 1m
+  [32m✓[0m claude 2.1.133 (Claude Code) (installed)
+    Linked /home/michal/bterm-fullchain/.local/bin/claude -> /home/michal/bterm-fullchain/.npm-global/bin/claude
+[2.5/7] Checking GitHub Copilot CLI...
+  [33m⚠[0m Copilot CLI not found (skipped — no-sudo mode)
+[2.7/7] Checking local LLM backend (Ollama)...
+  [33m⚠[0m Ollama install needs root for systemd unit — skipped (--no-sudo)
+[3/7] Checking system tools...
+  [32m✓[0m git
+  [33m⚠[0m git-lfs not found (optional) — apt install git-lfs
+  [32m✓[0m ssh
+  [32m✓[0m xdg-open
+    meld not found — installing meld...
+  [33m⚠[0m Cannot install meld without sudo — run install.sh without --no-sudo
+  [33m⚠[0m meld could not be installed — apt install meld
+    pdflatex (LaTeX) not found — installing texlive-latex-extra...
+  [33m⚠[0m Cannot install texlive-latex-extra without sudo — run install.sh without --no-sudo
+  [33m⚠[0m pdflatex (LaTeX) could not be installed — apt install texlive-latex-extra
+    latexmk not found — installing latexmk...
+  [33m⚠[0m Cannot install latexmk without sudo — run install.sh without --no-sudo
+  [33m⚠[0m latexmk could not be installed — apt install latexmk
+  [32m✓[0m poppler-utils (PDF preview)
+    pandoc not found — installing pandoc...
+  [33m⚠[0m Cannot install pandoc without sudo — run install.sh without --no-sudo
+  [33m⚠[0m pandoc could not be installed — apt install pandoc
+[4/7] Checking GTK bindings...
+  [32m✓[0m python3-gi
+  [32m✓[0m GTK 3.0
+  [32m✓[0m VTE 2.91
+[5/7] Installing BTerminal files...
+    Live symlinks: defaults/ README.md VERSION
+    Compiled 12 translation catalog(s)
+    Repo path: /home/michal/BTerminal
+    Skill installed: check-deps.md
+    Skill installed: reflect.md
+  [32m✓[0m Skills: 2 installed, 0 already present
+    latex-document-skill: cloning...
+  [32m✓[0m latex-document-skill (cloned)
+    latex-document-skill: switching a0037ed → 3cd9f27
+  [32m✓[0m latex-document-skill @ 3cd9f27
+    Skill linked: latex.md
+  [32m✓[0m /latex skill available
+[6/7] Creating symlinks...
+  [32m✓[0m Symlinks in /home/michal/bterm-fullchain/.local/bin
+[7/7] Finalizing...
+    Created /home/michal/bterm-fullchain/.claude-context/context.db
+[shared] user_preferences = saved.
+  [32m✓[0m Desktop entry created
+
+[SUMMARY]
+Required:
+  [32m✓[0m git
+  [32m✓[0m ssh
+Auto-install (apt):
+  [31m✗[0m meld
+  [31m✗[0m pdflatex (LaTeX)
+  [31m✗[0m latexmk
+  [32m✓[0m poppler-utils (PDF preview)
+  [31m✗[0m pandoc
+Optional (manual):
+  [31m✗[0m git-lfs
+  [32m✓[0m xdg-open
+
+Warnings (non-critical):
+  [33m⚠[0m Existing Claude binary at /home/michal/bterm-fullchain/.npm-global/bin/claude is broken — binary present but not executable (chmod +x missing — broken npm install); will reinstall
+  [33m⚠[0m Copilot CLI not found (skipped — no-sudo mode)
+  [33m⚠[0m Ollama install needs root for systemd unit — skipped (--no-sudo)
+  [33m⚠[0m git-lfs not found (optional) — apt install git-lfs
+  [33m⚠[0m Cannot install meld without sudo — run install.sh without --no-sudo
+  [33m⚠[0m meld could not be installed — apt install meld
+  [33m⚠[0m Cannot install texlive-latex-extra without sudo — run install.sh without --no-sudo
+  [33m⚠[0m pdflatex (LaTeX) could not be installed — apt install texlive-latex-extra
+  [33m⚠[0m Cannot install latexmk without sudo — run install.sh without --no-sudo
+  [33m⚠[0m latexmk could not be installed — apt install latexmk
+  [33m⚠[0m Cannot install pandoc without sudo — run install.sh without --no-sudo
+  [33m⚠[0m pandoc could not be installed — apt install pandoc
+
+=== BTerminal v1.3.0 installed successfully ===
+
+Run:  bterminal
+PATH: export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:$PATH"

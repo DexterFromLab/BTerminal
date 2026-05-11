@@ -1,0 +1,39 @@
+=== BTerminal Installer vunknown ===
+
+[1/7] Checking runtime...
+  [32m✓[0m python3 3.12.3 (>=  required)
+  [32m✓[0m node v22.22.1 (>=  required)
+  [32m✓[0m npm 10.9.4 (>=  required)
+[2/7] Checking Claude Code...
+  [32m✓[0m claude 2.1.133 (Claude Code) (/home/michal/.npm-global/bin/claude)
+    Updating to latest...
+
+changed 2 packages in 2s
+    Already up to date
+    Linked /home/michal/.local/bin/claude -> /home/michal/.npm-global/bin/claude
+[3/7] Checking system tools...
+  [32m✓[0m git
+  [33m⚠[0m git-lfs not found (optional) — apt install git-lfs
+  [32m✓[0m ssh
+  [32m✓[0m xdg-open
+    meld not found — installing meld...
+  [33m⚠[0m Cannot install meld without sudo — run install.sh without --no-sudo
+  [33m⚠[0m meld could not be installed — apt install meld
+    pdflatex (LaTeX) not found — installing texlive-latex-extra...
+  [33m⚠[0m Cannot install texlive-latex-extra without sudo — run install.sh without --no-sudo
+  [33m⚠[0m pdflatex (LaTeX) could not be installed — apt install texlive-latex-extra
+    latexmk not found — installing latexmk...
+  [33m⚠[0m Cannot install latexmk without sudo — run install.sh without --no-sudo
+  [33m⚠[0m latexmk could not be installed — apt install latexmk
+  [32m✓[0m poppler-utils (PDF preview)
+    pandoc not found — installing pandoc...
+  [33m⚠[0m Cannot install pandoc without sudo — run install.sh without --no-sudo
+  [33m⚠[0m pandoc could not be installed — apt install pandoc
+[4/7] Checking GTK bindings...
+  [32m✓[0m python3-gi
+  [32m✓[0m GTK 3.0
+  [32m✓[0m VTE 2.91
+[5/7] Installing BTerminal files...
+
+  [31m✗[0m Installation failed (fresh install, nothing to restore).
+    Fix the error above and run ./install.sh again.

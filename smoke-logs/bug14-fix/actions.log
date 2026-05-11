@@ -1,0 +1,15 @@
+[21:43:56] step=1 action=baseline_dark png=01_baseline_dark.png
+[21:43:58] step=2 action=file_options png=02_file_options_zoom.png (zoom 0,60-900,510)
+[21:44:02] step=3 action=light_selected_in_combo png=03_light_selected_in_combo.png
+[21:44:18] step=4 action=click_zapisz png=04_click_zapisz_zoom.png (zoom 0,60-900,510)
+[21:44:20] step=5 action=after_save_should_be_light png=05_after_save_should_be_light.png
+[21:44:48] step=6 action=file_options_v2 png=06_file_options_v2_zoom.png (zoom 0,60-900,510)
+[21:44:53] step=7 action=click_zapisz_v2 png=07_click_zapisz_v2_zoom.png (zoom 0,60-900,510)
+[21:44:55] step=8 action=after_save_should_be_dark_BUG png=08_after_save_should_be_dark_BUG.png
+[21:47:25] step=9 action=baseline_dark_v2 png=09_baseline_dark_v2.png
+[21:47:27] step=10 action=file_options_v3 png=10_file_options_v3_zoom.png (zoom 0,60-900,510)
+[21:47:32] step=11 action=zapisz_to_light png=11_zapisz_to_light_zoom.png (zoom 0,60-900,510)
+[21:47:34] step=12 action=after_save_light_v2 png=12_after_save_light_v2.png
+[21:47:37] step=13 action=file_options_v4 png=13_file_options_v4_zoom.png (zoom 0,60-900,510)
+[21:47:41] step=14 action=zapisz_back_to_dark png=14_zapisz_back_to_dark_zoom.png (zoom 0,60-900,510)
+[21:47:44] step=15 action=after_save_dark_FIX_VERIFIED png=15_after_save_dark_FIX_VERIFIED.png

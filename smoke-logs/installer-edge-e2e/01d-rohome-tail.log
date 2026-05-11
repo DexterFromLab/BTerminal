@@ -1,0 +1,7 @@
+=== BTerminal Installer v1.3.0 ===
+
+mkdir: nie można utworzyć katalogu „/tmp/ro-home/.local/share/bterminal”: Brak dostępu
+
+  [31m✗[0m Installation failed (fresh install, nothing to restore).
+    Fix the error above and run ./install.sh again.
+BTERMINAL_FRESH_INSTALL_FAILED

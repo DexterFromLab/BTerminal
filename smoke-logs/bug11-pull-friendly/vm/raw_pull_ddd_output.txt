@@ -1,0 +1,8 @@
+--- RESULT ---
+ok= False
+msg_len= 478
+msg=
+'\x1b[?2026h\x1b[?25l\x1b[1Gpulling manifest ⠋ \x1b[K\x1b[?25h\x1b[?2026l\x1b[?2026h\x1b[?25l\x1b[1Gpulling manifest ⠙ \x1b[K\x1b[?25h\x1b[?2026l\x1b[?2026h\x1b[?25l\x1b[1Gpulling manifest ⠹ \x1b[K\x1b[?25h\x1b[?2026l\x1b[?2026h\x1b[?25l\x1b[1Gpulling manifest ⠸ \x1b[K\x1b[?25h\x1b[?2026l\x1b[?2026h\x1b[?25l\x1b[1Gpulling manifest ⠼ \x1b[K\x1b[?25h\x1b[?2026l\x1b[?2026h\x1b[?25l\x1b[1Gpulling manifest ⠴ \x1b[K\x1b[?25h\x1b[?2026l\x1b[?2026h\x1b[?25l\x1b[1Gpulling manifest ⠦ \x1b[K\x1b[?25h\x1b[?2026l\x1b[?2026h\x1b[?25l\x1b[1Gpulling manifest \x1b[K\x1b[?25h\x1b[?2026l\nError: pull model manifest: file does not exist'
+---PRINTABLE---
+[?2026h[?25l[1Gpulling manifest ⠋ [K[?25h[?2026l[?2026h[?25l[1Gpulling manifest ⠙ [K[?25h[?2026l[?2026h[?25l[1Gpulling manifest ⠹ [K[?25h[?2026l[?2026h[?25l[1Gpulling manifest ⠸ [K[?25h[?2026l[?2026h[?25l[1Gpulling manifest ⠼ [K[?25h[?2026l[?2026h[?25l[1Gpulling manifest ⠴ [K[?25h[?2026l[?2026h[?25l[1Gpulling manifest ⠦ [K[?25h[?2026l[?2026h[?25l[1Gpulling manifest [K[?25h[?2026l
+Error: pull model manifest: file does not exist

@@ -1,0 +1,30 @@
+=== Release QA sanity check ===
+Repository: /home/michal/BTerminal
+QA root:    /home/michal/BTerminal/smoke-logs/release-qa
+Strict:     0
+
+=== Per-task results ===
+⚠ #165 — no evidence folder (yet)
+⚠ #166 — no evidence folder (yet)
+⚠ #167 — no evidence folder (yet)
+⚠ #168 — no evidence folder (yet)
+⚠ #169 — no evidence folder (yet)
+⚠ #170 — no evidence folder (yet)
+⚠ #171 — no evidence folder (yet)
+⚠ #172 — no evidence folder (yet)
+⚠ #173 — no evidence folder (yet)
+⚠ #174 — no evidence folder (yet)
+⚠ #175 — no evidence folder (yet)
+⚠ #176 — no evidence folder (yet)
+⚠ #177 — no evidence folder (yet)
+⚠ #178 — no evidence folder (yet)
+⚠ #179 — no evidence folder (yet)
+
+=== Pin suite regression ===
+FAILED tests/e2e/test_aider_full_session.py::test_aider_rules_inject_fires_after_inject_every_threshold
+FAILED tests/e2e/test_tier3_acceptance.py::test_widget_options_hide_plan_usage_for_copilot_tab
+28 failed, 2432 passed, 22 skipped in 297.85s (0:04:57)
+
+============================================================
+Release QA sanity:  PASS=0  WARN=15  FAIL=0
+============================================================

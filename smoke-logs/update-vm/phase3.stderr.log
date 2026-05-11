@@ -1,0 +1,5 @@
+Traceback (most recent call last):
+  File "/tmp/bt_update_checks/git_pull_check.py", line 30, in <module>
+    assert result.get("ok"), f"pull failed: {result!r}"
+           ^^^^^^^^^^^^^^^^
+AssertionError: pull failed: {'ok': False, 'stashed': False, 'stash_popped': False, 'error': 'git pull failed:\nZ /tmp/bt-fake-upstream-31531\n * branch            master     -> FETCH_HEAD\npodpowiedź: You have divergent branches and need to specify how to reconcile them.\npodpowiedź: You can do so by running one of the following commands sometime before\npodpowiedź: your next pull:\npodpowiedź: \npodpowiedź:   git config pull.rebase false  # merge\npodpowiedź:   git config pull.rebase true   # rebase\npodpowiedź:   git config pull.ff only       # fast-forward only\npodpowiedź: \npodpowiedź: You can replace "git config" with "git config --global" to set a default\npodpowiedź: preference for all repositories. You can also pass --rebase, --no-rebase,\npodpowiedź: or --ff-only on the command line to override the configured default per\npodpowiedź: invocation.\nfatal: Należy podać, jak godzić rozbieżne gałęzie.\n', 'pull_stdout': ''}

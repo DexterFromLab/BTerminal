@@ -1,0 +1,20 @@
+=== BTerminal uninstall ===
+
+    Removing CLI symlinks from /home/michal/.local/bin...
+  [32m✓[0m 8 CLI symlinks removed
+    Removing /home/michal/.local/share/bterminal...
+  [32m✓[0m BTerminal files removed
+    Removing desktop entry + icon...
+  [32m✓[0m Desktop integration removed
+    Removing npm-installed Claude Code...
+  [32m✓[0m Claude Code (npm) removed
+    Removing npm-installed Copilot CLI...
+  [32m✓[0m Copilot CLI (npm) removed
+    PURGE mode — removing user configs + databases...
+  [32m✓[0m Configs + ctx DB + sessions removed
+    Final uninstall log saved to: /tmp/bterminal-uninstall-final.TT0Wst.log
+    Note: Ollama (if installed) is NOT removed automatically;
+          uninstall it with: sudo rm -rf /usr/local/lib/ollama /usr/local/bin/ollama
+          and: sudo systemctl disable --now ollama (if systemd unit exists)
+
+=== BTerminal uninstall completed ===

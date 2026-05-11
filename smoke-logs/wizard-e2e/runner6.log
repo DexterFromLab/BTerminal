@@ -1,0 +1,19 @@
+=== wizard E2E with screenshots (2026-05-08T11:22:47Z) ===
+VM: vm-test  Path: /home/michal/BTerminal  Modes: install
+Screenshots: /home/bartek/workspace/ssh_client/smoke-logs/wizard-e2e/screenshots
+
+=== install mode ===
+  [32m✓[0m install: wizard window appeared
+  [32m✓[0m screenshot: install-01-welcome → 132250-install-01-welcome.png
+  [32m✓[0m screenshot: install-02-welcome-license-accepted → 132253-install-02-welcome-license-accepted.png
+  [32m✓[0m screenshot: install-03-inventory → 132256-install-03-inventory.png
+  [32m✓[0m install: advanced past welcome (license accepted)
+  [32m✓[0m screenshot: install-04-picks → 132259-install-04-picks.png
+  [32m✓[0m install: sudo dialog appeared
+  [32m✓[0m screenshot: install-05-sudo-prompt → 132304-install-05-sudo-prompt.png
+  [32m✓[0m screenshot: install-progress-132338 → 132338-install-progress-132338.png
+  [32m✓[0m screenshot: install-progress-132409 → 132409-install-progress-132409.png
+  [32m✓[0m screenshot: install-progress-132440 → 132440-install-progress-132440.png
+  [32m✓[0m screenshot: install-progress-132511 → 132511-install-progress-132511.png
+  [32m✓[0m screenshot: install-progress-132542 → 132542-install-progress-132542.png
+  [32m✓[0m screenshot: install-progress-132616 → 132616-install-progress-132616.png

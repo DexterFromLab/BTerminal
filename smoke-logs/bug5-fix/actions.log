@@ -1,0 +1,4 @@
+[21:07:31] step=1 action=file_options png=01_file_options_zoom.png (zoom 0,60-900,510)
+[21:07:33] step=2 action=options_dialog_before png=02_options_dialog_before_zoom.png (zoom 0,60-1500,800)
+[21:08:38] step=3 action=file_options_after png=03_file_options_after_zoom.png (zoom 0,60-900,510)
+[21:08:40] step=4 action=options_dialog_after_fix png=04_options_dialog_after_fix_zoom.png (zoom 0,60-1700,800)

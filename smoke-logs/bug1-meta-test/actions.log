@@ -1,0 +1,2 @@
+[20:33:00] step=01 action=menu_Narzędzia_open png=01_menu_Narzędzia_open_zoom.png (zoom 180,80-900,500)
+[20:33:23] step=02 action=narzedzia_full_menu png=02_narzedzia_full_menu_zoom.png (zoom 0,80-800,500)

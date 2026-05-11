@@ -1,0 +1,5 @@
+  [31m✗[0m Another install.sh is already running.
+    Lock: /home/michal/.config/bterminal/install.lock
+    The recorded holder process is gone but flock
+    is still held — try: rm /home/michal/.config/bterminal/install.lock && re-run installer.
+BTERMINAL_INSTALL_LOCKED

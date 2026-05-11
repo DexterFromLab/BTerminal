@@ -1,0 +1,96 @@
+BUG#22 — Aider wizard integration: spawn tab + sentinel + auto-relaunch
+Reproduced and fixed on VM (vm-test, michal-VirtualBox), 2026-05-11.
+
+Code surfaces touched:
+  bterminal/app.py
+    +open_aider_wizard_tab(session_config, on_done) — spawns
+      tools/aider_setup_wizard in a fresh TerminalTab; binary
+      discovery mirrors open_wizard_tab (memory_wizard pattern).
+      Tab tagged is_aider_wizard_tab=True so the close hook can
+      identify it. child-exited → _on_aider_wizard_done.
+    +_on_aider_wizard_done(wizard_tab, on_done) — reads sentinel
+      via aider_probe.read_sentinel, builds new aider config via
+      aider_probe.compute_relaunch_config, spawns aider tab as
+      a normal ai_config session, deletes sentinel file.
+  bterminal/providers/aider_probe.py
+    +SENTINEL_PATH constant (~/.config/bterminal/.aider_wizard_done.json)
+    +read_sentinel(path=None) — parse with graceful None on
+      missing / malformed JSON; returns dict otherwise.
+    +compute_relaunch_config(payload, original_config) — pure
+      function the App-side calls. Returns a new config dict (with
+      provider_options.model = sentinel.model) when sentinel
+      matches original.session_id; None otherwise.
+  bterminal/ui/terminal_tab.py
+    ~_aider_resolve_missing_model — action="wizard" now defers
+      app.open_aider_wizard_tab via GLib.idle_add (necessary —
+      modal dialog response handler ignores set_current_page).
+    -_aider_show_wizard_placeholder — removed (was BUG#21 stub).
+
+Timeline (host: bartek@pop-os, VM: 192.168.0.123, 1.9 GB RAM):
+
+10:31  Reproduced BEFORE state: launched BT, REST spawned aider tab,
+       missing-model dialog (BUG#19), Return → placeholder dialog
+       "Wizard konfiguracji modelu — wkrótce" visible.
+       → smoke-logs/bug22-fix/01_bug19_dialog_visible.png
+       → smoke-logs/bug22-fix/02_placeholder_BEFORE.png
+       → smoke-logs/bug22-fix/02b_placeholder_BEFORE_zoom.png
+       Read tool review confirmed: BUG#22 placeholder reproduced.
+
+10:34  Implemented fix (3 files), placeholder removed.
+
+10:36  First reproduction attempt failed: pull of qwen2.5-coder:0.5b
+       from BUG#21 wizard tests had completed in the background, so
+       BT pre-spawn check saw model present → no dialog → no wizard.
+       Cleared by `ollama rm qwen2.5-coder:0.5b`.
+
+10:37  Retest with model absent: dialog → Return → wizard tab spawned
+       but NOT focused (modal dialog response handler swallowed
+       notebook.set_current_page).
+       → smoke-logs/bug22-fix/05-08_*.png
+       Diagnosed: deferring via GLib.idle_add lets the dialog tear
+       down first.
+10:38  Fix applied: GLib.idle_add(self.app.open_aider_wizard_tab, config).
+
+10:42  Retested full flow:
+       (1) ollama rm qwen2.5-coder:0.5b (clean slate)
+       (2) launch BT --debug-rest, spawn aider via REST
+       (3) BUG#19 dialog visible
+           → 09_wizard_tab_focused_after_idle_add.png
+       (4) Return → wizard tab opened AS current page with
+           full semaforowa table (RAM 1.9 GB · VRAM 0.0 GB), 7
+           models listed, ★ on qwen2.5-coder:0.5b (recommended
+           for low-RAM VM)
+           → 10_full_flow_wizard_tab.png
+       (5) Typed "1" + Return in VTE → wizard ran `ollama pull
+           qwen2.5-coder:0.5b` (~30s, 397 MB)
+           → 11_ollama_pull_in_progress.png (rich Progress bar
+             visible in VTE during pull)
+       (6) Pull completed → wizard wrote sentinel + exited →
+           BT child-exited → compute_relaunch_config matched
+           session_id → spawned NEW aider tab with the just-
+           installed model → tab title bar now shows
+           "AiderBug2Test [4/4]" (current = relaunched aider)
+       (7) Banner of the relaunched aider:
+             Aider v0.86.2
+             Model: openai/qwen2.5-coder:0.5b with whole edit format
+             Git repo: .git with 0 files
+             Repo-map: using 1024 tokens, auto refresh
+             Added ../_bt_aider_rules_6736_o7tyhsm1.md to the chat
+             (read-only).
+           Status bar: 0 tok/h · openai/qwen2.5-coder:0.5b
+           NO litellm.NotFoundError — the BUG#19 root condition is
+           gone because the wizard pulled the missing model.
+           → 12_aider_auto_relaunched.png
+           → 12b_aider_running_zoom.png
+       (8) Sentinel file deleted after relaunch (verified ls).
+
+Pin test (tests/e2e/test_wizard_flow_e2e.py — 9 tests):
+  Sentinel parsing (3): missing / malformed / happy-path
+  Relaunch decision (5): no sentinel / session_id mismatch / empty
+    model / model injection into provider_options / legacy config
+    without provider_options block
+  Round-trip (1): invokes tools/aider_setup_wizard --headless with
+    --session-id, then read_sentinel + compute_relaunch_config
+    consume the wizard's output. Guards against drift between the
+    two halves of the integration.
+  All 9 PASSED on host + VM (`pytest tests/e2e/test_wizard_flow_e2e.py`).

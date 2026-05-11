@@ -1,0 +1,4 @@
+[21:37:07] step=1 action=menu_Plik_open png=01_menu_Plik_open_zoom.png (zoom 0,60-900,510)
+[21:40:24] step=2 action=menu_Plik_open png=02_menu_Plik_open_zoom.png (zoom 0,60-900,510)
+[21:40:55] step=3 action=click_new_ai_session png=03_click_new_ai_session_zoom.png (zoom 0,60-900,510)
+[21:40:58] step=4 action=ai_session_dialog_open png=04_ai_session_dialog_open_zoom.png (zoom 0,60-1700,800)

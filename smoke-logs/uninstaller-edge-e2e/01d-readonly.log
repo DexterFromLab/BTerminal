@@ -1,0 +1,9 @@
+=== BTerminal uninstall ===
+
+{"phase": "uninstall", "status": "installing", "progress": 5, "label": "Starting uninstall"}
+    Removing CLI symlinks from /tmp/edge-uninstall-d/.local/bin...
+{"phase": "uninstall", "status": "installing", "progress": 15, "label": "Removing CLI symlinks"}
+  [32m✓[0m 9 CLI symlinks removed
+    Removing /tmp/edge-uninstall-d/.local/share/bterminal...
+{"phase": "uninstall", "status": "installing", "progress": 35, "label": "Removing BTerminal files"}
+rm: nie można usunąć '/tmp/edge-uninstall-d/.local/share/bterminal/bterminal-launcher': Brak dostępu

@@ -1,0 +1,1 @@
+Visual confirm BEFORE: menu Narzędzia ma 'Diagnostics...' i 'Install dependencies...' po angielsku

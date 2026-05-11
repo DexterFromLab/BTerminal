@@ -1,0 +1,28 @@
+=== BTerminal uninstall ===
+
+{"phase": "uninstall", "status": "installing", "progress": 5, "label": "Starting uninstall"}
+    Removing CLI symlinks from /tmp/edge-uninstall-b/.local/bin...
+{"phase": "uninstall", "status": "installing", "progress": 15, "label": "Removing CLI symlinks"}
+  [32m✓[0m 9 CLI symlinks removed
+    Removing /tmp/edge-uninstall-b/.local/share/bterminal...
+{"phase": "uninstall", "status": "installing", "progress": 35, "label": "Removing BTerminal files"}
+  [32m✓[0m BTerminal files removed
+    Removing desktop entry + icon...
+{"phase": "uninstall", "status": "installing", "progress": 50, "label": "Removing desktop integration"}
+      Removed shortcut at /tmp/edge-uninstall-b/Pulpit/bterminal.desktop
+  [32m✓[0m Desktop integration removed
+{"phase": "uninstall", "status": "installing", "progress": 65, "label": "Removing AI CLIs (claude, copilot)"}
+    Removing npm-installed Claude Code...
+  [32m✓[0m Claude Code (npm) removed
+    Removing npm-installed Copilot CLI...
+  [32m✓[0m Copilot CLI (npm) removed
+{"phase": "uninstall", "status": "installing", "progress": 85, "label": "Cleaning up user data"}
+    PURGE mode — removing user configs + databases...
+  [32m✓[0m Configs + ctx DB + sessions removed
+    Final uninstall log saved to: /tmp/bterminal-uninstall-final.W16REn.log
+    Note: Ollama (if installed) is NOT removed automatically;
+          uninstall it with: sudo rm -rf /usr/local/lib/ollama /usr/local/bin/ollama
+          and: sudo systemctl disable --now ollama (if systemd unit exists)
+
+=== BTerminal uninstall completed ===
+{"phase": "done", "status": "ok", "progress": 100, "label": "Uninstall completed"}

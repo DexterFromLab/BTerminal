@@ -1,0 +1,14 @@
+[21:00:17] step=01 action=file_options png=01_file_options_zoom.png (zoom 0,60-900,510)
+[21:00:19] step=02 action=options_dialog_open png=02_options_dialog_open_zoom.png (zoom 0,60-1500,700)
+[21:00:47] step=03 action=widget_tree_dump file=03_widget_tree.txt
+[21:01:16] step=04 action=widget_tree_dump file=04_widget_tree.txt
+[21:01:56] step=05 action=click_pull_button png=05_click_pull_button_zoom.png (zoom 0,60-900,510)
+[21:01:58] step=06 action=pull_dialog_open png=06_pull_dialog_open_zoom.png (zoom 0,60-1500,700)
+[21:02:26] step=07 action=after_pull_click_no_warning png=07_after_pull_click_no_warning_zoom.png (zoom 0,60-1500,700)
+[21:02:47] step=08 action=dismiss_pulled_ok png=00_dismiss_pulled_ok_zoom.png (zoom 0,60-900,510)
+[21:02:49] step=09 action=cancel_options png=00_cancel_options_zoom.png (zoom 0,60-900,510)
+[21:05:19] step=11 action=file_options png=11_file_options_zoom.png (zoom 0,60-900,510)
+[21:05:23] step=12 action=click_pull_after_fix png=12_click_pull_after_fix_zoom.png (zoom 0,60-900,510)
+[21:05:25] step=13 action=pull_dialog_after_fix png=13_pull_dialog_after_fix_zoom.png (zoom 0,60-1500,700)
+[21:05:58] step=14 action=warning_dialog_should_appear png=14_warning_dialog_should_appear_zoom.png (zoom 0,60-1500,700)
+[21:06:33] step=15 action=dismiss_warning_no png=15_dismiss_warning_no_zoom.png (zoom 0,60-900,510)

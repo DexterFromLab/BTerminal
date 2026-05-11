@@ -1,0 +1,16 @@
+tests/e2e/test_aider_full_session.py                              1 failed, 5 passed in 6.55s
+tests/e2e/test_cli_tools_smoke.py                                 12 passed in 1.60s
+tests/e2e/test_concurrent_aider_claude_spawn.py                   11 passed in 3.91s
+tests/e2e/test_dual_provider_workflow.py                          4 passed in 7.79s
+tests/e2e/test_feed_capture_foundation.py                         5 passed in 0.70s
+tests/e2e/test_intro_prompt_structure.py                          2 passed in 0.77s
+tests/e2e/test_per_tab_plugin_gating.py                           2 passed in 3.28s
+tests/e2e/test_provider_switching.py                              3 passed in 2.46s
+tests/e2e/test_provider_switch_mid_session.py                     16 passed in 5.86s
+tests/e2e/test_rest_per_provider.py                               23 passed in 15.54s
+tests/e2e/test_sidebar_context_menu_rest.py                       11 passed in 10.40s
+tests/e2e/test_simultaneous_force_idle_race.py                    9 passed in 4.22s
+tests/e2e/test_smoke_battery.py                                   15 passed, 1 skipped in 1.03s
+tests/e2e/test_tier1_acceptance.py                                4 passed in 2.51s
+tests/e2e/test_tier2_acceptance.py                                5 passed in 3.82s
+tests/e2e/test_tier3_acceptance.py                                1 failed, 3 passed in 2.29s

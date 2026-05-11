@@ -1,0 +1,30 @@
+=== wizard E2E with screenshots (2026-05-08T11:16:23Z) ===
+VM: vm-test  Path: /home/michal/BTerminal  Modes: install
+Screenshots: /home/bartek/workspace/ssh_client/smoke-logs/wizard-e2e/screenshots
+
+=== install mode ===
+  [32m✓[0m install: wizard window appeared
+  [32m✓[0m screenshot: install-01-welcome → 131627-install-01-welcome.png
+  [32m✓[0m screenshot: install-02-welcome-license-accepted → 131629-install-02-welcome-license-accepted.png
+  [32m✓[0m screenshot: install-03-inventory → 131633-install-03-inventory.png
+  [32m✓[0m install: advanced past welcome (license accepted)
+  [32m✓[0m screenshot: install-04-picks → 131637-install-04-picks.png
+  [31m✗[0m install: sudo dialog never appeared
+  [32m✓[0m screenshot: install-progress-131742 → 131742-install-progress-131742.png
+  [32m✓[0m screenshot: install-progress-131813 → 131813-install-progress-131813.png
+  [32m✓[0m screenshot: install-progress-131844 → 131844-install-progress-131844.png
+  [32m✓[0m screenshot: install-progress-131915 → 131915-install-progress-131915.png
+  [32m✓[0m screenshot: install-progress-131946 → 131946-install-progress-131946.png
+  [32m✓[0m screenshot: install-progress-132017 → 132017-install-progress-132017.png
+  [32m✓[0m screenshot: install-progress-132048 → 132048-install-progress-132048.png
+  [32m✓[0m screenshot: install-progress-132119 → 132119-install-progress-132119.png
+  [32m✓[0m screenshot: install-progress-132150 → 132150-install-progress-132150.png
+  [32m✓[0m screenshot: install-progress-132221 → 132221-install-progress-132221.png
+  [32m✓[0m screenshot: install-progress-132252 → 132252-install-progress-132252.png
+  [32m✓[0m screenshot: install-progress-132323 → 132323-install-progress-132323.png
+  [32m✓[0m screenshot: install-progress-132354 → 132354-install-progress-132354.png
+  [32m✓[0m screenshot: install-progress-132425 → 132425-install-progress-132425.png
+  [32m✓[0m screenshot: install-progress-132457 → 132457-install-progress-132457.png
+  [32m✓[0m screenshot: install-progress-132528 → 132528-install-progress-132528.png
+  [32m✓[0m screenshot: install-progress-132559 → 132559-install-progress-132559.png
+  [32m✓[0m screenshot: install-progress-132630 → 132630-install-progress-132630.png

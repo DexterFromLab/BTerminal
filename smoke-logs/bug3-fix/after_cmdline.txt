@@ -1,0 +1,17 @@
+PID=297286
+---cmdline---
+/home/michal/.local/share/pipx/venvs/aider-chat/bin/python
+/home/michal/.local/bin/aider
+--model
+openai/qwen2.5-coder:0.5b
+--openai-api-base
+http://localhost:11434/v1
+--openai-api-key
+dummy
+--no-stream
+--no-show-model-warnings
+--read
+/tmp/_bt_aider_rules_297217_o6cukcec.md
+--read
+/tmp/aider_ctx_test/AIDER.md
+/tmp/aider_ctx_test

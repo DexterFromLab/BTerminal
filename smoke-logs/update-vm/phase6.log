@@ -1,0 +1,30 @@
+Required:
+  [32m✓[0m git
+  [32m✓[0m ssh
+Auto-install (apt):
+  [31m✗[0m meld
+  [31m✗[0m pdflatex (LaTeX)
+  [31m✗[0m latexmk
+  [32m✓[0m poppler-utils (PDF preview)
+  [31m✗[0m pandoc
+Optional (manual):
+  [31m✗[0m git-lfs
+  [32m✓[0m xdg-open
+
+Warnings (non-critical):
+  [33m⚠[0m Copilot CLI not found (skipped — no-sudo mode)
+  [33m⚠[0m Ollama install needs root for systemd unit — skipped (--no-sudo)
+  [33m⚠[0m git-lfs not found (optional) — apt install git-lfs
+  [33m⚠[0m Cannot install meld without sudo — run install.sh without --no-sudo
+  [33m⚠[0m meld could not be installed — apt install meld
+  [33m⚠[0m Cannot install texlive-latex-extra without sudo — run install.sh without --no-sudo
+  [33m⚠[0m pdflatex (LaTeX) could not be installed — apt install texlive-latex-extra
+  [33m⚠[0m Cannot install latexmk without sudo — run install.sh without --no-sudo
+  [33m⚠[0m latexmk could not be installed — apt install latexmk
+  [33m⚠[0m Cannot install pandoc without sudo — run install.sh without --no-sudo
+  [33m⚠[0m pandoc could not be installed — apt install pandoc
+
+=== BTerminal v1.3.0 installed successfully ===
+
+Run:  bterminal
+PATH: export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:$PATH"

@@ -1,0 +1,4 @@
+[20:43:20] step=01 action=aider_banner_before png=01_aider_banner_before_zoom.png (zoom 0,60-1500,600)
+[20:43:49] step=02 action=aider_banner_after_git_init png=02_aider_banner_after_git_init_zoom.png (zoom 0,60-1500,600)
+[20:45:47] step=03 action=aider_banner_first_state png=03_aider_banner_first_state_zoom.png (zoom 0,60-1500,600)
+[20:50:22] step=04 action=aider_response_to_marker_query png=04_aider_response_to_marker_query_zoom.png (zoom 0,60-1500,700)

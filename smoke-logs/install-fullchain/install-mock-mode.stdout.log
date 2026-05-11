@@ -1,0 +1,96 @@
+=== BTerminal Installer v1.3.0 ===
+
+[1/7] Checking runtime...
+  [32m✓[0m python3 3.12.3 (>= 3.10 required)
+  [32m✓[0m node v22.22.1 (>= 22.0 required)
+  [32m✓[0m npm 10.99.0-mock (>= 10.0 required)
+[2/7] Checking Claude Code...
+    Installing Claude Code via npm...
++ @anthropic-ai/claude-code@1.2.3-mock (mocked)
+  [32m✓[0m claude claude 1.2.3-mock (installed)
+    Linked /home/michal/bterm-fullchain/.local/bin/claude -> /home/michal/bterm-fullchain/.npm-global/bin/claude
+[2.5/7] Checking GitHub Copilot CLI...
+    Installing Copilot CLI via npm...
++ @github/copilot@4.5.6-mock (mocked)
+  [32m✓[0m copilot copilot 4.5.6-mock (installed)
+    First Copilot session will prompt for /login (device-flow,
+      requires active GitHub Copilot subscription)
+    Linked /home/michal/bterm-fullchain/.local/bin/copilot -> /home/michal/bterm-fullchain/.npm-global/bin/copilot
+[2.7/7] Checking local LLM backend (Ollama)...
+    Installing Ollama via curl ollama.com/install.sh...
+>>> Installing ollama to /usr/local
+sudo: do odczytu hasła wymagany jest terminal; należy użyć opcji -S, aby czytać ze standardowego wejścia, lub skonfigurować program pytający o hasło
+sudo: wymagane jest hasło
+  [33m⚠[0m Ollama install failed — install manually: curl -fsSL https://ollama.com/install.sh | sh
+[3/7] Checking system tools...
+  [32m✓[0m git
+  [33m⚠[0m git-lfs not found (optional) — apt install git-lfs
+  [32m✓[0m ssh
+  [32m✓[0m xdg-open
+    meld not found — installing meld...
+sudo: do odczytu hasła wymagany jest terminal; należy użyć opcji -S, aby czytać ze standardowego wejścia, lub skonfigurować program pytający o hasło
+sudo: wymagane jest hasło
+  [33m⚠[0m meld could not be installed — apt install meld
+    pdflatex (LaTeX) not found — installing texlive-latex-extra...
+sudo: do odczytu hasła wymagany jest terminal; należy użyć opcji -S, aby czytać ze standardowego wejścia, lub skonfigurować program pytający o hasło
+sudo: wymagane jest hasło
+  [33m⚠[0m pdflatex (LaTeX) could not be installed — apt install texlive-latex-extra
+    latexmk not found — installing latexmk...
+sudo: do odczytu hasła wymagany jest terminal; należy użyć opcji -S, aby czytać ze standardowego wejścia, lub skonfigurować program pytający o hasło
+sudo: wymagane jest hasło
+  [33m⚠[0m latexmk could not be installed — apt install latexmk
+  [32m✓[0m poppler-utils (PDF preview)
+    pandoc not found — installing pandoc...
+sudo: do odczytu hasła wymagany jest terminal; należy użyć opcji -S, aby czytać ze standardowego wejścia, lub skonfigurować program pytający o hasło
+sudo: wymagane jest hasło
+  [33m⚠[0m pandoc could not be installed — apt install pandoc
+[4/7] Checking GTK bindings...
+  [32m✓[0m python3-gi
+  [32m✓[0m GTK 3.0
+  [32m✓[0m VTE 2.91
+[5/7] Installing BTerminal files...
+    Live symlinks: defaults/ README.md VERSION
+    Compiled 12 translation catalog(s)
+    Repo path: /home/michal/BTerminal
+    Skill installed: check-deps.md
+    Skill installed: reflect.md
+  [32m✓[0m Skills: 2 installed, 0 already present
+    latex-document-skill: cloning...
+  [32m✓[0m latex-document-skill (cloned)
+    latex-document-skill: switching a0037ed → 3cd9f27
+  [32m✓[0m latex-document-skill @ 3cd9f27
+    Skill linked: latex.md
+  [32m✓[0m /latex skill available
+[6/7] Creating symlinks...
+  [32m✓[0m Symlinks in /home/michal/bterm-fullchain/.local/bin
+[7/7] Finalizing...
+    Created /home/michal/bterm-fullchain/.claude-context/context.db
+[shared] user_preferences = saved.
+  [32m✓[0m Desktop entry created
+
+[SUMMARY]
+Required:
+  [32m✓[0m git
+  [32m✓[0m ssh
+Auto-install (apt):
+  [31m✗[0m meld
+  [31m✗[0m pdflatex (LaTeX)
+  [31m✗[0m latexmk
+  [32m✓[0m poppler-utils (PDF preview)
+  [31m✗[0m pandoc
+Optional (manual):
+  [31m✗[0m git-lfs
+  [32m✓[0m xdg-open
+
+Warnings (non-critical):
+  [33m⚠[0m Ollama install failed — install manually: curl -fsSL https://ollama.com/install.sh | sh
+  [33m⚠[0m git-lfs not found (optional) — apt install git-lfs
+  [33m⚠[0m meld could not be installed — apt install meld
+  [33m⚠[0m pdflatex (LaTeX) could not be installed — apt install texlive-latex-extra
+  [33m⚠[0m latexmk could not be installed — apt install latexmk
+  [33m⚠[0m pandoc could not be installed — apt install pandoc
+
+=== BTerminal v1.3.0 installed successfully ===
+
+Run:  bterminal
+PATH: export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:$PATH"

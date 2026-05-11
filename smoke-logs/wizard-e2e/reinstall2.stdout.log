@@ -1,0 +1,5 @@
+{"phase": "done", "status": "ok", "progress": 100, "label": "Installation completed"}
+=== BTerminal v1.3.0 installed successfully ===
+
+Run:  bterminal
+PATH: export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:$PATH"

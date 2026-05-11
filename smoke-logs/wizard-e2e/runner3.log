@@ -1,0 +1,28 @@
+=== wizard E2E with screenshots (2026-05-08T11:08:49Z) ===
+VM: vm-test  Path: /home/michal/BTerminal  Modes: install
+Screenshots: /home/bartek/workspace/ssh_client/smoke-logs/wizard-e2e/screenshots
+
+=== install mode ===
+  [32m✓[0m install: wizard window appeared
+  [32m✓[0m screenshot: install-01-welcome → 130853-install-01-welcome.png
+  [32m✓[0m screenshot: install-02-welcome-license-accepted → 130855-install-02-welcome-license-accepted.png
+  [31m✗[0m install: did not advance to inventory page
+  [32m✓[0m screenshot: install-03-inventory → 130909-install-03-inventory.png
+  [32m✓[0m screenshot: install-04-picks → 130913-install-04-picks.png
+  [31m✗[0m install: sudo dialog never appeared
+ssh: connect to host 192.168.0.123 port 22: No route to host
+  [31m✗[0m install: did not reach summary in 10 min
+  [32m✓[0m screenshot: install-99-stuck → 131928-install-99-stuck.png
+  [32m✓[0m install: install.log captured (15 lines)
+  [32m✓[0m install: no [FAIL] entries in install.log
+  [32m✓[0m install: post-install verification passed
+  [31m✗[0m install: post-state probes FAIL — BT not installed
+
+=== Summary ===
+Total: 13   passed: 9   failed: 4
+Screenshots: /home/bartek/workspace/ssh_client/smoke-logs/wizard-e2e/screenshots (31 files)
+Failed:
+  - install: did not advance to inventory page
+  - install: sudo dialog never appeared
+  - install: did not reach summary in 10 min
+  - install: post-state probes FAIL — BT not installed

@@ -1,0 +1,2 @@
+lrwxrwxrwx 1 michal michal  60 maj  8 09:51 /home/michal/bterm-fullchain/.npm-global/bin/claude -> ../lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe
+-rw-r--r-- 1 michal michal 241 maj  8 09:51 /home/michal/bterm-fullchain/.npm-global/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe

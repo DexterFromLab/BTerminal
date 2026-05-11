@@ -1,0 +1,121 @@
+=== BTerminal fix (repair broken install) ===
+
+{"phase": "fix", "status": "installing", "progress": 5, "label": "Starting repair"}
+    Strategy: detect every break scenario from #143, restore
+      what's recoverable in-place, fall through to full install
+      for anything that needs reinstallation. User data preserved.
+
+{"phase": "fix", "status": "installing", "progress": 10, "label": "Checking install lockfile"}
+{"phase": "fix", "status": "installing", "progress": 20, "label": "Checking BTerminal package files"}
+  [32m✓[0m BTerminal package present at /home/michal/.local/share/bterminal/bterminal/
+{"phase": "fix", "status": "installing", "progress": 35, "label": "Checking launcher symlink"}
+  [32m✓[0m Launcher symlink intact
+{"phase": "fix", "status": "installing", "progress": 50, "label": "Checking companion CLI symlinks"}
+{"phase": "fix", "status": "installing", "progress": 70, "label": "Re-validating AI provider CLIs"}
+./install.sh: linia 487: validate_npm_cli: nie znaleziono polecenia
+./install.sh: linia 489: validate_explain: nie znaleziono polecenia
+      [FIX] Claude Code broken () — full reinstall scheduled
+./install.sh: linia 501: validate_npm_cli: nie znaleziono polecenia
+./install.sh: linia 503: validate_explain: nie znaleziono polecenia
+      [FIX] Copilot CLI broken () — full reinstall scheduled
+  [33m⚠[0m 2 in-place fix(es) applied; falling through to full
+  [33m⚠[0m   install path to restore missing/broken components.
+
+=== BTerminal Installer v1.3.0 ===
+
+{"phase": "runtime", "status": "installing", "progress": 5, "label": "Checking runtime"}
+[1/7] Checking runtime...
+  [32m✓[0m python3 3.12.3 (>= 3.10 required)
+  [32m✓[0m node v22.22.1 (>= 22.0 required)
+  [32m✓[0m npm 10.9.4 (>= 10.0 required)
+{"phase": "claude", "status": "installing", "progress": 15, "label": "Checking Claude Code CLI"}
+[2/7] Checking Claude Code...
+  [33m⚠[0m Existing Claude binary at /home/michal/.npm-global/bin/claude is broken — binary present but not executable (chmod +x missing — broken npm install); will reinstall
+    Installing Claude Code via npm...
+      Anthropic's terminal-based AI coding agent. Powers the
+      'Claude' provider in BTerminal — opens an interactive Claude
+      session with your repo context. Requires Anthropic account.
+
+added 2 packages in 2s
+  [32m✓[0m claude 2.1.133 (Claude Code) (installed)
+    Linked /home/michal/.local/bin/claude -> /home/michal/.npm-global/bin/claude
+{"phase": "copilot", "status": "installing", "progress": 30, "label": "Checking GitHub Copilot CLI"}
+[2.5/7] Checking GitHub Copilot CLI...
+  [32m✓[0m copilot GitHub Copilot CLI 1.0.43. (/home/michal/.npm-global/bin/copilot)
+    Updating to latest...
+
+changed 2 packages in 3s
+    Already up to date
+    Linked /home/michal/.local/bin/copilot -> /home/michal/.npm-global/bin/copilot
+{"phase": "llama", "status": "installing", "progress": 40, "label": "Checking local LLM backend (Ollama)"}
+[2.7/7] Checking local LLM backend (Ollama)...
+  [32m✓[0m ollama Warning: could not connect to a running Ollama instance (/usr/local/bin/ollama)
+{"phase": "system_tools", "status": "installing", "progress": 50, "label": "Checking system tools"}
+[3/7] Checking system tools...
+  [32m✓[0m git
+  [33m⚠[0m git-lfs not found (optional) — apt install git-lfs
+  [32m✓[0m ssh
+  [32m✓[0m xdg-open
+  [32m✓[0m meld
+  [32m✓[0m pdflatex (LaTeX)
+  [32m✓[0m latexmk
+  [32m✓[0m poppler-utils (PDF preview)
+  [32m✓[0m pandoc
+{"phase": "gtk", "status": "installing", "progress": 65, "label": "Checking GTK bindings"}
+[4/7] Checking GTK bindings...
+  [32m✓[0m python3-gi
+  [32m✓[0m GTK 3.0
+  [32m✓[0m VTE 2.91
+{"phase": "files", "status": "installing", "progress": 75, "label": "Installing BTerminal files"}
+[5/7] Installing BTerminal files...
+    Backup: /tmp/bterminal-backup-Y1UBno
+    Live symlinks: defaults/ README.md VERSION
+    Compiled 12 translation catalog(s)
+    Repo path: /home/michal/BTerminal
+  [32m✓[0m Skills: 0 installed, 2 already present
+  [32m✓[0m latex-document-skill @ 3cd9f27 (up to date)
+  [32m✓[0m /latex skill available
+{"phase": "symlinks", "status": "installing", "progress": 90, "label": "Creating symlinks"}
+[6/7] Creating symlinks...
+  [32m✓[0m Symlinks in /home/michal/.local/bin
+{"phase": "finalize", "status": "installing", "progress": 95, "label": "Finalizing"}
+[7/7] Finalizing...
+[shared] user_preferences = saved.
+  [32m✓[0m Desktop entry created
+
+[SUMMARY]
+Required:
+  [32m✓[0m git
+  [32m✓[0m ssh
+Auto-install (apt):
+  [32m✓[0m meld
+  [32m✓[0m pdflatex (LaTeX)
+  [32m✓[0m latexmk
+  [32m✓[0m poppler-utils (PDF preview)
+  [32m✓[0m pandoc
+Optional (manual):
+  [31m✗[0m git-lfs
+  [32m✓[0m xdg-open
+
+Warnings (non-critical):
+  [33m⚠[0m 2 in-place fix(es) applied; falling through to full
+  [33m⚠[0m   install path to restore missing/broken components.
+  [33m⚠[0m Existing Claude binary at /home/michal/.npm-global/bin/claude is broken — binary present but not executable (chmod +x missing — broken npm install); will reinstall
+  [33m⚠[0m git-lfs not found (optional) — apt install git-lfs
+
+
+──────────────────────────────────────────────────────────────
+  [33m⚠[0m 1 component(s) need manual installation:
+
+  • [1mgit-lfs (optional)[0m
+      [36m$[0m sudo apt install git-lfs
+
+  After installing manually, re-run ./install.sh —
+  it will detect each component and skip past it.
+──────────────────────────────────────────────────────────────
+
+{"phase": "done", "status": "ok", "progress": 100, "label": "Installation completed"}
+=== BTerminal v1.3.0 installed successfully ===
+
+Run:  bterminal
+PATH: export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:$PATH"

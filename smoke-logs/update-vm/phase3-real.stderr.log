@@ -1,0 +1,5 @@
+Traceback (most recent call last):
+  File "/tmp/bt_update_checks/git_pull_check.py", line 33, in <module>
+    assert after == "99.0.0", f"VERSION did not advance: {after!r}"
+           ^^^^^^^^^^^^^^^^^
+AssertionError: VERSION did not advance: '1.2.0'

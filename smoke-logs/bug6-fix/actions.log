@@ -1,0 +1,4 @@
+[21:10:08] step=1 action=file_options png=01_file_options_zoom.png (zoom 0,60-900,510)
+[21:10:11] step=2 action=options_with_english_checkbox png=02_options_with_english_checkbox_zoom.png (zoom 0,60-1700,800)
+[21:11:29] step=3 action=file_options_after png=03_file_options_after_zoom.png (zoom 0,60-900,510)
+[21:11:31] step=4 action=options_with_pl_checkbox png=04_options_with_pl_checkbox_zoom.png (zoom 0,60-1700,800)

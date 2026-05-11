@@ -1,0 +1,10 @@
+
+  After installing manually, re-run ./install.sh —
+  it will detect each component and skip past it.
+──────────────────────────────────────────────────────────────
+
+{"phase": "done", "status": "ok", "progress": 100, "label": "Installation completed"}
+=== BTerminal v1.3.0 installed successfully ===
+
+Run:  bterminal
+PATH: export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:$PATH"

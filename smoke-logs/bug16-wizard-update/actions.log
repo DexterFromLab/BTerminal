@@ -1,0 +1,5 @@
+[22:37:57] step=1 action=file_options png=01_file_options_zoom.png (zoom 0,60-900,510)
+[22:37:59] step=2 action=wizard_welcome_before_fix png=02_wizard_welcome_before_fix_zoom.png (zoom 0,60-1700,900)
+[22:39:01] step=4 action=dismiss_update_prompt png=04_dismiss_update_prompt_zoom.png (zoom 0,60-900,510)
+[22:39:46] step=6 action=close_wizard png=06_close_wizard_zoom.png (zoom 0,60-900,510)
+[22:49:18] step=7 action=file_options_after png=07_file_options_after_zoom.png (zoom 0,60-900,510)

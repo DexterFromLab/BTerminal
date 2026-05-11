@@ -1,0 +1,25 @@
+=== wizard E2E with screenshots (2026-05-08T12:23:09Z) ===
+VM: vm-test  Path: /home/michal/BTerminal  Modes: install
+Screenshots: /home/bartek/workspace/ssh_client/smoke-logs/wizard-e2e/screenshots
+
+=== install mode ===
+  [32m✓[0m install: wizard window appeared
+  [32m✓[0m screenshot: install-01-welcome → 142312-install-01-welcome.png
+  [32m✓[0m screenshot: install-02-welcome-license-accepted → 142315-install-02-welcome-license-accepted.png
+  [32m✓[0m screenshot: install-03-inventory → 142320-install-03-inventory.png
+  [32m✓[0m install: advanced past welcome (license accepted)
+  [32m✓[0m screenshot: install-04-picks → 142323-install-04-picks.png
+  [32m✓[0m install: sudo dialog appeared
+  [32m✓[0m screenshot: install-05-sudo-prompt → 142328-install-05-sudo-prompt.png
+  [32m✓[0m screenshot: install-progress-142403 → 142403-install-progress-142403.png
+  [32m✓[0m screenshot: install-progress-142434 → 142434-install-progress-142434.png
+  [32m✓[0m install: install.log shows final status
+  [32m✓[0m screenshot: install-99-summary → 142438-install-99-summary.png
+  [32m✓[0m install: install.log captured (77 lines)
+  [32m✓[0m install: no [FAIL] entries in install.log
+  [32m✓[0m install: post-install verification passed
+  [32m✓[0m install: post-state probes pass (launcher + package)
+
+=== Summary ===
+Total: 16   passed: 16   failed: 0
+Screenshots: /home/bartek/workspace/ssh_client/smoke-logs/wizard-e2e/screenshots (128 files)

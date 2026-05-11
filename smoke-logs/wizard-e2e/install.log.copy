@@ -1,0 +1,79 @@
+2026-05-08T13:10:46Z [RUN_START] Run log: /home/michal/.config/bterminal/install-runs/run-20260508-131046.log
+2026-05-08T13:10:46Z [DIAG] BTerminal version: 1.3.0
+2026-05-08T13:10:46Z [DIAG] Action: install  (HEADLESS=false  NO_SUDO=false  STATUS_JSON=false)
+2026-05-08T13:10:46Z [DIAG] Selected: (empty)
+2026-05-08T13:10:46Z [DIAG] OS: Linux Mint 22.3
+2026-05-08T13:10:46Z [DIAG] Kernel: Linux 6.14.0-37-generic x86_64
+2026-05-08T13:10:46Z [DIAG] Architecture: x86_64
+2026-05-08T13:10:46Z [DIAG] Locale: pl_PL.UTF-8
+2026-05-08T13:10:46Z [DIAG] Display: :0  Wayland: unset
+2026-05-08T13:10:46Z [DIAG] Shell: ./install.sh  PID: 85780  PPID: 1
+2026-05-08T13:10:46Z [DIAG] User: michal  Home: /home/michal
+2026-05-08T13:10:46Z [DIAG] Memory: 1.9Gi total, 1.2Gi available
+2026-05-08T13:10:46Z [DIAG] Disk free: 7.1G available on /dev/sda3
+2026-05-08T13:10:46Z [INFO] GTK desktop session detected — launching graphical installer
+2026-05-08T13:10:46Z [INFO] (use --headless to force the bash flow).
+2026-05-08T13:11:07Z [SUDO] rc=0; stderr=
+2026-05-08T13:11:07Z [RUN_START] Run log: /home/michal/.config/bterminal/install-runs/run-20260508-131107.log
+2026-05-08T13:11:07Z [DIAG] BTerminal version: 1.3.0
+2026-05-08T13:11:07Z [DIAG] Action: install  (HEADLESS=true  NO_SUDO=false  STATUS_JSON=true)
+2026-05-08T13:11:07Z [DIAG] Selected: git-lfs,xdg-open,meld,pdflatex,latexmk,pdftoppm,pandoc,llama
+2026-05-08T13:11:07Z [DIAG] OS: Linux Mint 22.3
+2026-05-08T13:11:07Z [DIAG] Kernel: Linux 6.14.0-37-generic x86_64
+2026-05-08T13:11:07Z [DIAG] Architecture: x86_64
+2026-05-08T13:11:07Z [DIAG] Locale: pl_PL.UTF-8
+2026-05-08T13:11:07Z [DIAG] Display: :0  Wayland: unset
+2026-05-08T13:11:07Z [DIAG] Shell: /home/michal/BTerminal/install.sh  PID: 86188  PPID: 85822
+2026-05-08T13:11:07Z [DIAG] User: michal  Home: /home/michal
+2026-05-08T13:11:07Z [DIAG] Memory: 1.9Gi total, 1.1Gi available
+2026-05-08T13:11:07Z [DIAG] Disk free: 7.2G available on /dev/sda3
+2026-05-08T13:11:07Z [OK] python3 3.12.3 (>= 3.10 required)
+2026-05-08T13:11:07Z [OK] node v22.22.1 (>= 22.0 required)
+2026-05-08T13:11:07Z [OK] npm 10.9.4 (>= 10.0 required)
+2026-05-08T13:11:07Z [INFO] Installing Claude Code via npm...
+2026-05-08T13:11:07Z [INFO]   Anthropic's terminal-based AI coding agent. Powers the
+2026-05-08T13:11:07Z [INFO]   'Claude' provider in BTerminal — opens an interactive Claude
+2026-05-08T13:11:07Z [INFO]   session with your repo context. Requires Anthropic account.
+2026-05-08T13:11:10Z [VALIDATE] Claude Code: OK (2.1.133 (Claude Code))
+2026-05-08T13:11:10Z [OK] claude 2.1.133 (Claude Code) (installed)
+2026-05-08T13:11:10Z [INFO] Linked /home/michal/.local/bin/claude -> /home/michal/.npm-global/bin/claude
+2026-05-08T13:11:10Z [INFO] Installing Copilot CLI via npm...
+2026-05-08T13:11:10Z [INFO]   GitHub's AI coding agent (terminal version). Powers the
+2026-05-08T13:11:10Z [INFO]   'Copilot' provider — agentic mode with task management,
+2026-05-08T13:11:10Z [INFO]   plan review. Requires active GitHub Copilot subscription.
+2026-05-08T13:11:15Z [VALIDATE] Copilot CLI: OK (GitHub Copilot CLI 1.0.43.)
+2026-05-08T13:11:15Z [OK] copilot GitHub Copilot CLI 1.0.43. (installed)
+2026-05-08T13:11:15Z [INFO] First Copilot session will prompt for /login (device-flow,
+2026-05-08T13:11:15Z [INFO]   requires active GitHub Copilot subscription)
+2026-05-08T13:11:15Z [INFO] Linked /home/michal/.local/bin/copilot -> /home/michal/.npm-global/bin/copilot
+2026-05-08T13:11:15Z [OK] ollama Warning: could not connect to a running Ollama instance (/usr/local/bin/ollama)
+2026-05-08T13:11:15Z [OK] git
+2026-05-08T13:11:15Z [WARN] git-lfs not found (optional) — apt install git-lfs
+2026-05-08T13:11:15Z [MANUAL] git-lfs (optional) → run manually: sudo apt install git-lfs
+2026-05-08T13:11:15Z [OK] ssh
+2026-05-08T13:11:15Z [OK] xdg-open
+2026-05-08T13:11:15Z [OK] meld
+2026-05-08T13:11:15Z [OK] pdflatex (LaTeX)
+2026-05-08T13:11:15Z [OK] latexmk
+2026-05-08T13:11:15Z [OK] poppler-utils (PDF preview)
+2026-05-08T13:11:15Z [OK] pandoc
+2026-05-08T13:11:15Z [OK] python3-gi
+2026-05-08T13:11:15Z [OK] GTK 3.0
+2026-05-08T13:11:15Z [OK] VTE 2.91
+2026-05-08T13:11:15Z [INFO] Live symlinks: defaults/ README.md VERSION
+2026-05-08T13:11:16Z [INFO] Compiled 12 translation catalog(s)
+2026-05-08T13:11:16Z [INFO] Repo path: /home/michal/BTerminal
+2026-05-08T13:11:16Z [OK] Skills: 0 installed, 2 already present
+2026-05-08T13:11:16Z [INFO] latex-document-skill: cloning...
+2026-05-08T13:12:00Z [OK] latex-document-skill (cloned)
+2026-05-08T13:12:00Z [INFO] latex-document-skill: switching a0c7921 → 3cd9f27
+2026-05-08T13:12:01Z [OK] latex-document-skill @ 3cd9f27
+2026-05-08T13:12:01Z [OK] /latex skill available
+2026-05-08T13:12:01Z [OK] Symlinks in /home/michal/.local/bin
+2026-05-08T13:12:02Z [INFO] Created /home/michal/.claude-context/context.db
+2026-05-08T13:12:02Z [OK] Desktop entry created (apps menu)
+2026-05-08T13:12:02Z [INFO] Desktop shortcut placed at /home/michal/Pulpit/bterminal.desktop
+2026-05-08T13:12:02Z [OK] Desktop icon created on Pulpit
+2026-05-08T13:12:02Z [VALIDATE] Claude Code (post-install): OK (2.1.133 (Claude Code))
+2026-05-08T13:12:04Z [VALIDATE] Copilot CLI (post-install): OK (GitHub Copilot CLI 1.0.43.)
+2026-05-08T13:12:04Z [OK] BTerminal v1.3.0 installed successfully

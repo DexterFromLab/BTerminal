@@ -1,0 +1,13 @@
+{
+  "bterminal_version": "1.3.0",
+  "errors": [],
+  "warnings": [
+    "--",
+    "Ollama install failed \u2014 install manually: curl -fsSL https://ollama.com/install.sh | sh",
+    "git-lfs not found (optional) \u2014 apt install git-lfs",
+    "meld could not be installed \u2014 apt install meld",
+    "pdflatex (LaTeX) could not be installed \u2014 apt install texlive-latex-extra",
+    "latexmk could not be installed \u2014 apt install latexmk",
+    "pandoc could not be installed \u2014 apt install pandoc"
+  ]
+}
