@@ -1,6 +1,6 @@
 # BTerminal
 
-A GTK 3 terminal emulator built for developers who work with SSH servers and Claude Code. Combines session management, macro automation, a persistent context database, multi-model AI consultation, task orchestration, git awareness, a skills library and a global rules system in a single window. Ships with Catppuccin Mocha (dark) and Latte (light) themes.
+A GTK 3 terminal emulator built for developers who work with SSH servers and AI coding CLIs (Claude Code, GitHub Copilot CLI, Aider). Combines session management, macro automation, a persistent context database, multi-model AI consultation, task orchestration, git awareness, a skills library and a global rules system in a single window. Ships with Catppuccin Mocha (dark) and Latte (light) themes.
 
 **Current release: v1.3.1**
 
@@ -74,9 +74,9 @@ All fixes verified end-to-end on real VM with semi-automatic UI driver
 - Clipboard image detection on paste (`Ctrl+Shift+V`) — saves the image to `copied_images/` in the project directory and pastes the path; right-click option to paste directly into ctx
 - Drag-and-drop file URIs into the terminal to paste paths
 
-### AI providers — Claude Code + GitHub Copilot CLI
+### AI providers — Claude Code + GitHub Copilot CLI + Aider
 
-BTerminal supports two AI CLI providers per session. Pick one in the
+BTerminal supports three AI CLI providers per session. Pick one in the
 "Add ▾ → AI Session" dialog dropdown; the choice is stored in
 `~/.config/bterminal/ai_sessions.json` (provider-aware schema R4.2)
 and drives spawn args, visual marker, log parsing, idle detection
@@ -593,19 +593,30 @@ Entry point: `python -m bterminal` (launcher: `~/.local/bin/bterminal` →
 `bterminal-launcher` → `python3 -m bterminal`).
 
 ```
-bterminal/                     ← Python package (~30 modules)
+bterminal/                     ← Python package (~50 modules)
 ├── __init__.py                ← public API re-exports + helper injection
 ├── __main__.py                ← argparse + Gtk.Application bootstrap
 ├── app.py                     ← BTerminalApp orchestrator, ShrinkableBin
 ├── config.py                  ← paths, options, Catppuccin palette, CSS
+├── i18n.py                    ← gettext, SUPPORTED_LANGUAGES, live refresh
+├── system_probe.py            ← RAM/GPU detection, Ollama model recommender
 ├── models.py                  ← JsonListManager, SessionManager,
-│                                ClaudeSessionManager, ConsultManager,
+│                                AISessionManager, ConsultManager,
 │                                SessionPasswordCache
 ├── debug_rest.py              ← loopback REST API (--debug-rest), 26 routes
 ├── plugin_runtime.py          ← BTerminalPlugin ABC (in-process contract)
 ├── sidecar_runtime.py         ← SidecarManifest, Discovery, Runner, HealthChecker
 ├── updater.py                 ← auto-update + errata + rollback
 ├── helpers.py                 ← intro prompt, clipboard, image attachments
+├── providers/                 ← per-CLI abstraction (R4.2)
+│   ├── base.py                ← Provider interface + capabilities schema
+│   ├── claude.py              ← Claude Code spawn args, log parsing
+│   ├── copilot.py             ← GitHub Copilot CLI + events.jsonl tail
+│   ├── copilot_session_store.py ← FTS5 session index
+│   ├── aider.py               ← Aider provider (OpenAI-compatible endpoint)
+│   ├── aider_probe.py         ← Ollama model presence + curated suggestions
+│   ├── defaults.json          ← bundled provider/capability defaults
+│   └── ctx_defaults.py        ← built-in ctx entries per provider
 ├── ctx/
 │   ├── helpers.py             ← project-name resolution, ctx CLI checks
 │   ├── dialogs.py             ← CtxSetupWizard, CtxEditDialog
@@ -613,11 +624,12 @@ bterminal/                     ← Python package (~30 modules)
 └── ui/
     ├── stats.py               ← SessionStatsBar (Claude-only)
     ├── sidebar.py             ← SessionSidebar
-    ├── terminal_tab.py        ← TerminalTab + spawn_claude/spawn_ssh
+    ├── terminal_tab.py        ← TerminalTab + spawn_{claude,copilot,aider,ssh}
     ├── dialogs/
     │   ├── sessions.py        ← SessionDialog, MacroDialog
-    │   ├── claude_code.py     ← ClaudeCodeDialog + _build_intro_prompt
-    │   └── options.py         ← OptionsDialog
+    │   ├── ai_session.py      ← provider-aware AI session dialog
+    │   ├── claude_code.py     ← legacy Claude dialog + _build_intro_prompt
+    │   └── options.py         ← OptionsDialog (incl. Local Models panel)
     └── panels/                ← 8 sidebar panels: consult, ctx_manager,
                                   files, git, memory, plugin_manager,
                                   skills, tasks
