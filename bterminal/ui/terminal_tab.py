@@ -536,6 +536,145 @@ class TerminalTab(Gtk.Box):
             return TerminalTab._SUDO_ASKPASS_PROLOGUE + f"{cmd_str}\nexec bash\n"
         return f"{cmd_str}\nexec bash\n"
 
+    def _aider_resolve_model(self, provider, config):
+        """Mirror AiderProvider.build_argv's --model resolution chain.
+
+        Priority: per-session opts.model → global default_local_model_for_provider
+        → provider.capabilities.default_model → hardcoded fallback.
+        """
+        opts = config.get("provider_options") or {}
+        model = opts.get("model")
+        if not model:
+            try:
+                from bterminal.config import _OPTIONS
+                mapping = _OPTIONS.get("default_local_model_for_provider") or {}
+                model = mapping.get("aider")
+            except Exception:
+                model = None
+        return (model
+                or getattr(provider.capabilities, "default_model", None)
+                or "openai/qwen2.5-coder:0.5b")
+
+    def _aider_resolve_missing_model(self, provider, config):
+        """Pre-spawn safety net for aider — see BUG#19.
+
+        Returns:
+          - original (or amended) `config` dict to proceed with spawn
+          - None to abort spawn (user cancelled the dialog)
+        """
+        from bterminal.providers.aider import (
+            is_model_available, list_installed_models,
+        )
+        model = self._aider_resolve_model(provider, config)
+        if is_model_available(model):
+            return config
+
+        action, picked = self._aider_show_missing_model_dialog(
+            model, list_installed_models())
+
+        if action == "skip":
+            return config  # spawn anyway — user accepts raw litellm error
+        if action == "pick" and picked:
+            new_config = dict(config)
+            new_opts = dict(new_config.get("provider_options") or {})
+            new_opts["model"] = picked
+            new_config["provider_options"] = new_opts
+            return new_config
+        if action == "wizard":
+            # BUG#22: hand off to the CLI wizard in a fresh tab.
+            # After it exits, app._on_aider_wizard_done checks the sentinel
+            # and (if it matches this session_id) spawns aider with the
+            # newly-chosen model — no user click required.
+            # idle_add: we're still inside the dialog response handler.
+            # Deferring lets the dialog tear down before append_page +
+            # set_current_page run, otherwise GTK keeps focus on the
+            # (about-to-be-aborted) aider tab.
+            GLib.idle_add(self.app.open_aider_wizard_tab, config)
+            return None  # current spawn aborts; the wizard takes over
+        return None  # cancel / closed
+
+    def _aider_show_missing_model_dialog(self, missing_tag, installed):
+        """Show 3-option dialog. Returns (action, picked_model_or_None).
+
+        action ∈ {'wizard', 'pick', 'skip', 'cancel'}
+        """
+        try:
+            from bterminal.config import _
+        except Exception:
+            def _(s):
+                return s
+
+        primary = _("Brakuje modelu lokalnego dla aidera")
+        secondary = _(
+            "Model '%s' nie jest pobrany w Ollamie. Aider wystartuje, "
+            "ale przy pierwszym promptcie wypisze litellm.NotFoundError. "
+            "Co chcesz zrobić?"
+        ) % missing_tag
+
+        dlg = Gtk.MessageDialog(
+            transient_for=self.app,
+            modal=True,
+            destroy_with_parent=True,
+            message_type=Gtk.MessageType.WARNING,
+            text=primary,
+        )
+        dlg.format_secondary_text(secondary)
+        dlg.add_button(_("Uruchom wizarda"), 1)
+        if installed:
+            dlg.add_button(_("Wybierz inny model"), 2)
+        dlg.add_button(_("Pomiń (uruchom mimo to)"), 3)
+        dlg.add_button(_("Anuluj"), Gtk.ResponseType.CANCEL)
+        resp = dlg.run()
+        dlg.destroy()
+
+        if resp == 1:
+            return ("wizard", None)
+        if resp == 2:
+            picked = self._aider_pick_installed_model(installed)
+            return ("pick", picked) if picked else ("cancel", None)
+        if resp == 3:
+            return ("skip", None)
+        return ("cancel", None)
+
+    def _aider_pick_installed_model(self, installed):
+        """Modal combo dialog over `installed`. Returns tag or None."""
+        try:
+            from bterminal.config import _
+        except Exception:
+            def _(s):
+                return s
+
+        dlg = Gtk.Dialog(
+            title=_("Wybierz model lokalny"),
+            transient_for=self.app,
+            modal=True,
+            destroy_with_parent=True,
+        )
+        dlg.add_buttons(
+            _("Anuluj"), Gtk.ResponseType.CANCEL,
+            _("OK"), Gtk.ResponseType.OK,
+        )
+        box = dlg.get_content_area()
+        box.set_spacing(8)
+        box.set_margin_start(12)
+        box.set_margin_end(12)
+        box.set_margin_top(12)
+        box.set_margin_bottom(12)
+        box.pack_start(Gtk.Label(label=_("Dostępne modele Ollama:")), False, False, 0)
+        combo = Gtk.ComboBoxText()
+        for tag in installed:
+            combo.append_text(tag)
+        combo.set_active(0)
+        box.pack_start(combo, False, False, 0)
+        dlg.show_all()
+        resp = dlg.run()
+        picked = combo.get_active_text() if resp == Gtk.ResponseType.OK else None
+        dlg.destroy()
+        # Aider expects `openai/<tag>` (litellm prefix), preserve convention.
+        if picked and "/" not in picked:
+            picked = "openai/" + picked
+        return picked
+
     def spawn_ai_cli(self, config):
         """Spawn an AI CLI session — provider-aware dispatch (T2.1).
 
@@ -566,6 +705,14 @@ class TerminalTab(Gtk.Box):
         binary = provider.find_binary()
         work_dir = config.get("project_dir") or os.environ.get("HOME", "/")
 
+        # BUG#19: aider pre-spawn check — without an installed Ollama model
+        # the user would see a raw `litellm.NotFoundError` in VTE.
+        if binary and provider_name == "aider":
+            config = self._aider_resolve_missing_model(provider, config)
+            if config is None:
+                return  # user picked Anuluj / closed dialog
+
+        intro_prompt = ""
         if not binary:
             script = self._build_binary_not_found_script(provider)
         else:
@@ -587,6 +734,13 @@ class TerminalTab(Gtk.Box):
             None,
             None,
         )
+
+        # BUG#27: providers that can't take intro_prompt via argv (aider —
+        # no --message-init) deliver it through the PTY after a delay.
+        # Default base-class implementation is a no-op, so Claude/Copilot
+        # paths are unchanged.
+        if binary and intro_prompt:
+            provider.inject_intro_prompt(self.terminal, intro_prompt)
 
     # T4.6.1 (2026-05-07): the `spawn_claude` legacy alias was removed.
     # Callers must use spawn_ai_cli(config) directly. Sessions whose
@@ -695,8 +849,11 @@ class TerminalTab(Gtk.Box):
         project = self._task_project or os.path.basename(project_dir.rstrip("/"))
         count = self._stats_bar._prompt_count
 
-        inject_every = 100
-        refresh_every = 200
+        from bterminal.providers.ctx_defaults import (
+            DEFAULT_INJECT_EVERY, DEFAULT_REFRESH_EVERY,
+        )
+        inject_every = DEFAULT_INJECT_EVERY
+        refresh_every = DEFAULT_REFRESH_EVERY
         try:
             if os.path.exists(CTX_DB):
                 db = sqlite3.connect(CTX_DB)

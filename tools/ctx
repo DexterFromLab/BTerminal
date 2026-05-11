@@ -15,6 +15,26 @@ from pathlib import Path
 
 DB_PATH = Path.home() / ".claude-context" / "context.db"
 
+# BUG#28: rules_config defaults. MUST stay in sync with
+# bterminal/providers/ctx_defaults.py — drift between the two causes
+# user-visible inconsistencies (Memory panel shows 100, intro prompt
+# header says 20). Try to import the canonical values from the
+# package; fall back to literals when the script runs outside the
+# bterminal repo / install (e.g. shipped flat in ~/.local/share/bterminal/).
+try:
+    HERE = Path(__file__).resolve().parent
+    for _candidate in (HERE.parent, HERE):  # repo: tools/.. ; installed: HERE
+        _bt_pkg = _candidate / "bterminal" / "providers" / "ctx_defaults.py"
+        if _bt_pkg.is_file():
+            sys.path.insert(0, str(_candidate))
+            break
+    from bterminal.providers.ctx_defaults import (  # type: ignore
+        DEFAULT_INJECT_EVERY, DEFAULT_REFRESH_EVERY,
+    )
+except Exception:
+    DEFAULT_INJECT_EVERY = 100
+    DEFAULT_REFRESH_EVERY = 200
+
 
 def _ensure_secure_perms(path):
     """Force 0o600 on the CTX DB file + 0o700 on its parent dir
@@ -84,8 +104,16 @@ def init_db():
 
         CREATE TABLE IF NOT EXISTS rules_config (
             project TEXT PRIMARY KEY,
-            inject_every INTEGER NOT NULL DEFAULT 20,
-            refresh_every INTEGER NOT NULL DEFAULT 50,
+            -- BUG#31: NOT NULL without DEFAULT is intentional. Every
+            -- caller (memory panel Apply, memory_wizard, _rules_inject
+            -- auto-UPSERT) passes explicit values; a schema-level
+            -- DEFAULT would silently catch a future regression where
+            -- someone writes `INSERT INTO rules_config (project) VALUES
+            -- (?)` and pins the project to whatever DEFAULT was set
+            -- at create-time (and would drift from the Python-side
+            -- DEFAULT_INJECT_EVERY constant).
+            inject_every INTEGER NOT NULL,
+            refresh_every INTEGER NOT NULL,
             updated_at TEXT DEFAULT (datetime('now'))
         );
 
@@ -515,6 +543,18 @@ def _rules_inject(project):
     rows = db.execute(
         "SELECT rule FROM rules WHERE project = ? AND enabled = 1 ORDER BY id", (project,)
     ).fetchall()
+    # BUG#28: auto-create rules_config row with defaults on first access.
+    # Without this, projects that never had Memory panel "Apply" pressed
+    # hit the `if cfg else N` fallback path and the value depended on
+    # which fallback constant the caller used (memory.py: 100, this
+    # script before fix: 20 — exactly the user-visible inconsistency
+    # this task fixes).
+    db.execute(
+        "INSERT OR IGNORE INTO rules_config "
+        "(project, inject_every, refresh_every) VALUES (?, ?, ?)",
+        (project, DEFAULT_INJECT_EVERY, DEFAULT_REFRESH_EVERY),
+    )
+    db.commit()
     cfg = db.execute(
         "SELECT inject_every FROM rules_config WHERE project = ?", (project,)
     ).fetchone()
@@ -523,10 +563,10 @@ def _rules_inject(project):
     if not rows:
         return
 
-    inj = cfg["inject_every"] if cfg else 20
+    inj = cfg["inject_every"] if cfg else DEFAULT_INJECT_EVERY
     line = "═" * 52
     print(line)
-    print(f"PRZYPOMNIENIE REGUŁ [{project}] (co {inj} promptów)")
+    print(f"RULES REMINDER [{project}] (every {inj} prompts)")
     print(line)
     for row in rows:
         print(f"• {row['rule']}")

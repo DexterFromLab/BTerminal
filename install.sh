@@ -806,7 +806,7 @@ validate_explain() {
 BACKUP_DIR=""
 # CLI tools (flat at INSTALL_DIR root); the bterminal/ Python package is
 # copied separately as a directory tree (see install loop below).
-BTERMINAL_FILES=(ctx consult tasks claude_log memory_wizard)
+BTERMINAL_FILES=(ctx consult tasks claude_log memory_wizard aider_setup_wizard)
 
 _on_error() {
     local code=$?
@@ -1721,7 +1721,8 @@ chmod +x "$INSTALL_DIR/bterminal-launcher"
 cp "$SCRIPT_DIR/bterminal.svg" "$ICON_DIR/bterminal.svg"
 gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor/" 2>/dev/null || true
 chmod +x "$INSTALL_DIR/ctx" "$INSTALL_DIR/consult" \
-         "$INSTALL_DIR/tasks" "$INSTALL_DIR/claude_log" "$INSTALL_DIR/memory_wizard"
+         "$INSTALL_DIR/tasks" "$INSTALL_DIR/claude_log" "$INSTALL_DIR/memory_wizard" \
+         "$INSTALL_DIR/aider_setup_wizard"
 
 # Live symlinks from repo (git pull → immediate effect, no reinstall needed).
 # License files live under defaults/license/ (LICENSE.en.md, LICENSE.pl.md...);

@@ -494,6 +494,15 @@ class BTerminalApp(Gtk.Window):
             N_("Install dependencies…"),
             self._show_installer_wizard,
         ))
+        # BUG#23: manual entry to the aider model wizard. Unlike the
+        # spawn-time path (BUG#19 dialog → 'Uruchom wizarda'), this one
+        # has no source session — wizard runs without --session-id so
+        # nothing auto-relaunches after it exits. Used when the user
+        # wants to pre-pull a model or change the default.
+        tools_menu.append(_item(
+            N_("Configure local model (aider)…"),
+            self._on_open_aider_wizard,
+        ))
         tools_root = Gtk.MenuItem()
         tr(tools_root, "set_label", N_("Tools"))
         tools_root.set_submenu(tools_menu)
@@ -752,6 +761,97 @@ class BTerminalApp(Gtk.Window):
                 if on_done:
                     GLib.idle_add(on_done)
             tab.terminal.connect("child-exited", _on_exit)
+
+    def open_aider_wizard_tab(self, session_config, on_done=None):
+        """Spawn `tools/aider_setup_wizard` in a new tab (BUG#22).
+
+        session_config: the aider session config that triggered the wizard
+        (its `id` becomes `--session-id`, so the wizard's sentinel can be
+        matched back here in `_on_wizard_done`).
+
+        Sequence end-to-end:
+          BUG#19 dialog → 'Uruchom wizarda' → this method →
+          wizard tab opens (rich CLI) → user picks & pulls model →
+          wizard writes sentinel → child-exited → _on_wizard_done →
+          spawn aider tab with the new model in provider_options.
+        """
+        # Locate wizard binary (mirrors open_wizard_tab's policy — installed
+        # tree is preferred, repo path is a fallback for dev).
+        candidates = [
+            shutil.which("aider_setup_wizard"),
+            # install.sh flattens tools/ into INSTALL_DIR (~/.local/share/bterminal/),
+            # same convention as memory_wizard / ctx / tasks. This is the
+            # production path on installed hosts.
+            str(Path.home() / ".local" / "share" / "bterminal"
+                / "aider_setup_wizard"),
+            # Dev path — running `python -m bterminal` straight from the repo.
+            str(Path(__file__).resolve().parent.parent
+                / "tools" / "aider_setup_wizard"),
+        ]
+        wizard_bin = next(
+            (p for p in candidates if p and os.path.isfile(p)), None,
+        )
+        if not wizard_bin:
+            show_error_dialog(
+                self,
+                "tools/aider_setup_wizard nie znaleziony. "
+                "Uruchom install.sh aby zaktualizować instalację.",
+            )
+            return
+
+        session_id = session_config.get("id") or ""
+        tab = TerminalTab(self)
+        tab.is_aider_wizard_tab = True
+        tab.wizard_session_config = session_config
+        label = self._build_tab_label("🧙 aider setup", tab)
+        idx = self.notebook.append_page(tab, label)
+        self.notebook.set_current_page(idx)
+        self.notebook.set_tab_reorderable(tab, True)
+        tab.terminal.grab_focus()
+        self._update_window_title()
+
+        argv = ["/usr/bin/env", "python3", wizard_bin]
+        if session_id:
+            argv += ["--session-id", session_id]
+        tab.terminal.spawn_async(
+            Vte.PtyFlags.DEFAULT,
+            os.environ.get("HOME", "/"),
+            argv,
+            None,
+            GLib.SpawnFlags.DEFAULT,
+            None, None, -1, None, None,
+        )
+
+        def _on_exit(_terminal, _status):
+            GLib.idle_add(self._on_aider_wizard_done, tab, on_done)
+        tab.terminal.connect("child-exited", _on_exit)
+
+    def _on_aider_wizard_done(self, wizard_tab, on_done):
+        """Wizard tab exited — check sentinel, maybe relaunch aider."""
+        from bterminal.providers import aider_probe
+        relaunched = False
+        original = getattr(wizard_tab, "wizard_session_config", None) or {}
+        payload = aider_probe.read_sentinel()
+        new_config = aider_probe.compute_relaunch_config(payload, original)
+        if new_config is not None:
+            # Spawn aider with the chosen model. Reuses normal ai_config
+            # entry point so intro prompt / stats bar / rules injection
+            # all hook in identically to a user-initiated open.
+            from bterminal.ui.terminal_tab import TerminalTab as _TT
+            new_tab = _TT(self, ai_config=new_config)
+            tab_name = new_config.get("name", "aider")
+            new_label = self._build_tab_label(f"🧪 {tab_name}", new_tab)
+            new_idx = self.notebook.append_page(new_tab, new_label)
+            self.notebook.set_current_page(new_idx)
+            self.notebook.set_tab_reorderable(new_tab, True)
+            relaunched = True
+            try:
+                Path(aider_probe.SENTINEL_PATH).unlink()
+            except OSError:
+                pass
+        if on_done:
+            on_done(relaunched)
+        return False  # idle_add: do not repeat
 
     def open_ssh_tab(self, session):
         from bterminal.ui.terminal_tab import compute_tab_label
@@ -1015,6 +1115,23 @@ class BTerminalApp(Gtk.Window):
             self._paned.set_position(self._sidebar_last_pos)
             self._show_sidebar_btn.hide()
         self._sidebar_visible = not self._sidebar_visible
+
+    def _on_open_aider_wizard(self):
+        """Tools → Configure local model (aider)… (BUG#23).
+
+        Manual entry to the aider model wizard — opens it WITHOUT a
+        session_id so the post-wizard sentinel won't trigger an
+        automatic aider spawn (matches the user expectation: 'I'm
+        just pre-pulling a model, not starting a session right now').
+        Reuses the same TerminalTab + child-exited plumbing as the
+        BUG#22 spawn-time path.
+        """
+        # session_config={} → no `id`, so the wizard runs without
+        # --session-id; the sentinel (if written) won't match anything
+        # in compute_relaunch_config and BT silently does nothing on
+        # child-exited. The new model still lands in options.json
+        # (that's the point of the manual entry).
+        self.open_aider_wizard_tab({})
 
     def _show_installer_wizard(self):
         """Tools → Install dependencies… (task #6 / #78).
