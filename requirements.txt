@@ -1,0 +1,11 @@
+# Runtime Python dependencies for BTerminal.
+#
+# GTK/VTE/PyGObject come from the distro (apt python3-gi gir1.2-vte-2.91)
+# and are NOT installed via pip — see defaults/dependencies.json.
+#
+# This file pins only the pure-Python packages we ship through pip:
+
+# Used by:
+#   - tools/aider_setup_wizard  (BUG#21 — semaforowa table + ollama pull bar)
+# Optional for BTerminal itself; required for the aider wizard CLI.
+rich>=13.0
