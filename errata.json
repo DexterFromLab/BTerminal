@@ -1,5 +1,25 @@
 [
   {
+    "date": "2026-05-11",
+    "message": "BTerminal v1.3.2 — Aider setup wizard + 10 bug-fix bundle (#19-28). New tools/aider_setup_wizard CLI detects missing Ollama models, surfaces the curated catalog, and orchestrates pulls so users hit a guided flow instead of LiteLLM's raw stack trace. Memory panel's Apply Rules now affects the current tab without a restart. All fixes verified end-to-end on a real VM with the semi-automatic UI driver. Recommended: run install.sh to pick up the new wizard CLI, recompile locale catalogs, and refresh provider defaults.",
+    "changes": [
+      "feat(aider): tools/aider_setup_wizard — detects missing Ollama models, presents curated catalog, orchestrates pulls (BUG#19)",
+      "feat(aider): providers/aider_probe.py — model presence + curated suggestions logic with refresh from ollama.com (BUG#25, #26)",
+      "feat(aider): providers/aider_models.json — bundled catalog (qwen2.5-coder family, deepseek-coder-v2, codellama, llama3.1, qwen2.5, llava)",
+      "feat(aider): providers/ctx_defaults.py — built-in ctx entries seeded on first Aider run for consistent project conventions (BUG#28)",
+      "fix(aider): missing-model dialog with Open wizard / Skip buttons replaces raw LiteLLM stack trace on spawn (BUG#19)",
+      "fix(aider): pass intro prompt to Aider spawn so the LLM sees CLAUDE.md from prompt #1 (BUG#27)",
+      "fix(aider): auto-relaunch Aider after a successful wizard pull (BUG#22)",
+      "feat(app): Tools → Aider Setup Wizard… menu item opens the wizard tab from BT (BUG#23)",
+      "fix(memory): Apply Rules button now feeds refreshed rules into the active terminal — no restart needed",
+      "fix(i18n): refresh 12 locale catalogs (.po) and bterminal.pot for new strings introduced by the wizard flow; PL filled, other locales fallback until translated",
+      "test(e2e): 5 AT-SPI pin tests covering missing-model dialog, wizard end-to-end flow, Tools menu entry, Aider intro-prompt feed, memory apply current-tab effect",
+      "test: 6 new unit tests (aider_probe, aider_setup_wizard CLI, catalog refresh, ctx defaults consistency, ctx rules autoinsert, memory wizard defaults)",
+      "chore: add requirements.txt pinning rich>=13.0 (consumed by aider_setup_wizard semaphore-table UI)",
+      "docs(readme): multi-provider description + architecture refresh (~50 modules, providers/ subpackage, i18n.py, system_probe.py, ai_session.py listed)"
+    ]
+  },
+  {
     "date": "2026-05-10",
     "message": "BTerminal v1.3.1 — stability + Polish locale bug-fix bundle driven by manual QA. 14 user-visible fixes across the Aider provider, Pull Ollama dialog, Options layout and theme toggle, plus Polish catalog completeness. All fixes verified end-to-end on a real VM with a new semi-automatic UI driver (AT-SPI accessibility tree). Recommended: run install.sh to recompile locale catalogs and pick up the helper scripts; no schema changes, no manual migration needed.",
     "changes": [
