@@ -41,6 +41,39 @@ _DEFAULT_MODEL = "openai/qwen2.5-coder:0.5b"
 _DEFAULT_API_KEY_DUMMY = "dummy"  # local Ollama ignores this; aider requires non-empty
 
 
+def _strip_provider_prefix(model_tag: str) -> str:
+    # Litellm tags like 'openai/qwen2.5-coder:0.5b' or 'ollama/qwen2.5:7b'
+    # — Ollama itself only knows the bare tag after the slash.
+    if "/" in model_tag:
+        return model_tag.split("/", 1)[1]
+    return model_tag
+
+
+def list_installed_models() -> list[str]:
+    """Return Ollama model tags installed locally, or [] when Ollama missing."""
+    try:
+        result = subprocess.run(
+            ["ollama", "list"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (FileNotFoundError, subprocess.SubprocessError, OSError):
+        return []
+    if result.returncode != 0:
+        return []
+    tags: list[str] = []
+    for line in result.stdout.splitlines()[1:]:  # skip 'NAME ID SIZE ...' header
+        parts = line.split()
+        if parts:
+            tags.append(parts[0])
+    return tags
+
+
+def is_model_available(model_tag: str) -> bool:
+    """True when the bare Ollama tag (sans `openai/`…) is in `ollama list`."""
+    bare = _strip_provider_prefix(model_tag)
+    return bare in list_installed_models()
+
+
 def detect_aider_version(binary_path: Optional[str] = None
                           ) -> Optional[tuple[int, int, int]]:
     """Probe `aider --version` and return parsed (major, minor, patch).
@@ -219,6 +252,40 @@ class AiderProvider(AIProvider):
         # NOTE intro_prompt intentionally not appended — see docstring.
         return argv
 
+    # ─── Intro prompt delivery (BUG#27) ────────────────────────────────────
+
+    # Aider settles into its main prompt loop ~1-2s after spawn — too
+    # soon and feed_child() races the banner, too late and the user
+    # has typed something. 2000 ms is the floor on a midrange Linux
+    # laptop; bumping higher would feel sluggish to attentive users.
+    _INTRO_FEED_DELAY_MS = 2000
+
+    def inject_intro_prompt(self, terminal, intro_prompt: str) -> None:
+        """BUG#27 — push the intro prompt over the PTY after aider's
+        banner has rendered. Aider lacks `--message-init`, so this is
+        the only way intro_prompt (which carries plugin context, ctx
+        rules header, BT welcome line) reaches the model on prompt #1.
+        """
+        if not intro_prompt:
+            return
+        payload = intro_prompt.encode("utf-8") + b"\n"
+
+        def _send():
+            try:
+                terminal.feed_child(payload)
+                # Record for the debug-rest feed_log (pin tests assert here).
+                try:
+                    from bterminal.debug_rest import record_feed
+                    record_feed("intro_prompt_aider", payload)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+            return False  # one-shot — GLib mustn't repeat the timer
+
+        from gi.repository import GLib
+        GLib.timeout_add(self._INTRO_FEED_DELAY_MS, _send)
+
     # ─── Session log ───────────────────────────────────────────────────────
 
     def session_log_glob(self, project_dir: str) -> Optional[str]:
@@ -310,4 +377,9 @@ def _parse_num_with_suffix(num_str: str, suffix: str) -> int:
     return int(n)
 
 
-__all__ = ["AiderProvider"]
+__all__ = [
+    "AiderProvider",
+    "detect_aider_version",
+    "is_model_available",
+    "list_installed_models",
+]

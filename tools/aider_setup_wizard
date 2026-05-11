@@ -1,0 +1,446 @@
+#!/usr/bin/env python3
+"""BTerminal — aider setup wizard.
+
+Interactive CLI that walks a user through choosing & pulling a local
+Ollama model suitable for aider. Spawned by BT as a new tab when
+spawn_ai_cli detects a missing model (BUG#19 dialog → 'Run wizard'),
+or directly via Tools → Configure local model (BUG#23).
+
+Flow:
+  1. Verify Ollama is installed + daemon responding. If not, prompt
+     the user to run the upstream installer script.
+  2. Load curated catalog (bterminal/providers/aider_models.json),
+     probe host hardware, render a status table (✓ / ⚠ / ✗).
+  3. Picker → user chooses a row, presses 'r' to refresh the catalog,
+     or 'c' to enter a custom Ollama tag (BUG#26 — escape hatch for
+     workstation users whose hardware outgrew the bundled list).
+  4. `ollama pull <tag>` with a live progress bar (parses stderr).
+  5. Persist the choice in ~/.config/bterminal/options.json under
+     default_local_model_for_provider.aider as `openai/<tag>` (litellm
+     prefix — aider routes via OpenAI-compatible endpoint to Ollama).
+  6. When --session-id is set, write a sentinel
+     ~/.config/bterminal/.aider_wizard_done.json so BT's child-exited
+     hook can auto-relaunch the aider tab with the new model.
+
+Headless mode (--headless) makes the wizard non-interactive: it picks
+the recommended model, attempts a pull, and writes the same artifacts.
+Used by CI / pin tests with a fake `ollama` binary on PATH.
+
+User-facing strings are intentionally English — same convention as
+other tools/ CLI helpers (`tasks`, `consult`, `memory_wizard`). GTK
+dialogs in BT itself (terminal_tab.py, app.py) are i18n-aware via
+gettext and follow the BT.language setting.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+# ── Import path bootstrap ────────────────────────────────────────────────
+HERE = Path(__file__).resolve().parent
+REPO_ROOT = HERE.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+try:
+    from rich.console import Console
+    from rich.table import Table
+    from rich.prompt import Prompt, Confirm
+    from rich.progress import (
+        Progress, SpinnerColumn, TextColumn, BarColumn,
+        TimeElapsedColumn,
+    )
+except ImportError:
+    sys.stderr.write(
+        "Missing 'rich' package. Install:  pip install --user rich\n"
+        "Or from repo:  pip install --user -r requirements.txt\n"
+    )
+    sys.exit(2)
+
+from bterminal.providers import aider_probe  # noqa: E402
+
+
+CONFIG_DIR = Path(os.path.expanduser("~/.config/bterminal"))
+OPTIONS_PATH = CONFIG_DIR / "options.json"
+SENTINEL_PATH = CONFIG_DIR / ".aider_wizard_done.json"
+OLLAMA_INSTALL_URL = "https://ollama.com/install.sh"
+
+
+# ─── Ollama presence checks ─────────────────────────────────────────────────
+
+
+def ollama_binary_present() -> bool:
+    return shutil.which("ollama") is not None
+
+
+def ollama_daemon_responding(timeout: float = 2.0) -> bool:
+    """True when /api/tags returns 200 — daemon is up."""
+    try:
+        with urllib.request.urlopen(
+                "http://127.0.0.1:11434/api/tags", timeout=timeout) as resp:
+            return resp.status == 200
+    except (urllib.error.URLError, OSError):
+        return False
+
+
+def offer_install_ollama(console: Console, headless: bool) -> bool:
+    """Show the upstream install command. Returns True if the user opted
+    in and the installer reported success."""
+    console.print(
+        "[bold yellow]⚠ Ollama not found[/bold yellow] — required to run "
+        "local models.\n"
+        f"Vendor install command: [cyan]curl -fsSL {OLLAMA_INSTALL_URL} | sh[/cyan]\n"
+        "[dim]The script needs sudo to drop the binary in /usr/local/bin "
+        "and register a systemd service.[/dim]"
+    )
+    if headless:
+        console.print("[red]--headless: skipping installation prompt[/red]")
+        return False
+    if not Confirm.ask("Run installer now?", default=False):
+        return False
+    console.print("[dim]→ running: curl … install.sh | sh[/dim]")
+    try:
+        rc = subprocess.run(
+            f"curl -fsSL {OLLAMA_INSTALL_URL} | sh",
+            shell=True, check=False,
+        ).returncode
+    except OSError as e:
+        console.print(f"[red]Install error: {e}[/red]")
+        return False
+    return rc == 0 and ollama_binary_present()
+
+
+# ─── Status table rendering ─────────────────────────────────────────────────
+
+STATUS_GLYPH = {
+    "fits":    "[green]✓[/green]",
+    "tight":   "[yellow]⚠[/yellow]",
+    "too_big": "[red]✗[/red]",
+}
+
+
+def render_table(
+    console: Console,
+    catalog: dict,
+    ram_gb: float,
+    vram_gb: float,
+    recommended_tag: str | None,
+    installed_tags: set[str],
+) -> list[dict]:
+    """Render the model status table and return the model list in the
+    same order so the caller can map numeric picker input to a model."""
+    table = Table(
+        title=f"Local model selection for aider "
+              f"(RAM {ram_gb} GB · VRAM {vram_gb} GB)",
+        show_lines=False,
+        title_style="bold",
+    )
+    table.add_column("#", justify="right", style="dim")
+    table.add_column("Model")
+    table.add_column("Info")
+    table.add_column("RAM", justify="right")
+    table.add_column("DL", justify="right")
+    table.add_column("Fit", justify="center")
+    table.add_column("Installed", justify="center")
+
+    models = catalog.get("models", [])
+    for i, m in enumerate(models, start=1):
+        status_key = aider_probe.score_model(m, ram_gb, vram_gb)
+        glyph = STATUS_GLYPH[status_key]
+        installed = m["tag"] in installed_tags
+        installed_mark = "[green]●[/green]" if installed else "[dim]○[/dim]"
+        label = m["label"]
+        if m["tag"] == recommended_tag:
+            label = f"[bold]★ {label}[/bold]"
+        url = m.get("url") or ""
+        info_cell = f"[link={url}]details[/link]" if url else "—"
+        table.add_row(
+            str(i),
+            f"{label}\n[dim]{m['tag']}[/dim]",
+            info_cell,
+            f"{m.get('ram_gb', 0)} GB",
+            f"{m.get('download_mb', 0):,} MB".replace(",", " "),
+            glyph,
+            installed_mark,
+        )
+
+    console.print(table)
+    console.print(
+        "[dim]Legend: ✓ fits  ⚠ tight (fits but swaps under load)  "
+        "✗ too big  ● already pulled  ○ not pulled  ★ recommended[/dim]"
+    )
+    return list(models)
+
+
+# ─── Picker ──────────────────────────────────────────────────────────────────
+
+
+def pick_model(
+    console: Console,
+    models: list[dict],
+    recommended_idx: int,
+    headless: bool,
+) -> dict | str:
+    """Return the chosen model dict, or one of the sentinel strings
+    'refresh' / 'custom'. Headless picks the recommended row."""
+    if headless:
+        return models[recommended_idx]
+    choices = [str(i + 1) for i in range(len(models))] + ["r", "c"]
+    raw = Prompt.ask(
+        "Choose a number, 'r' to refresh catalog, or 'c' for custom tag",
+        choices=choices,
+        default=str(recommended_idx + 1),
+    )
+    if raw == "r":
+        return "refresh"
+    if raw == "c":
+        return "custom"
+    return models[int(raw) - 1]
+
+
+def prompt_custom_tag(console: Console) -> dict | None:
+    """BUG#26 — free-text Ollama tag entry. Returns a synthetic model
+    dict the rest of the flow can treat like a catalog entry."""
+    console.print(
+        "[dim]Enter any Ollama tag (see https://ollama.com/library). "
+        "Examples: 'llama3.3:70b', 'qwen2.5-coder:32b-instruct-fp16'.[/dim]"
+    )
+    raw = Prompt.ask("Custom model tag").strip()
+    if not raw:
+        console.print("[yellow]Empty input — cancelling.[/yellow]")
+        return None
+    return {
+        "tag": raw,
+        "label": raw,
+        "url": f"https://ollama.com/library/{raw.split(':', 1)[0]}",
+        "ram_gb": 0.0,
+        "vram_gb": 0.0,
+        "download_mb": 0,
+        "tier": "custom",
+    }
+
+
+# ─── ollama pull with progress ──────────────────────────────────────────────
+
+
+def pull_model(console: Console, tag: str, headless: bool) -> bool:
+    """Run `ollama pull <tag>` and stream a progress bar.
+
+    Returns True on success. Parses Ollama's stderr for `xx%` markers.
+    """
+    bare = tag.split("/", 1)[1] if "/" in tag else tag
+    cmd = ["ollama", "pull", bare]
+    console.print(f"[bold]Pulling[/bold] {bare} …")
+
+    if headless:
+        try:
+            rc = subprocess.run(cmd).returncode
+        except FileNotFoundError:
+            console.print("[red]Missing `ollama` binary on PATH[/red]")
+            return False
+        return rc == 0
+
+    import re
+    pct_re = re.compile(r"(\d+(?:\.\d+)?)\s*%")
+    progress = Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("{task.percentage:>3.0f}%"),
+        TimeElapsedColumn(),
+        console=console,
+    )
+    with progress:
+        task = progress.add_task("ollama pull", total=100.0)
+        try:
+            proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, bufsize=1,
+            )
+        except FileNotFoundError:
+            console.print("[red]Missing `ollama` binary on PATH[/red]")
+            return False
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            m = pct_re.search(line)
+            if m:
+                try:
+                    progress.update(task, completed=float(m.group(1)))
+                except (TypeError, ValueError):
+                    pass
+        rc = proc.wait()
+        progress.update(task, completed=100.0)
+    if rc == 0:
+        console.print(f"[green]✓ Pulled {bare}[/green]")
+        return True
+    console.print(f"[red]✗ ollama pull exited with code {rc}[/red]")
+    return False
+
+
+# ─── Persistence ────────────────────────────────────────────────────────────
+
+
+def save_default_model(tag: str) -> None:
+    """Persist the chosen model under default_local_model_for_provider.aider.
+    Tag is stored WITH the `openai/` litellm prefix — that's what
+    AiderProvider.build_argv passes to `aider --model`."""
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    options = {}
+    if OPTIONS_PATH.exists():
+        try:
+            options = json.loads(OPTIONS_PATH.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            options = {}
+    mapping = options.get("default_local_model_for_provider") or {}
+    full_tag = tag if "/" in tag else "openai/" + tag
+    mapping["aider"] = full_tag
+    options["default_local_model_for_provider"] = mapping
+    OPTIONS_PATH.write_text(
+        json.dumps(options, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+
+def write_sentinel(session_id: str, tag: str) -> None:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "session_id": session_id,
+        "model": tag if "/" in tag else "openai/" + tag,
+        "ts": int(time.time()),
+    }
+    SENTINEL_PATH.write_text(
+        json.dumps(payload, indent=2) + "\n", encoding="utf-8",
+    )
+
+
+# ─── Main ───────────────────────────────────────────────────────────────────
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--session-id", dest="session_id",
+                    help="If set, write the post-wizard sentinel for BT to "
+                         "auto-relaunch this aider session with the new model.")
+    ap.add_argument("--headless", action="store_true",
+                    help="Non-interactive: pick the recommended model, "
+                         "pull it, write artifacts. Used by tests.")
+    ap.add_argument("--no-pull", action="store_true",
+                    help="Skip the `ollama pull` step (testing only).")
+    ap.add_argument("--refresh-catalog", action="store_true",
+                    help="Fetch the latest aider_models.json from GitHub "
+                         "before rendering. Blocks ~5s.")
+    args = ap.parse_args(argv)
+
+    console = Console()
+    console.rule("[bold]BTerminal — aider local model setup[/bold]")
+
+    # 1. Ollama presence
+    if not ollama_binary_present():
+        if not offer_install_ollama(console, args.headless):
+            console.print("[red]Cancelled — without Ollama the wizard "
+                          "cannot continue.[/red]")
+            return 3
+    if not ollama_daemon_responding():
+        console.print(
+            "[yellow]⚠ Ollama is installed but the daemon isn't "
+            "responding on :11434[/yellow]\n"
+            "[dim]Try: `ollama serve` in another terminal, then rerun "
+            "the wizard.[/dim]"
+        )
+        if not args.headless and not Confirm.ask(
+                "Continue anyway?", default=False):
+            return 4
+
+    # 2. Catalog + hardware probe
+    if args.refresh_catalog:
+        console.print("[dim]→ fetching fresh catalog from GitHub …[/dim]")
+        payload = aider_probe.fetch_remote_catalog()
+        if payload and aider_probe._write_cache(payload):
+            console.print("[green]✓ Catalog updated.[/green]")
+        else:
+            console.print("[yellow]⚠ Fetch failed — using bundled.[/yellow]")
+    catalog = aider_probe.load_catalog()
+    if not catalog.get("models"):
+        console.print("[red]Catalog is empty — check "
+                      f"{aider_probe.CATALOG_PATH}[/red]")
+        return 5
+
+    ram_gb = aider_probe.detect_ram_gb()
+    vram_gb = aider_probe.detect_vram_gb()
+    recommended = aider_probe.recommend_model(catalog, ram_gb, vram_gb)
+    rec_tag = recommended["tag"] if recommended else None
+    installed_tags = {
+        m["tag"] for m in catalog["models"]
+        if aider_probe.is_model_installed(m["tag"])
+    }
+
+    # 3. Render + pick — loop so 'r' / 'c' re-prompt without re-running setup.
+    while True:
+        models = render_table(
+            console, catalog, ram_gb, vram_gb, rec_tag, installed_tags)
+        rec_idx = next(
+            (i for i, m in enumerate(models) if m["tag"] == rec_tag), 0)
+        chosen = pick_model(console, models, rec_idx, args.headless)
+        if chosen == "refresh":
+            console.print("[dim]→ fetching fresh catalog from GitHub …[/dim]")
+            payload = aider_probe.fetch_remote_catalog()
+            if payload and aider_probe._write_cache(payload):
+                console.print("[green]✓ Catalog updated.[/green]")
+                catalog = aider_probe.load_catalog()
+                recommended = aider_probe.recommend_model(
+                    catalog, ram_gb, vram_gb)
+                rec_tag = recommended["tag"] if recommended else None
+                installed_tags = {
+                    m["tag"] for m in catalog["models"]
+                    if aider_probe.is_model_installed(m["tag"])
+                }
+            else:
+                console.print(
+                    "[yellow]⚠ Fetch failed (timeout/network) — "
+                    "keeping the existing catalog.[/yellow]")
+            continue
+        if chosen == "custom":
+            custom = prompt_custom_tag(console)
+            if custom is None:
+                continue
+            chosen = custom
+            # Refresh installed_tags so the "already pulled" short-circuit
+            # works for custom tags too.
+            if aider_probe.is_model_installed(chosen["tag"]):
+                installed_tags.add(chosen["tag"])
+        break
+    console.print(f"Picked: [bold]{chosen['tag']}[/bold]")
+
+    # 4. Pull (unless already installed)
+    if chosen["tag"] in installed_tags:
+        console.print("[green]Model already pulled — skipping `ollama pull`.[/green]")
+    elif args.no_pull:
+        console.print("[yellow]--no-pull: skipping download.[/yellow]")
+    else:
+        if not pull_model(console, chosen["tag"], args.headless):
+            console.print("[red]Pull failed — aborting.[/red]")
+            return 6
+
+    # 5. Persist + sentinel
+    save_default_model(chosen["tag"])
+    console.print(
+        f"[dim]Saved aider default: {chosen['tag']}  "
+        f"→  {OPTIONS_PATH}[/dim]"
+    )
+    if args.session_id:
+        write_sentinel(args.session_id, chosen["tag"])
+        console.print(f"[dim]Sentinel → {SENTINEL_PATH}[/dim]")
+    console.rule("[bold green]Done[/bold green]")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

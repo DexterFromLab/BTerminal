@@ -1,0 +1,73 @@
+{
+  "_meta": {
+    "updated": "2026-05-11",
+    "source": "bundled",
+    "schema_version": 2,
+    "note": "Curated list of Ollama models suitable for aider (--edit-format whole). RAM/VRAM figures are conservative — they include OS + Ollama overhead so 'fits' means 'comfortably loadable while user keeps a browser open'. download_mb is Ollama's quantized blob size. `url` points at the Ollama Library page for that tag — schema_version 2 (BUG#25) replaced free-form `description` with this link so the wizard never displays stale model copy."
+  },
+  "models": [
+    {
+      "tag": "qwen2.5-coder:0.5b",
+      "label": "Qwen2.5-Coder 0.5B",
+      "url": "https://ollama.com/library/qwen2.5-coder:0.5b",
+      "ram_gb": 1.0,
+      "vram_gb": 0.0,
+      "download_mb": 400,
+      "tier": "test"
+    },
+    {
+      "tag": "qwen2.5-coder:1.5b",
+      "label": "Qwen2.5-Coder 1.5B",
+      "url": "https://ollama.com/library/qwen2.5-coder:1.5b",
+      "ram_gb": 2.5,
+      "vram_gb": 0.0,
+      "download_mb": 1000,
+      "tier": "minimum"
+    },
+    {
+      "tag": "qwen2.5-coder:3b",
+      "label": "Qwen2.5-Coder 3B",
+      "url": "https://ollama.com/library/qwen2.5-coder:3b",
+      "ram_gb": 5.0,
+      "vram_gb": 0.0,
+      "download_mb": 2000,
+      "tier": "entry"
+    },
+    {
+      "tag": "qwen2.5-coder:7b",
+      "label": "Qwen2.5-Coder 7B",
+      "url": "https://ollama.com/library/qwen2.5-coder:7b",
+      "ram_gb": 10.0,
+      "vram_gb": 0.0,
+      "download_mb": 4700,
+      "tier": "recommended"
+    },
+    {
+      "tag": "qwen2.5-coder:14b",
+      "label": "Qwen2.5-Coder 14B",
+      "url": "https://ollama.com/library/qwen2.5-coder:14b",
+      "ram_gb": 20.0,
+      "vram_gb": 12.0,
+      "download_mb": 9000,
+      "tier": "high"
+    },
+    {
+      "tag": "qwen2.5-coder:32b",
+      "label": "Qwen2.5-Coder 32B",
+      "url": "https://ollama.com/library/qwen2.5-coder:32b",
+      "ram_gb": 40.0,
+      "vram_gb": 24.0,
+      "download_mb": 20000,
+      "tier": "premium"
+    },
+    {
+      "tag": "deepseek-coder-v2:16b",
+      "label": "DeepSeek-Coder-V2 16B",
+      "url": "https://ollama.com/library/deepseek-coder-v2:16b",
+      "ram_gb": 22.0,
+      "vram_gb": 14.0,
+      "download_mb": 9100,
+      "tier": "high"
+    }
+  ]
+}

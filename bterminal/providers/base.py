@@ -175,6 +175,20 @@ class AIProvider(ABC):
         """
         return None
 
+    def inject_intro_prompt(self, terminal: Any, intro_prompt: str) -> None:
+        """Deliver the intro prompt for providers that can't take it via argv.
+
+        Default: no-op — Claude / Copilot already appended `intro_prompt`
+        to argv in `build_argv`, so the CLI sees it on stdin before its
+        first prompt iteration.
+
+        Aider has no `--message-init` flag, so AiderProvider overrides
+        this to schedule a delayed `terminal.feed_child(...)` via GLib —
+        the PTY needs ~2s to settle past aider's banner before it
+        accepts piped input cleanly (BUG#27).
+        """
+        return None
+
     def detect_idle(
         self,
         terminal: Any,
