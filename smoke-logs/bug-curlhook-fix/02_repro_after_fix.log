@@ -1,0 +1,12 @@
+=== syntax checks ===
+bash -n: OK
+/tmp/repro-curlhook/curl: 2: Syntax error: "(" unexpected
+dash -n: fails (expected — bashism)
+=== shebang ===
+#!/bin/bash
+=== run wrapper, expect no %q error, curl actually fetches ===
+<!doctype html><html lang="en"><head><title>Example Domain</title><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{background:#eee;width:60vw;margin:15vh auto;font-family:system-ui,sans-serif}h1{font-size:1.5em}div{opacity:0.8}a:link,a:visited{color:#348}</style></head><body><div><h1>Example Domain</h1><p>This domain is for use in documentation examples without needing permission. Avoid use in operations.</p><p><a href="https://iana.org/domains/example">Learn more</a></p></div></body></html>
+=== exit: PIPESTATUS[0]=0 ===
+=== verify --progress-bar / -s actually stripped (run wrapper with -v to see what curl sees) ===
+* Connected to example.com (104.20.23.154) port 443
+> GET / HTTP/2

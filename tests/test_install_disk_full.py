@@ -238,19 +238,41 @@ def test_npm_install_calls_wrapped_in_if_block_for_explicit_handling():
     )
 
 
-def test_npm_install_failure_uses_fail_helper_not_err_trap():
-    """The `fail` helper in install.sh appends to ERRORS[] and
-    prints a red ✗ — but does NOT exit. Pin this so npm errors
-    surface in the summary without aborting the whole installer."""
+def test_npm_install_failure_uses_soft_helper_not_err_trap():
+    """The npm install error branch must use a SOFT helper (warn or
+    fail) — both append to a report and continue — instead of letting
+    `set -e` fire the ERR trap and roll back the whole install.
+
+    Originally this test required `fail` specifically, but install.sh
+    deliberately uses `warn` for npm provider installs (Claude/Copilot
+    are --selected opt-ins; their failure shouldn't abort an otherwise
+    successful BT install). Both helpers satisfy the contract.
+
+    Pin: at least one npm-provider failure path must invoke warn() or
+    fail() with a message mentioning the provider, AND must live inside
+    an `if npm install ...; then ... else <soft>; fi` block."""
     src = INSTALL_SH.read_text()
-    # `fail()` definition
     assert "fail() {" in src, "fail() helper missing"
-    # Used in npm error branch (e.g. "Claude Code installation
-    # failed — install manually: ...")
-    assert ("fail \"Claude Code installation failed" in src
-            or "fail \"npm install" in src
-            or 'fail "Claude Code' in src), (
-        "fail helper not invoked from npm install error branch"
+    assert "warn() {" in src, "warn() helper missing"
+
+    # Find an `if npm install ...` block and check its else-branch
+    # contains warn/fail with a provider name.
+    lines = src.split("\n")
+    found_soft_handling = False
+    for i, line in enumerate(lines):
+        if "if npm install -g @anthropic-ai/claude-code" not in line:
+            continue
+        # Scan forward up to 30 lines for the matching `else` + soft helper
+        block = "\n".join(lines[i:i + 30])
+        if (("warn \"Claude Code installation failed" in block
+             or "fail \"Claude Code installation failed" in block)
+                and "else" in block):
+            found_soft_handling = True
+            break
+    assert found_soft_handling, (
+        "no `if npm install ... claude-code; ...; else warn/fail \"Claude "
+        "Code installation failed\"; fi` block found — npm errors might "
+        "now propagate to ERR trap and trigger fatal rollback."
     )
 
 
@@ -258,21 +280,41 @@ def test_npm_install_failure_uses_fail_helper_not_err_trap():
 
 
 def test_ollama_curl_install_wrapped_in_if_block():
-    """Same softer handling as npm: `curl ollama.com/install.sh | sh`
-    is inside `if`, so ENOSPC during ollama download/install just
-    warns (TOOL_REPORT entry as 'missing') without aborting."""
+    """Same softer handling as npm: the live `curl ollama.com/install.sh
+    | sh` invocation is inside `if`, so ENOSPC during ollama download
+    just warns (TOOL_REPORT entry as 'missing') without aborting.
+
+    Find the live invocation (piped to sh) — NOT the string literals
+    inside `add_manual_install` hints or `warn` messages that mention
+    the same URL. The marker for a real invocation is `| ... sh`
+    (pipe-to-sh) on or near the curl line. DOWNLOAD POLICY forbids
+    `-s`/`-fsSL`, so the live call uses `curl -fL`."""
     src = INSTALL_SH.read_text()
-    # Find the curl|sh line
-    curl_idx = src.find("curl -fsSL https://ollama.com/install.sh")
-    assert curl_idx > 0
-    # Walk backwards to find the surrounding control structure
-    preceding = src[max(0, curl_idx - 200):curl_idx]
-    last_50_lines = preceding.split("\n")[-5:]
-    has_if = any("if " in line for line in last_50_lines)
-    assert has_if, (
-        f"curl ollama install not in `if` block — ENOSPC during "
-        f"ollama download would trigger fatal rollback. Context:\n"
-        f"{preceding[-300:]!r}"
+    lines = src.split("\n")
+    live_invocation_line = -1
+    for i, line in enumerate(lines):
+        if "ollama.com/install.sh" not in line:
+            continue
+        # Skip strings inside add_manual_install / warn / info hints
+        # (those wrap the URL in double quotes that span the whole arg)
+        stripped = line.strip()
+        if stripped.startswith(("add_manual_install", "warn", "info", '"')):
+            continue
+        # The live invocation pipes to sh
+        if "| stdbuf -oL sh" in line or "| sh" in line:
+            live_invocation_line = i
+            break
+    assert live_invocation_line > 0, (
+        "no live `curl ... ollama.com/install.sh | sh` invocation found; "
+        "test cannot verify ENOSPC handling without the real call site"
+    )
+    # Walk backwards up to 5 lines looking for `if`
+    window_start = max(0, live_invocation_line - 5)
+    window = "\n".join(lines[window_start:live_invocation_line + 1])
+    assert " if " in (" " + window) or window.lstrip().startswith("if "), (
+        f"curl ollama install (line {live_invocation_line + 1}) not in "
+        f"`if` block — ENOSPC during ollama download would trigger fatal "
+        f"rollback. Context:\n{window}"
     )
 
 

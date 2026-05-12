@@ -1,0 +1,7 @@
+=== shebang ===
+#!/bin/sh
+=== run wrapper with dummy args (expect %q error) ===
+/tmp/repro-curlhook/curl: 7: printf: %q: invalid directive
+/tmp/repro-curlhook/curl: 7: printf: %q: invalid directive
+curl: try 'curl --help' or 'curl --manual' for more information
+=== exit code: 0 ===
