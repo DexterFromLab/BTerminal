@@ -1,6 +1,16 @@
 [
   {
     "date": "2026-05-20",
+    "message": "BTerminal v1.3.5 — friendlier update flow when the working tree is dirty. Previously, updating with uncommitted local changes auto-stashed and then crashed mid-update with 'git stash pop produced conflicts' when the stashed files clashed with new files from origin (this was hitting users who had v1.3.3 test files locally). Now the updater asks up front whether to discard all local changes; Yes runs `git reset --hard HEAD` + `git clean -fd` before pulling, No cleanly cancels the update. Recommended: run install.sh to pick up the new dialog.",
+    "changes": [
+      "feat(updater): _prompt_reset_local_changes — modal Yes/No warning before discarding uncommitted work, shown only when `git status --porcelain` reports a dirty tree",
+      "feat(updater): _git_hard_reset helper — `git reset --hard HEAD` + `git clean -fd` to align the working tree with origin/master when the user consents",
+      "fix(updater): _git_pull_with_autostash accepts force_reset=True — runs the hard reset before pulling instead of the stash dance, eliminating the 'stash pop conflicts' mid-update failure",
+      "fix(updater): _do_update calls the prompt before the progress dialog opens — if the user cancels, no progress UI flashes and the update aborts cleanly"
+    ]
+  },
+  {
+    "date": "2026-05-20",
     "message": "BTerminal v1.3.4 — sudo dialog fixes after the v1.3.3 rollout on Pop_OS!. The shared askpass cache worked on Mint but the first AI tab on Pop_OS! froze after the password dialog closed: the bash prologue's `sudo -A true` warm-up hung under PAM/mail_badpass without a real PTY. Drop the redundant bash check (ensure() already validated the password in Python), fix the off-by-one in the attempt counter, migrate legacy provider keys in the 'Resume last session' shortcut, honour the schema's default for the sudo checkbox, and default new Claude sessions to sudo=True. Recommended: run install.sh to pick up the new dialogs.",
     "changes": [
       "fix(sudo): drop `sudo -A true` pre-check from _build_shared_askpass_prologue — was redundant and stalled the AI tab on hosts where sudo blocks under PAM/mail_badpass without a TTY",

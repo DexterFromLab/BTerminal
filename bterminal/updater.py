@@ -476,10 +476,45 @@ def _git_repo_is_dirty(cwd: str) -> bool:
     return bool(result.stdout.strip())
 
 
-def _git_pull_with_autostash(cwd: str, stash_msg: str = "bterminal-auto-update") -> dict:
+def _git_hard_reset(cwd: str) -> dict:
+    """Discard ALL local changes (tracked + untracked) and align with origin.
+
+    Used when the user accepts the "reset local changes" prompt in the
+    update flow. Runs `git reset --hard HEAD` to drop tracked modifications
+    and `git clean -fd` to remove untracked files/dirs so a subsequent
+    `git pull` sees a pristine tree.
+
+    Returns dict with keys: ok (bool), error (str|None).
+    """
+    try:
+        reset = subprocess.run(
+            ["git", "reset", "--hard", "HEAD"],
+            cwd=cwd, capture_output=True, text=True, timeout=15,
+        )
+        if reset.returncode != 0:
+            return {"ok": False,
+                    "error": "git reset failed:\n"
+                             + (reset.stderr or reset.stdout)}
+        clean = subprocess.run(
+            ["git", "clean", "-fd"],
+            cwd=cwd, capture_output=True, text=True, timeout=15,
+        )
+        if clean.returncode != 0:
+            return {"ok": False,
+                    "error": "git clean failed:\n"
+                             + (clean.stderr or clean.stdout)}
+        return {"ok": True, "error": None}
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return {"ok": False, "error": f"git reset/clean error: {e}"}
+
+
+def _git_pull_with_autostash(cwd: str, stash_msg: str = "bterminal-auto-update",
+                             force_reset: bool = False) -> dict:
     """V1 — git pull that survives uncommitted local changes.
 
     Flow:
+      0. If force_reset → `git reset --hard HEAD` + `git clean -fd` (drops
+         all local changes per user consent); then plain pull.
       1. If dirty → `git stash push -u -m <msg>` (untracked too).
       2. `git pull origin master`.
       3. If we stashed → `git stash pop`. Conflict during pop leaves
@@ -494,6 +529,12 @@ def _git_pull_with_autostash(cwd: str, stash_msg: str = "bterminal-auto-update")
       error         (str|None) — diagnostic on failure.
       pull_stdout   (str)   — captured pull output (status display).
     """
+    if force_reset and _git_repo_is_dirty(cwd):
+        rst = _git_hard_reset(cwd)
+        if not rst["ok"]:
+            return {"ok": False, "stashed": False, "stash_popped": False,
+                    "error": rst["error"], "pull_stdout": ""}
+
     dirty = _git_repo_is_dirty(cwd)
 
     stashed = False
@@ -563,8 +604,44 @@ def _git_pull_with_autostash(cwd: str, stash_msg: str = "bterminal-auto-update")
     }
 
 
+def _prompt_reset_local_changes(window) -> bool:
+    """Modal Yes/No dialog asking the user to discard local changes.
+
+    Returns True if the user confirms (we should `git reset --hard` and
+    proceed with the update), False if they cancel.
+    """
+    dlg = Gtk.MessageDialog(
+        transient_for=window,
+        modal=True,
+        message_type=Gtk.MessageType.WARNING,
+        buttons=Gtk.ButtonsType.YES_NO,
+        text=_("Local changes detected"),
+    )
+    dlg.format_secondary_text(_(
+        "The repository has uncommitted local changes that would conflict "
+        "with the update.\n\n"
+        "Reset to the upstream version and discard ALL local changes "
+        "(tracked and untracked)?\n\n"
+        "This cannot be undone."
+    ))
+    dlg.set_default_response(Gtk.ResponseType.NO)
+    response = dlg.run()
+    dlg.destroy()
+    return response == Gtk.ResponseType.YES
+
+
 def _do_update(window):
     """Pull changes and run install.sh in a background thread."""
+    # If the working tree is dirty, ask up front whether we should hard-
+    # reset before pulling. The previous behaviour stashed and produced
+    # confusing 'stash pop conflict' errors mid-update — now the user
+    # either consents to losing local changes or cancels cleanly.
+    force_reset = False
+    if _git_repo_is_dirty(REPO_DIR):
+        if not _prompt_reset_local_changes(window):
+            return
+        force_reset = True
+
     dialog = Gtk.Dialog(title=_("BTerminal update"), transient_for=window, modal=True)
     dialog.set_default_size(480, 220)
     dialog.set_resizable(False)
@@ -616,7 +693,13 @@ def _do_update(window):
             # V1: dirty-tree-safe pull. Stashes uncommitted changes
             # before pull and restores them after; bails cleanly on
             # any failure path (image bug from 2026-05-06).
-            pull_result = _git_pull_with_autostash(REPO_DIR)
+            # force_reset=True when the user confirmed discarding local
+            # changes in the up-front prompt.
+            if force_reset:
+                GLib.idle_add(_append_line,
+                              "discarding local changes (user consent)")
+            pull_result = _git_pull_with_autostash(REPO_DIR,
+                                                   force_reset=force_reset)
             if pull_result["stashed"]:
                 GLib.idle_add(_append_line,
                               "stashed local changes (will restore after pull)")
