@@ -240,10 +240,7 @@ class ClaudeCodeDialog(Gtk.Dialog):
             if saved_enabled is not None:
                 chk.set_active(name in saved_enabled)
             else:
-                chk.set_active(
-                    entry["default_in_session"]
-                    and entry["currently_enabled_globally"]
-                )
+                chk.set_active(False)
             self._plugin_checks[name] = chk
             plugins_box.pack_start(chk, False, False, 0)
         if not available:

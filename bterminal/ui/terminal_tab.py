@@ -129,6 +129,29 @@ def compute_tab_label(
 # `ctx set` of file contents — refuse loudly so the user notices.
 _RULES_INJECT_MAX_BYTES = 50 * 1024 * 1024  # 50 MB hard cap
 
+# Key groups used by the typing guard (_typing_state_after_key).
+# Raw GDK integer values so the sets are importable without GTK,
+# which makes them unit-testable outside the GTK process.
+_TYPING_SUBMIT_KEYS = frozenset({
+    0xff0d,  # Gdk.KEY_Return
+    0xff8d,  # Gdk.KEY_KP_Enter
+    0xff1b,  # Gdk.KEY_Escape
+})
+_TYPING_CTRL_ABORT_KEYS = frozenset({
+    0x0063, 0x0043,  # Gdk.KEY_c / KEY_C  (Ctrl+C — interrupt)
+    0x0064, 0x0044,  # Gdk.KEY_d / KEY_D  (Ctrl+D — EOF)
+})
+_TYPING_PURE_MODIFIER_KEYS = frozenset({
+    0xffe1, 0xffe2,  # Shift_L / Shift_R
+    0xffe3, 0xffe4,  # Control_L / Control_R
+    0xffe9, 0xffea,  # Alt_L / Alt_R
+    0xffeb, 0xffec,  # Super_L / Super_R
+    0xffe7, 0xffe8,  # Meta_L / Meta_R
+    0xffe5,          # Caps_Lock
+    0xff7f,          # Num_Lock
+    0xff14,          # Scroll_Lock
+    0xfe03,          # ISO_Level3_Shift (AltGr on some layouts)
+})
 
 def extract_rules_inject_bytes(
         provider_name: str, project_name: str, rules_stdout: str) -> bytes:
@@ -297,6 +320,7 @@ class TerminalTab(Gtk.Box):
         self._inject_pending = None  # (project, count, refresh_every) when rules inject is due
         self._inject_pending_ts = 0.0  # monotonic ts when pending was set (for hard-cap force-fire)
         self._last_content_change = 0.0  # monotonic ts of last VTE contents-changed event
+        self._user_is_typing = False  # True while user has uncommitted text in the input line
         self._stats_bar = None
         # Per-tab plugin gating (Etap 8). None = backwards-compat: every
         # globally-enabled plugin contributes to this tab's intro prompt and
@@ -420,7 +444,11 @@ class TerminalTab(Gtk.Box):
     # before the CLI binary, captures user's sudo password into a
     # tempfile, and exports SUDO_ASKPASS so the CLI's sudo invocations
     # don't prompt mid-session.
-    _SUDO_ASKPASS_PROLOGUE = (
+    #
+    # BUG#31d: per-terminal read-loop refactored out so the same fallback
+    # can be reused when the shared askpass (set at the app level) fails
+    # its pre-check (cache expired).
+    _INTERACTIVE_SUDO_READ_LOOP = (
         'while true; do\n'
         '  read -rsp "Enter sudo password: " SUDO_PW\n'
         '  echo\n'
@@ -438,6 +466,29 @@ class TerminalTab(Gtk.Box):
         'done\n'
         'trap \'rm -f "$ASKPASS"\' EXIT\n'
     )
+    # Backwards-compat alias for callers/tests pre-BUG#31d.
+    _SUDO_ASKPASS_PROLOGUE = _INTERACTIVE_SUDO_READ_LOOP
+
+    @staticmethod
+    def _build_shared_askpass_prologue(askpass_path):
+        """BUG#31d: prologue using a shared askpass tempfile created by
+        SudoAskpassCache. The `sudo -A true` pre-check graceful-fallbacks
+        to the interactive read-loop when the cached sudo timestamp has
+        expired."""
+        quoted = shlex.quote(askpass_path)
+        # BUG#31g: when BTERMINAL_TEST_FAKE_SUDO=1, SudoAskpassCache.ensure()
+        # accepts any non-empty password without contacting real sudo, so the
+        # askpass script holds a bogus password. Skip the verify-then-fallback
+        # branch in that env so component tests can validate the happy path
+        # end-to-end without granting the test runner root.
+        return (
+            f'export SUDO_ASKPASS={quoted}\n'
+            'if [ "$BTERMINAL_TEST_FAKE_SUDO" != "1" ] && ! sudo -A true 2>/dev/null; then\n'
+            '  echo "Sudo cache expired — please re-enter password."\n'
+            '  unset SUDO_ASKPASS\n'
+            + TerminalTab._INTERACTIVE_SUDO_READ_LOOP +
+            'fi\n'
+        )
 
     @staticmethod
     def _build_binary_not_found_script(provider):
@@ -510,7 +561,7 @@ class TerminalTab(Gtk.Box):
         opts["rules_file"] = path
 
     @staticmethod
-    def _build_spawn_script(provider, config, intro_prompt):
+    def _build_spawn_script(provider, config, intro_prompt, askpass_path=None):
         """Pure function: bash -c script for spawning an AI CLI binary.
 
         argv comes from provider.build_argv(); we shlex-quote each
@@ -521,6 +572,11 @@ class TerminalTab(Gtk.Box):
         Sudo wrapping fires only when (a) the session config requests
         sudo (legacy top-level OR provider_options.sudo) AND (b) the
         provider declares supports_sudo capability.
+
+        BUG#31d: when `askpass_path` is provided (caller resolved it from
+        the app-level SudoAskpassCache), use a shared-askpass prologue
+        that skips the read-loop. On cache miss (None) or post-cancel
+        fallback we revert to the legacy per-tab interactive read-loop.
         """
         TerminalTab._materialize_rules_file(config)
         argv = provider.build_argv(config, intro_prompt)
@@ -533,8 +589,35 @@ class TerminalTab(Gtk.Box):
         cmd_str = " ".join(shlex.quote(x) for x in argv)
         opts = config.get("provider_options") or config
         if opts.get("sudo") and provider.capabilities.supports_sudo:
-            return TerminalTab._SUDO_ASKPASS_PROLOGUE + f"{cmd_str}\nexec bash\n"
+            if askpass_path:
+                prologue = TerminalTab._build_shared_askpass_prologue(
+                    askpass_path
+                )
+            else:
+                prologue = TerminalTab._INTERACTIVE_SUDO_READ_LOOP
+            return prologue + f"{cmd_str}\nexec bash\n"
         return f"{cmd_str}\nexec bash\n"
+
+    def _resolve_sudo_askpass_path(self):
+        """BUG#31d: pull the shared askpass path from the app-level cache.
+
+        If the cache is empty and the app exposes prompt_sudo_password()
+        (task 31c), trigger the modal dialog synchronously; otherwise
+        return None to let _build_spawn_script fall back to the per-tab
+        read-loop. Defensive against pre-31c app instances missing the
+        attribute entirely.
+        """
+        cache = getattr(self.app, "sudo_askpass", None)
+        if cache is None:
+            return None
+        path = cache.get_path()
+        if path:
+            return path
+        prompt = getattr(self.app, "prompt_sudo_password", None)
+        if prompt is None:
+            return None
+        prompt()
+        return cache.get_path()
 
     def _aider_resolve_model(self, provider, config):
         """Mirror AiderProvider.build_argv's --model resolution chain.
@@ -720,7 +803,16 @@ class TerminalTab(Gtk.Box):
             intro_prompt = _compute_intro_prompt_for_tab(self.app, self) or ""
             from bterminal.debug_rest import record_feed
             record_feed("intro_prompt", intro_prompt.encode())
-            script = self._build_spawn_script(provider, config, intro_prompt)
+            # BUG#31d: resolve shared askpass path before spawn so the
+            # modal dialog (if needed) runs synchronously on the main
+            # loop before terminal.spawn_async kicks in.
+            opts = config.get("provider_options") or config
+            askpass_path = None
+            if opts.get("sudo") and provider.capabilities.supports_sudo:
+                askpass_path = self._resolve_sudo_askpass_path()
+            script = self._build_spawn_script(
+                provider, config, intro_prompt, askpass_path=askpass_path,
+            )
 
         self.terminal.spawn_async(
             Vte.PtyFlags.DEFAULT,
@@ -775,6 +867,15 @@ class TerminalTab(Gtk.Box):
         mod = event.state & Gtk.accelerator_get_default_mod_mask()
         ctrl = Gdk.ModifierType.CONTROL_MASK
         shift = Gdk.ModifierType.SHIFT_MASK
+
+        # Typing guard: update _user_is_typing before any shortcut handling.
+        # This prevents rules injection from firing while the user has
+        # uncommitted text in the input line (pauses mid-sentence > 2 s).
+        self._user_is_typing = self._typing_state_after_key(
+            self._user_is_typing,
+            event.keyval,
+            bool(mod & ctrl),
+        )
 
         # Ctrl+Shift+C: copy
         if mod == (ctrl | shift) and event.keyval in (Gdk.KEY_C, Gdk.KEY_c):
@@ -1056,6 +1157,11 @@ class TerminalTab(Gtk.Box):
 
         Returns True to keep polling, False to stop.
         """
+        # Never inject while the user has uncommitted text in the input line.
+        # The poll loop continues so we fire as soon as they press Enter.
+        if self._user_is_typing:
+            return True
+
         now = time.monotonic()
         quiet_for = now - self._last_content_change
         pending_age = (now - self._inject_pending_ts) if self._inject_pending else 0.0
@@ -1213,6 +1319,24 @@ class TerminalTab(Gtk.Box):
             # Race condition — another session claimed it between SELECT and INSERT
             db.rollback()
             return None
+
+    @staticmethod
+    def _typing_state_after_key(is_typing: bool, keyval: int, has_ctrl: bool) -> bool:
+        """Pure typing-guard state machine — testable without GTK.
+
+        Returns the updated _user_is_typing value after processing a key event.
+        Enter / Escape clear the flag (message submitted or line cancelled).
+        Ctrl+C / Ctrl+D clear it (interrupt / EOF — not composing any more).
+        Pure modifier keys leave the flag unchanged.
+        Everything else sets it to True (user is composing).
+        """
+        if keyval in _TYPING_SUBMIT_KEYS:
+            return False
+        if has_ctrl and keyval in _TYPING_CTRL_ABORT_KEYS:
+            return False
+        if keyval not in _TYPING_PURE_MODIFIER_KEYS:
+            return True
+        return is_typing
 
     def _paste_clipboard_image_path(self):
         """Save clipboard image to project copied_images/ and paste path.

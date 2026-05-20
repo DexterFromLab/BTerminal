@@ -72,6 +72,11 @@ case "$MODE" in
         python3 -m pytest tests/test_config.py tests/test_models.py \
             tests/test_ctx_helpers.py tests/test_plugin_contracts.py \
             tests/test_updater.py tests/test_session_password_cache.py \
+            tests/test_sudo_askpass.py \
+            tests/test_sudo_password_dialog.py \
+            tests/test_app_sudo_integration.py \
+            tests/test_terminal_tab_sudo_branching.py \
+            tests/test_tools_menu_sudo_items.py \
             tests/test_app.py tests/test_legacy_shim.py \
             tests/test_license.py tests/test_i18n.py \
             tests/test_translations.py -v

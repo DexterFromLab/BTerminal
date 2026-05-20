@@ -126,7 +126,18 @@ Czy to celowe? (Tak, zgodnie z komentarzem w SidecarRunner — atexit jest
 - R3.f1 — brak `host` → `ValueError("SSH session requires 'host'")`
 - R3.f2 — uszkodzony sessions.json → `self.sessions = []`, brak crashu
 
-### R3a: SSH session passwords — IN-MEMORY ONLY *(decyzja: 2026-05-04)*
+### R3a: SSH session passwords — IN-MEMORY ONLY *(decyzja: 2026-05-04, częściowo zaimplementowane 2026-05-17)*
+
+**Status:** **częściowo zaimplementowane**
+- ✅ Sudo askpass cache + dialog (BUG#31a-i) — shared per-app instance,
+  Tools menu Set/Clear, fallback per-tab on cancel/expiry, atomic /tmp
+  cleanup on shutdown (delete-event + File→Quit), debug REST endpoints,
+  E2E battery 11 PNG steps + 5 pin test files green on VM.
+  Pliki: `bterminal/sudo_askpass.py`, `bterminal/ui/dialogs/sudo_password.py`,
+  prologue branch w `bterminal/ui/terminal_tab.py`.
+- ⏳ SSH session password cache (`SessionPasswordCache` exists w
+  `models.py` ale SessionDialog jeszcze nie ma password field z R3a.4-5
+  dialog flow).
 
 **Wymaganie:** hasła SSH **nigdy nie są zapisywane na dysku**. Cache
 tylko w pamięci procesu BTerminal, traci się przy restarcie aplikacji.

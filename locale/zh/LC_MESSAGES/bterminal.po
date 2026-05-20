@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version:  bterminal\n"
 "Report-Msgid-Bugs-To: bartoszczarnota1@gmail.com\n"
-"POT-Creation-Date: 2026-05-11 10:56+0200\n"
+"POT-Creation-Date: 2026-05-16 10:31+0200\n"
 "PO-Revision-Date: 2026-05-05 13:39+0200\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -50,6 +50,17 @@ msgstr "首次运行"
 #: bterminal/license.py:202
 msgid "Update"
 msgstr "更新"
+
+#: bterminal/ollama_client.py:59
+msgid ""
+"Model {model!r} nie istnieje w bibliotece Ollama. Sprawdź pisownię na ollama."
+"com/library."
+msgstr ""
+"模型 {model!r} 不存在于 Ollama 库中。请在 ollama.com/library 检查拼写。"
+
+#: bterminal/ollama_client.py:78
+msgid "Timeout pobierania {model!r}. Sprawdź połączenie internetowe."
+msgstr "下载 {model!r} 超时。请检查网络连接。"
 
 #: bterminal/updater.py:57
 msgid "No repository"
@@ -150,44 +161,47 @@ msgstr ""
 "详细信息:\n"
 "{details}"
 
-#: bterminal/ui/terminal_tab.py:607
+#: bterminal/ui/terminal_tab.py:661
 msgid "Brakuje modelu lokalnego dla aidera"
-msgstr ""
+msgstr "缺少 Aider 的本地模型"
 
-#: bterminal/ui/terminal_tab.py:609
+#: bterminal/ui/terminal_tab.py:663
 #, python-format
 msgid ""
 "Model '%s' nie jest pobrany w Ollamie. Aider wystartuje, ale przy pierwszym "
 "promptcie wypisze litellm.NotFoundError. Co chcesz zrobić?"
 msgstr ""
+"模型 '%s' 未在 Ollama 中拉取。Aider 仍会启动，但首个提示会显示 litellm."
+"NotFoundError。您希望如何处理？"
 
-#: bterminal/ui/terminal_tab.py:622
+#: bterminal/ui/terminal_tab.py:676
 msgid "Uruchom wizarda"
-msgstr ""
+msgstr "运行向导"
 
-#: bterminal/ui/terminal_tab.py:624
+#: bterminal/ui/terminal_tab.py:678
 msgid "Wybierz inny model"
-msgstr ""
+msgstr "选择其他模型"
 
-#: bterminal/ui/terminal_tab.py:625
+#: bterminal/ui/terminal_tab.py:679
 msgid "Pomiń (uruchom mimo to)"
-msgstr ""
+msgstr "跳过(仍然运行)"
 
-#: bterminal/ui/terminal_tab.py:626 bterminal/ui/terminal_tab.py:654
+#: bterminal/ui/terminal_tab.py:680 bterminal/ui/terminal_tab.py:708
+#: bterminal/ui/dialogs/sudo_password.py:50
 msgid "Anuluj"
-msgstr ""
+msgstr "取消"
 
-#: bterminal/ui/terminal_tab.py:648
+#: bterminal/ui/terminal_tab.py:702
 msgid "Wybierz model lokalny"
-msgstr ""
+msgstr "选择本地模型"
 
-#: bterminal/ui/terminal_tab.py:655
+#: bterminal/ui/terminal_tab.py:709 bterminal/ui/dialogs/sudo_password.py:51
 msgid "OK"
-msgstr ""
+msgstr "确定"
 
-#: bterminal/ui/terminal_tab.py:663
+#: bterminal/ui/terminal_tab.py:717
 msgid "Dostępne modele Ollama:"
-msgstr ""
+msgstr "可用的 Ollama 模型："
 
 #: bterminal/ui/sidebar.py:165
 #, python-brace-format
@@ -267,15 +281,15 @@ msgstr "告知 AI 代理我使用的语言"
 
 #: bterminal/ui/dialogs/options.py:244
 msgid "Auto-add vision hint when pasting images into Copilot sessions"
-msgstr ""
+msgstr "粘贴图像到 Copilot 会话时自动添加视觉提示"
 
 #: bterminal/ui/dialogs/options.py:258
 msgid "AI Providers"
-msgstr ""
+msgstr "AI 提供商"
 
 #: bterminal/ui/dialogs/options.py:276
 msgid "Local Models (Ollama)"
-msgstr ""
+msgstr "本地模型 (Ollama)"
 
 #: bterminal/ui/dialogs/options.py:299
 msgid "Save"
@@ -283,60 +297,60 @@ msgstr "保存"
 
 #: bterminal/ui/dialogs/options.py:432
 msgid "Start daemon"
-msgstr ""
+msgstr "启动守护进程"
 
 #: bterminal/ui/dialogs/options.py:433
 msgid "Stop daemon"
-msgstr ""
+msgstr "停止守护进程"
 
 #: bterminal/ui/dialogs/options.py:434 bterminal/ui/dialogs/options.py:522
 msgid "Refresh"
-msgstr ""
+msgstr "刷新"
 
 #: bterminal/ui/dialogs/options.py:454
 msgid "Recommendations for this machine:"
-msgstr ""
+msgstr "本机推荐："
 
 #: bterminal/ui/dialogs/options.py:487
 msgid "Installed models:"
-msgstr ""
+msgstr "已安装的模型："
 
 #: bterminal/ui/dialogs/options.py:509
 msgid "Pull…"
-msgstr ""
+msgstr "拉取…"
 
 #: bterminal/ui/dialogs/options.py:513
 msgid "Delete"
-msgstr ""
+msgstr "删除"
 
 #: bterminal/ui/dialogs/options.py:517
 msgid "Set as default for…"
-msgstr ""
+msgstr "设为默认用于…"
 
 #: bterminal/ui/dialogs/options.py:625
 msgid "Pull Ollama model"
-msgstr ""
+msgstr "拉取 Ollama 模型"
 
 #: bterminal/ui/dialogs/options.py:630
 msgid "Pull"
-msgstr ""
+msgstr "拉取"
 
 #: bterminal/ui/dialogs/options.py:642
 msgid "Pick a model from the list below or type a custom tag."
-msgstr ""
+msgstr "从下表中选择模型，或输入自定义标签。"
 
 #: bterminal/ui/dialogs/options.py:644
 msgid "Note: models below 3B parameters often fail with Aider's edit format."
-msgstr ""
+msgstr "提示：参数低于 3B 的模型通常无法在 Aider 的编辑格式下正常工作。"
 
 #: bterminal/ui/dialogs/options.py:676
 msgid "Browse all models on ollama.com →"
-msgstr ""
+msgstr "在 ollama.com 上浏览全部模型 →"
 
 #: bterminal/ui/dialogs/options.py:696
 #, python-brace-format
 msgid "{name} has only {size}B parameters"
-msgstr ""
+msgstr "{name} 仅有 {size}B 个参数"
 
 #: bterminal/ui/dialogs/options.py:699
 msgid ""
@@ -344,18 +358,37 @@ msgid ""
 "produce empty or repeated responses. Are you sure you want to pull this "
 "model?"
 msgstr ""
+"参数低于 3B 的模型通常无法遵循 Aider 的编辑格式，会生成空白或重复的回复。您确"
+"定要拉取此模型吗？"
 
 #: bterminal/ui/dialogs/options.py:740
 msgid "Model pulled"
-msgstr ""
+msgstr "模型已拉取"
 
 #: bterminal/ui/dialogs/options.py:740
 msgid "Pull failed"
-msgstr ""
+msgstr "拉取失败"
 
 #: bterminal/ui/dialogs/options.py:810
 msgid "Apply"
-msgstr ""
+msgstr "应用"
+
+#: bterminal/ui/dialogs/sudo_password.py:44
+msgid "BTerminal — sudo"
+msgstr "BTerminal — sudo"
+
+#: bterminal/ui/dialogs/sudo_password.py:62
+msgid "Podaj hasło sudo (wspólne dla sesji AI):"
+msgstr "Podaj hasło sudo (wspólne dla sesji AI):"
+
+#: bterminal/ui/dialogs/sudo_password.py:99
+msgid "Hasło nie może być puste"
+msgstr "Hasło nie może być puste"
+
+#: bterminal/ui/dialogs/sudo_password.py:110
+#, python-format
+msgid "Błędne hasło sudo. Próba %d/3"
+msgstr "Błędne hasło sudo. Próba %d/3"
 
 #: bterminal/ctx/dialogs.py:163
 msgid ""
@@ -365,55 +398,55 @@ msgstr ""
 "尚未收集项目上下文。在工作时收集上下文并保存重要发现:ctx set <project> <key> "
 "<value>"
 
-#: bterminal/app.py:193 bterminal/app.py:225 bterminal/app.py:466
+#: bterminal/app.py:199 bterminal/app.py:231 bterminal/app.py:472
 msgid "Sessions"
 msgstr "会话"
 
-#: bterminal/app.py:196 bterminal/app.py:225 bterminal/app.py:467
+#: bterminal/app.py:202 bterminal/app.py:231 bterminal/app.py:473
 msgid "Ctx"
 msgstr "Ctx"
 
-#: bterminal/app.py:199 bterminal/app.py:226 bterminal/app.py:468
+#: bterminal/app.py:205 bterminal/app.py:232 bterminal/app.py:474
 msgid "Consult"
 msgstr "Consult"
 
-#: bterminal/app.py:202 bterminal/app.py:226 bterminal/app.py:469
+#: bterminal/app.py:208 bterminal/app.py:232 bterminal/app.py:475
 msgid "Tasks"
 msgstr "任务"
 
-#: bterminal/app.py:205 bterminal/app.py:227
+#: bterminal/app.py:211 bterminal/app.py:233
 msgid "Memory"
 msgstr "记忆"
 
-#: bterminal/app.py:208 bterminal/app.py:227
+#: bterminal/app.py:214 bterminal/app.py:233
 msgid "Skills"
 msgstr "Skills"
 
-#: bterminal/app.py:211 bterminal/app.py:228
+#: bterminal/app.py:217 bterminal/app.py:234
 msgid "Files"
 msgstr "文件"
 
-#: bterminal/app.py:214 bterminal/app.py:228 bterminal/app.py:470
+#: bterminal/app.py:220 bterminal/app.py:234 bterminal/app.py:476
 msgid "Plugins"
 msgstr "插件"
 
-#: bterminal/app.py:246
+#: bterminal/app.py:252
 msgid "Hide sidebar (Ctrl+B)"
 msgstr "隐藏侧边栏 (Ctrl+B)"
 
-#: bterminal/app.py:323
+#: bterminal/app.py:329
 msgid "Show sidebar (Ctrl+B)"
 msgstr "显示侧边栏 (Ctrl+B)"
 
-#: bterminal/app.py:333
+#: bterminal/app.py:339
 msgid "Toggle light/dark theme"
 msgstr "切换浅色/深色主题"
 
-#: bterminal/app.py:339
+#: bterminal/app.py:345
 msgid "Show Git panel (Ctrl+G)"
 msgstr "显示 Git 面板 (Ctrl+G)"
 
-#: bterminal/app.py:388
+#: bterminal/app.py:394
 #, python-brace-format
 msgid ""
 "The file ~/.config/bterminal/options.json was corrupted — default settings "
@@ -425,70 +458,87 @@ msgstr ""
 "\n"
 "原因: {exc_type}: {exc}"
 
-#: bterminal/app.py:450
+#: bterminal/app.py:456
 msgid "New local tab"
 msgstr "新建本地标签页"
 
-#: bterminal/app.py:451
+#: bterminal/app.py:457
 msgid "New SSH session…"
 msgstr "新建 SSH 会话…"
 
-#: bterminal/app.py:452
-#, fuzzy
+#: bterminal/app.py:458
 msgid "New AI session…"
-msgstr "新建 SSH 会话…"
+msgstr "新建 AI 会话…"
 
-#: bterminal/app.py:454
+#: bterminal/app.py:460
 msgid "Options…"
 msgstr "选项…"
 
-#: bterminal/app.py:456
+#: bterminal/app.py:462
 msgid "Quit"
 msgstr "退出"
 
-#: bterminal/app.py:457
+#: bterminal/app.py:463
 msgid "File"
 msgstr "文件"
 
-#: bterminal/app.py:461
+#: bterminal/app.py:467
 msgid "Toggle sidebar (Ctrl+B)"
 msgstr "切换侧边栏 (Ctrl+B)"
 
-#: bterminal/app.py:462
+#: bterminal/app.py:468
 msgid "Toggle Git panel (Ctrl+G)"
 msgstr "切换 Git 面板 (Ctrl+G)"
 
-#: bterminal/app.py:463
+#: bterminal/app.py:469
 msgid "Toggle theme ☀/🌙"
 msgstr "切换主题 ☀/🌙"
 
-#: bterminal/app.py:479
+#: bterminal/app.py:485
 msgid "View"
 msgstr "视图"
 
-#: bterminal/app.py:483
+#: bterminal/app.py:489
 msgid "Check for updates"
 msgstr "检查更新"
 
-#: bterminal/app.py:484
+#: bterminal/app.py:490
 msgid "Errata…"
 msgstr "更新日志…"
 
-#: bterminal/app.py:487
+#: bterminal/app.py:493
 msgid "Diagnostics…"
-msgstr ""
+msgstr "诊断…"
 
-#: bterminal/app.py:494
+#: bterminal/app.py:500
 msgid "Install dependencies…"
-msgstr ""
+msgstr "安装依赖项…"
 
-#: bterminal/app.py:503
+#: bterminal/app.py:509
 msgid "Configure local model (aider)…"
-msgstr ""
+msgstr "配置本地模型(aider)…"
 
-#: bterminal/app.py:507
+#: bterminal/app.py:521
+msgid "Set sudo password…"
+msgstr "Set sudo password…"
+
+#: bterminal/app.py:525
+msgid "Clear sudo password"
+msgstr "Clear sudo password"
+
+#: bterminal/app.py:534
 msgid "Tools"
 msgstr "工具"
+
+#: bterminal/app.py:825
+msgid ""
+"tools/aider_setup_wizard nie znaleziony. Uruchom install.sh aby "
+"zaktualizować instalację."
+msgstr "未找到 tools/aider_setup_wizard。请运行 install.sh 更新安装。"
+
+#: bterminal/app.py:1663
+msgid "Hasło sudo wyczyszczone z pamięci"
+msgstr "Hasło sudo wyczyszczone z pamięci"
 
 #~ msgid "New Claude Code session…"
 #~ msgstr "新建 Claude Code 会话…"

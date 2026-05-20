@@ -268,7 +268,12 @@ def bterminal_process():
     from tests._subprocess_helpers import seed_license
     seed_license(home)
     env = {**os.environ, "HOME": home,
-           "BTERMINAL_DEBUG_REST_PORT": str(_TEST_PORT)}
+           "BTERMINAL_DEBUG_REST_PORT": str(_TEST_PORT),
+           # BUG#31g: component fixture spawns BT with the sudo cache in
+           # fake mode so /api/debug/sudo_submit can populate it without
+           # requiring real root. Production paths are unaffected — the
+           # var only short-circuits SudoAskpassCache.ensure().
+           "BTERMINAL_TEST_FAKE_SUDO": "1"}
     # Capture stderr to file — runtime errors w GTK callbacks (NameError z
     # refactoringów, AttributeError z brakujących imports, etc.) idą do
     # stderr i bez tego ginęłyby w DEVNULL. bt_stderr_watcher fixture +

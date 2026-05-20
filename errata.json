@@ -1,5 +1,24 @@
 [
   {
+    "date": "2026-05-20",
+    "message": "BTerminal v1.3.3 — shared sudo password cache (BUG#31), rules-injection typing guard, and stats bar accuracy fixes. AI sessions that need root now share a single sudo password dialog at the window level — subsequent tabs reuse the cached askpass helper without prompting again. A new typing guard prevents rules/ctx injection from firing while the user is composing a message. The stats bar ♻️ cache-hit label and tok/h metric are now accurate. Recommended: run install.sh to pick up the new sudo dialog and locale strings.",
+    "changes": [
+      "feat(sudo): shared SudoAskpassCache — lazy per-window, populated on first sudo AI tab; reused by all subsequent tabs without re-prompting (BUG#31)",
+      "feat(sudo): SudoPasswordDialog — 3-attempt modal with PL error counter; validates via sudo -A true pre-check (BUG#31)",
+      "feat(sudo): Tools → 'Ustaw hasło sudo…' / 'Wyczyść hasło sudo' menu items with sensitivity refresh on show (BUG#31e)",
+      "fix(sudo): _on_quit + _on_delete_event both call sudo_askpass.clear() — no /tmp/bt-askpass-shared-* tempfile leak on exit (BUG#31i)",
+      "fix(sudo): _build_shared_askpass_prologue — exports SUDO_ASKPASS, falls back to interactive per-tab read-loop when cache expires (BUG#31d)",
+      "feat(sudo): BTERMINAL_TEST_FAKE_SUDO=1 env — skips real sudo verification in component tests without touching production paths (BUG#31g)",
+      "feat(sudo): GET /api/debug/sudo_state + POST /api/debug/sudo_submit REST endpoints for component test introspection (BUG#31g)",
+      "fix(terminal): typing guard — _user_is_typing flag blocks rules/ctx injection while user has uncommitted text; clears on Enter/Escape/Ctrl+C/Ctrl+D",
+      "fix(stats): ♻️ replaces 📦 for cache hit rate — clearer that the metric is cache efficiency, not context occupancy",
+      "fix(stats): tok/h now counts only freshly-processed tokens (input + cache_write + output), excluding cheap cache_read — matches visible ↑ ↓ counters",
+      "fix(i18n): ollama_client error messages wrapped in _() — Ollama pull errors now follow the active language",
+      "test: 6 new unit test files covering SudoAskpassCache, SudoPasswordDialog, app sudo integration, Tools menu sudo items, terminal_tab sudo branching, typing guard state machine (19 typing-guard cases)",
+      "test(e2e): REST-driven sudo dialog flow — sudo_state + sudo_submit endpoints verified against running BT under xvfb"
+    ]
+  },
+  {
     "date": "2026-05-11",
     "message": "BTerminal v1.3.2 — Aider setup wizard + 10 bug-fix bundle (#19-28). New tools/aider_setup_wizard CLI detects missing Ollama models, surfaces the curated catalog, and orchestrates pulls so users hit a guided flow instead of LiteLLM's raw stack trace. Memory panel's Apply Rules now affects the current tab without a restart. All fixes verified end-to-end on a real VM with the semi-automatic UI driver. Recommended: run install.sh to pick up the new wizard CLI, recompile locale catalogs, and refresh provider defaults.",
     "changes": [

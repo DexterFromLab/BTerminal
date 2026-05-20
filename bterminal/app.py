@@ -71,6 +71,8 @@ from bterminal.ctx.helpers import (
 from bterminal.ctx.dialogs import CtxEditDialog
 from bterminal.ui.dialogs.claude_code import ClaudeCodeDialog
 from bterminal.ui.dialogs.options import OptionsDialog
+from bterminal.ui.dialogs.sudo_password import SudoPasswordDialog
+from bterminal.sudo_askpass import SudoAskpassCache
 from bterminal.models import AISessionManager, ConsultManager, SessionManager
 from bterminal.ui.panels.consult import ConsultPanel
 from bterminal.ui.panels.ctx_manager import CtxManagerPanel
@@ -153,6 +155,14 @@ class BTerminalApp(Gtk.Window):
         # cleanup. Both names point at the SAME instance.
         self.ai_manager = AISessionManager()
         self.claude_manager = self.ai_manager
+
+        # Shared sudo password cache for AI sessions (BUG#31). Lazily
+        # populated via prompt_sudo_password(); cleared on window close.
+        self.sudo_askpass = SudoAskpassCache()
+        # BUG#31g: flag for /api/debug/sudo_state — True while a modal
+        # SudoPasswordDialog is on screen (allows component tests to
+        # observe the awaiting_sudo_password state without scraping GTK).
+        self._sudo_dialog_pending = False
 
         # Layout: VBox → menubar + HPaned
         root_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -453,7 +463,7 @@ class BTerminalApp(Gtk.Window):
         file_menu.append(_sep())
         file_menu.append(_item(N_("Options…"), lambda: OptionsDialog(self).run_and_apply()))
         file_menu.append(_sep())
-        file_menu.append(_item(N_("Quit"), self.destroy))
+        file_menu.append(_item(N_("Quit"), self._on_quit))
         menubar.append(_root(N_("File"), file_menu))
 
         # ── View ──────────────────────────────────────────────────────────────
@@ -503,6 +513,27 @@ class BTerminalApp(Gtk.Window):
             N_("Configure local model (aider)…"),
             self._on_open_aider_wizard,
         ))
+
+        # BUG#31e: shared sudo password for AI sessions. "Set" force-prompts
+        # even when a cache exists (user may need to re-enter after expiry).
+        # "Clear" is greyed out unless a helper is currently cached — we
+        # refresh sensitivity on every 'show' of the Tools menu, since the
+        # cache state can flip without GUI interaction (e.g. AI session
+        # itself calling prompt_sudo_password).
+        tools_menu.append(_sep())
+        tools_menu.append(_item(
+            N_("Set sudo password…"),
+            self.prompt_sudo_password,
+        ))
+        self._clear_sudo_menu_item = _item(
+            N_("Clear sudo password"),
+            self._on_clear_sudo_password,
+        )
+        tools_menu.append(self._clear_sudo_menu_item)
+        tools_menu.connect(
+            "show", lambda _m: self._refresh_sudo_menu_sensitivity()
+        )
+
         tools_root = Gtk.MenuItem()
         tr(tools_root, "set_label", N_("Tools"))
         tools_root.set_submenu(tools_menu)
@@ -794,8 +825,10 @@ class BTerminalApp(Gtk.Window):
         if not wizard_bin:
             show_error_dialog(
                 self,
-                "tools/aider_setup_wizard nie znaleziony. "
-                "Uruchom install.sh aby zaktualizować instalację.",
+                _(
+                    "tools/aider_setup_wizard nie znaleziony. "
+                    "Uruchom install.sh aby zaktualizować instalację."
+                ),
             )
             return
 
@@ -1614,8 +1647,58 @@ class BTerminalApp(Gtk.Window):
 
         return False
 
+    def prompt_sudo_password(self):
+        """Show modal SudoPasswordDialog and validate via self.sudo_askpass.
+
+        Returns True if a working sudo password is now cached, False if the
+        user cancelled or exhausted attempts. The pending flag lets the
+        debug-REST surface report awaiting_sudo_password to tests.
+        """
+        self._sudo_dialog_pending = True
+        try:
+            dialog = SudoPasswordDialog(self)
+            return dialog.run_and_validate(self.sudo_askpass)
+        finally:
+            self._sudo_dialog_pending = False
+
+    def _on_clear_sudo_password(self):
+        """Wipe the cached askpass helper and confirm to the user."""
+        self.sudo_askpass.clear()
+        dlg = Gtk.MessageDialog(
+            transient_for=self,
+            modal=True,
+            message_type=Gtk.MessageType.INFO,
+            buttons=Gtk.ButtonsType.OK,
+            text=_("Hasło sudo wyczyszczone z pamięci"),
+        )
+        dlg.run()
+        dlg.destroy()
+
+    def _refresh_sudo_menu_sensitivity(self):
+        """Grey out 'Clear sudo password' when there is nothing to clear.
+
+        Called on Tools menu 'show' so the state is always fresh — sudo
+        cache can flip without GUI interaction (e.g. an AI session that
+        calls prompt_sudo_password from spawn flow).
+        """
+        if getattr(self, "_clear_sudo_menu_item", None) is not None:
+            self._clear_sudo_menu_item.set_sensitive(self.sudo_askpass.is_set())
+
     def _on_delete_event(self, widget, event):
+        self.sudo_askpass.clear()
         self._unload_plugins()
         return False
+
+    def _on_quit(self):
+        """File→Quit handler — same shutdown chain as window close.
+
+        BUG#31i: file_menu.Quit used to call self.destroy() directly,
+        which emits 'destroy' but skips the 'delete-event' chain where
+        sudo_askpass.clear() lives. Funnel both paths through the same
+        cleanup to keep the /tmp/bt-askpass-shared-* tempfile from leaking.
+        """
+        self.sudo_askpass.clear()
+        self._unload_plugins()
+        self.destroy()
 
 

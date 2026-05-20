@@ -579,3 +579,98 @@ def test_edit_with_unknown_provider_falls_back_to_default():
         assert active in ("aider", "claude", "copilot")
     finally:
         _close(dlg, parent)
+
+
+# ─── New session — plugins unchecked by default ─────────────────────────────
+#
+# 2026-05-13: user requested that newly created sessions have ALL plugins
+# DISABLED by default. Pre-fix the dialog ticked each plugin whose
+# `default_in_session` was True (i.e. nearly all of them). The fix in
+# claude_code.py replaces that branch with `chk.set_active(False)` when
+# no saved selection exists. These tests pin the new behavior.
+
+
+def _parent_with_stub_plugins():
+    """Parent stubbed with two GTK plugins and one sidecar manifest, all
+    with `default_in_session=True` — pre-fix this would tick all three."""
+    parent = _stub_parent()
+    parent._plugins = {
+        "plugin_a": SimpleNamespace(
+            name="plugin_a", title="Plugin A", default_in_session=True,
+        ),
+        "plugin_b": SimpleNamespace(
+            name="plugin_b", title="Plugin B", default_in_session=True,
+        ),
+    }
+    parent.sidecar_manifests = {
+        "sidecar_x": SimpleNamespace(
+            name="sidecar_x", title="Sidecar X", default_in_session=True,
+        ),
+    }
+    return parent
+
+
+def test_new_session_has_all_plugin_checkboxes_unchecked():
+    """A brand-new session (session=None) must start with every plugin
+    checkbox UNCHECKED. Earlier behavior: ticked whenever the plugin's
+    own `default_in_session` flag was True — surprising for the user who
+    expected an opt-in model."""
+    parent = _parent_with_stub_plugins()
+    dlg, parent = _new_dialog(parent=parent, session=None)
+    try:
+        assert dlg._plugin_checks, "stub plugins must surface as checkboxes"
+        for name, chk in dlg._plugin_checks.items():
+            assert chk.get_active() is False, (
+                f"plugin {name!r} is ticked on a new-session dialog; "
+                f"expected opt-in default (all unchecked)"
+            )
+
+        # Save → enabled_plugins is an empty list, persisting the
+        # user's untouched "no plugins" choice into ai_sessions.json.
+        data = dlg.get_data()
+        assert data.get("enabled_plugins") == []
+    finally:
+        _close(dlg, parent)
+
+
+def test_edit_session_with_saved_plugins_respects_selection():
+    """Edit-mode regression guard: an existing session that picked
+    `plugin_a` must still display plugin_a ticked + the rest unticked.
+    The opt-in default only applies to brand-new sessions."""
+    parent = _parent_with_stub_plugins()
+    sess = {
+        "name": "EditMe", "provider": "claude",
+        "project_dir": "/tmp/e",
+        "enabled_plugins": ["plugin_a"],
+    }
+    dlg, parent = _new_dialog(parent=parent, session=sess)
+    try:
+        checks = dlg._plugin_checks
+        assert checks["plugin_a"].get_active() is True
+        assert checks["plugin_b"].get_active() is False
+        assert checks["sidecar_x"].get_active() is False
+    finally:
+        _close(dlg, parent)
+
+
+def test_edit_session_with_empty_enabled_plugins_keeps_all_unchecked():
+    """Edge case: a session saved after the fix has `enabled_plugins=[]`.
+    Re-opening it must NOT re-tick any plugin (which would happen if the
+    code mistakenly treated [] as 'no preference' and fell through to
+    the new-session default — except now that default is also False, so
+    this is doubly safe). Pin the explicit-empty semantics."""
+    parent = _parent_with_stub_plugins()
+    sess = {
+        "name": "Empty", "provider": "claude",
+        "project_dir": "/tmp/e",
+        "enabled_plugins": [],
+    }
+    dlg, parent = _new_dialog(parent=parent, session=sess)
+    try:
+        for name, chk in dlg._plugin_checks.items():
+            assert chk.get_active() is False, (
+                f"plugin {name!r} ticked on a session that explicitly "
+                f"saved enabled_plugins=[]"
+            )
+    finally:
+        _close(dlg, parent)

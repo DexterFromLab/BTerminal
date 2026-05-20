@@ -464,6 +464,44 @@ def _route_debug_log(h: BTerminalDebugHandler) -> None:
     h._send_json(200, {"lines": [ln.rstrip("\n") for ln in lines]})
 
 
+def _route_debug_sudo_state(h: BTerminalDebugHandler) -> None:
+    """BUG#31g: read-only snapshot of the shared sudo askpass cache.
+
+    Returns ``{has_path, pending_dialog}``. Never returns the password or
+    the helper path itself — those are secrets.
+    """
+    app = h.server.app
+    cache = getattr(app, "sudo_askpass", None)
+    has = bool(cache.is_set()) if cache is not None else False
+    pending = bool(getattr(app, "_sudo_dialog_pending", False))
+    h._send_json(200, {"has_path": has, "pending_dialog": pending})
+
+
+def _route_debug_sudo_submit(h: BTerminalDebugHandler) -> None:
+    """BUG#31g: test-only bypass of the GTK SudoPasswordDialog.
+
+    Gated by ``BTERMINAL_TEST_FAKE_SUDO=1`` — without that env the endpoint
+    returns 403. With it, calls ``cache.ensure(password)`` directly and
+    clears the pending-dialog flag so subsequent state polls report
+    ``has_path: True, pending_dialog: False``.
+    """
+    if os.environ.get("BTERMINAL_TEST_FAKE_SUDO") != "1":
+        h._send_error(403, "forbidden — set BTERMINAL_TEST_FAKE_SUDO=1")
+        return
+    body = h._read_json_body()
+    if body is None:
+        return  # error already sent by helper
+    password = body.get("password", "")
+    app = h.server.app
+    cache = getattr(app, "sudo_askpass", None)
+    if cache is None:
+        h._send_error(500, "sudo_askpass cache not initialized")
+        return
+    ok = cache.ensure(password)
+    app._sudo_dialog_pending = False
+    h._send_json(200, {"ok": ok, "has_path": cache.is_set()})
+
+
 def _route_feed_log(h: BTerminalDebugHandler) -> None:
     """GET /api/debug/feed_log[?since=<ts>][&label=<l>] — captured feed events.
 
@@ -734,6 +772,7 @@ def _route_post_tab_simulate_prompt(h: BTerminalDebugHandler, idx: str) -> None:
         return ("ok", {
             "prompt_count": tab._stats_bar._prompt_count,
             "inject_pending": list(pending) if pending else None,
+            "user_is_typing": tab._user_is_typing,
         })
 
     status, info = _via_glib_idle(_do)
@@ -744,6 +783,34 @@ def _route_post_tab_simulate_prompt(h: BTerminalDebugHandler, idx: str) -> None:
         h._send_error(400, f"tab {idx_int} is not a Claude Code tab (no _stats_bar)")
         return
     h._send_json(200, {"ok": True, **info})
+
+
+def _route_get_tab_inject_state(h: BTerminalDebugHandler, idx: str) -> None:
+    """GET /api/debug/tabs/{idx}/inject_state — read-only snapshot of the
+    typing-guard and injection state for a tab.  Used by E2E tests to
+    assert that _user_is_typing blocks rule injection while the user is
+    composing a message.
+    """
+    app = h.server.app
+    idx_int = int(idx)
+    TerminalTab = _terminal_tab_class()
+
+    def _do():
+        tab = _resolve_tab(app, idx_int)
+        if tab is None or not isinstance(tab, TerminalTab):
+            return ("not_found", None)
+        pending = tab._inject_pending
+        return ("ok", {
+            "user_is_typing": tab._user_is_typing,
+            "inject_pending": list(pending) if pending else None,
+            "prompt_count": tab._stats_bar._prompt_count if tab._stats_bar else None,
+        })
+
+    status, info = _via_glib_idle(_do)
+    if status == "not_found":
+        h._send_error(404, f"no terminal tab at idx {idx_int}")
+        return
+    h._send_json(200, info)
 
 
 def _route_post_tab_force_idle(h: BTerminalDebugHandler, idx: str) -> None:
@@ -1297,6 +1364,8 @@ def _start_debug_rest_server(app, token: str) -> BTerminalDebugServer:
         (r"/api/sessions", _route_sessions_list),
         (r"/api/debug/log", _route_debug_log),
         (r"/api/debug/feed_log", _route_feed_log),
+        (r"/api/debug/sudo_state", _route_debug_sudo_state),
+        (r"/api/tabs/(?P<idx>\d+)/inject_state", _route_get_tab_inject_state),
     ])
     server._routes_put.extend([
         (r"/api/tabs/(?P<idx>\d+)/plugins", _route_put_tab_plugins),
@@ -1327,6 +1396,8 @@ def _start_debug_rest_server(app, token: str) -> BTerminalDebugServer:
         # Task #63: REST analog of right-click → 'Run as ▸' / 'Resume'.
         (r"/api/sidebar/context_menu/(?P<session_id>[\w.-]+)",
          _route_post_sidebar_context_menu),
+        # BUG#31g: test-only bypass for the SudoPasswordDialog (gated by env).
+        (r"/api/debug/sudo_submit", _route_debug_sudo_submit),
     ])
     thread = threading.Thread(target=server.serve_forever, daemon=True, name="debug-rest")
     thread.start()

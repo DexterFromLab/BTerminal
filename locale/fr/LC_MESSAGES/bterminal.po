@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version:  bterminal\n"
 "Report-Msgid-Bugs-To: bartoszczarnota1@gmail.com\n"
-"POT-Creation-Date: 2026-05-11 10:56+0200\n"
+"POT-Creation-Date: 2026-05-16 10:31+0200\n"
 "PO-Revision-Date: 2026-05-05 13:39+0200\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -50,6 +50,20 @@ msgstr "Premier lancement"
 #: bterminal/license.py:202
 msgid "Update"
 msgstr "Mise à jour"
+
+#: bterminal/ollama_client.py:59
+msgid ""
+"Model {model!r} nie istnieje w bibliotece Ollama. Sprawdź pisownię na ollama."
+"com/library."
+msgstr ""
+"Le modèle {model!r} n'existe pas dans la bibliothèque Ollama. Vérifiez "
+"l'orthographe sur ollama.com/library."
+
+#: bterminal/ollama_client.py:78
+msgid "Timeout pobierania {model!r}. Sprawdź połączenie internetowe."
+msgstr ""
+"Délai dépassé lors du téléchargement de {model!r}. Vérifiez la connexion "
+"Internet."
 
 #: bterminal/updater.py:57
 msgid "No repository"
@@ -153,44 +167,47 @@ msgstr ""
 "Détails :\n"
 "{details}"
 
-#: bterminal/ui/terminal_tab.py:607
+#: bterminal/ui/terminal_tab.py:661
 msgid "Brakuje modelu lokalnego dla aidera"
-msgstr ""
+msgstr "Modèle local manquant pour Aider"
 
-#: bterminal/ui/terminal_tab.py:609
+#: bterminal/ui/terminal_tab.py:663
 #, python-format
 msgid ""
 "Model '%s' nie jest pobrany w Ollamie. Aider wystartuje, ale przy pierwszym "
 "promptcie wypisze litellm.NotFoundError. Co chcesz zrobić?"
 msgstr ""
+"Le modèle '%s' n'est pas téléchargé dans Ollama. Aider va démarrer, mais au "
+"premier prompt il affichera litellm.NotFoundError. Que voulez-vous faire ?"
 
-#: bterminal/ui/terminal_tab.py:622
+#: bterminal/ui/terminal_tab.py:676
 msgid "Uruchom wizarda"
-msgstr ""
+msgstr "Lancer l'assistant"
 
-#: bterminal/ui/terminal_tab.py:624
+#: bterminal/ui/terminal_tab.py:678
 msgid "Wybierz inny model"
-msgstr ""
+msgstr "Choisir un autre modèle"
 
-#: bterminal/ui/terminal_tab.py:625
+#: bterminal/ui/terminal_tab.py:679
 msgid "Pomiń (uruchom mimo to)"
-msgstr ""
+msgstr "Ignorer (lancer quand même)"
 
-#: bterminal/ui/terminal_tab.py:626 bterminal/ui/terminal_tab.py:654
+#: bterminal/ui/terminal_tab.py:680 bterminal/ui/terminal_tab.py:708
+#: bterminal/ui/dialogs/sudo_password.py:50
 msgid "Anuluj"
-msgstr ""
+msgstr "Annuler"
 
-#: bterminal/ui/terminal_tab.py:648
+#: bterminal/ui/terminal_tab.py:702
 msgid "Wybierz model lokalny"
-msgstr ""
+msgstr "Sélectionner un modèle local"
 
-#: bterminal/ui/terminal_tab.py:655
+#: bterminal/ui/terminal_tab.py:709 bterminal/ui/dialogs/sudo_password.py:51
 msgid "OK"
-msgstr ""
+msgstr "OK"
 
-#: bterminal/ui/terminal_tab.py:663
+#: bterminal/ui/terminal_tab.py:717
 msgid "Dostępne modele Ollama:"
-msgstr ""
+msgstr "Modèles Ollama disponibles :"
 
 #: bterminal/ui/sidebar.py:165
 #, python-brace-format
@@ -272,14 +289,16 @@ msgstr "Indiquer à l'agent IA quelle langue je parle"
 #: bterminal/ui/dialogs/options.py:244
 msgid "Auto-add vision hint when pasting images into Copilot sessions"
 msgstr ""
+"Ajouter automatiquement l'indice visuel lors du collage d'images dans les "
+"sessions Copilot"
 
 #: bterminal/ui/dialogs/options.py:258
 msgid "AI Providers"
-msgstr ""
+msgstr "Fournisseurs d'IA"
 
 #: bterminal/ui/dialogs/options.py:276
 msgid "Local Models (Ollama)"
-msgstr ""
+msgstr "Modèles locaux (Ollama)"
 
 #: bterminal/ui/dialogs/options.py:299
 msgid "Save"
@@ -287,60 +306,64 @@ msgstr "Enregistrer"
 
 #: bterminal/ui/dialogs/options.py:432
 msgid "Start daemon"
-msgstr ""
+msgstr "Démarrer le démon"
 
 #: bterminal/ui/dialogs/options.py:433
 msgid "Stop daemon"
-msgstr ""
+msgstr "Arrêter le démon"
 
 #: bterminal/ui/dialogs/options.py:434 bterminal/ui/dialogs/options.py:522
 msgid "Refresh"
-msgstr ""
+msgstr "Actualiser"
 
 #: bterminal/ui/dialogs/options.py:454
 msgid "Recommendations for this machine:"
-msgstr ""
+msgstr "Recommandations pour cette machine :"
 
 #: bterminal/ui/dialogs/options.py:487
 msgid "Installed models:"
-msgstr ""
+msgstr "Modèles installés :"
 
 #: bterminal/ui/dialogs/options.py:509
 msgid "Pull…"
-msgstr ""
+msgstr "Télécharger…"
 
 #: bterminal/ui/dialogs/options.py:513
 msgid "Delete"
-msgstr ""
+msgstr "Supprimer"
 
 #: bterminal/ui/dialogs/options.py:517
 msgid "Set as default for…"
-msgstr ""
+msgstr "Définir par défaut pour…"
 
 #: bterminal/ui/dialogs/options.py:625
 msgid "Pull Ollama model"
-msgstr ""
+msgstr "Télécharger un modèle Ollama"
 
 #: bterminal/ui/dialogs/options.py:630
 msgid "Pull"
-msgstr ""
+msgstr "Télécharger"
 
 #: bterminal/ui/dialogs/options.py:642
 msgid "Pick a model from the list below or type a custom tag."
 msgstr ""
+"Choisissez un modèle dans la liste ci-dessous ou saisissez une étiquette "
+"personnalisée."
 
 #: bterminal/ui/dialogs/options.py:644
 msgid "Note: models below 3B parameters often fail with Aider's edit format."
 msgstr ""
+"Remarque : les modèles de moins de 3 Md de paramètres échouent souvent avec "
+"le format d'édition d'Aider."
 
 #: bterminal/ui/dialogs/options.py:676
 msgid "Browse all models on ollama.com →"
-msgstr ""
+msgstr "Parcourir tous les modèles sur ollama.com →"
 
 #: bterminal/ui/dialogs/options.py:696
 #, python-brace-format
 msgid "{name} has only {size}B parameters"
-msgstr ""
+msgstr "{name} ne compte que {size} Md de paramètres"
 
 #: bterminal/ui/dialogs/options.py:699
 msgid ""
@@ -348,18 +371,38 @@ msgid ""
 "produce empty or repeated responses. Are you sure you want to pull this "
 "model?"
 msgstr ""
+"Les modèles de moins de 3 Md de paramètres respectent souvent mal le format "
+"d'édition d'Aider et produisent des réponses vides ou répétées. Voulez-vous "
+"vraiment télécharger ce modèle ?"
 
 #: bterminal/ui/dialogs/options.py:740
 msgid "Model pulled"
-msgstr ""
+msgstr "Modèle téléchargé"
 
 #: bterminal/ui/dialogs/options.py:740
 msgid "Pull failed"
-msgstr ""
+msgstr "Échec du téléchargement"
 
 #: bterminal/ui/dialogs/options.py:810
 msgid "Apply"
-msgstr ""
+msgstr "Appliquer"
+
+#: bterminal/ui/dialogs/sudo_password.py:44
+msgid "BTerminal — sudo"
+msgstr "BTerminal — sudo"
+
+#: bterminal/ui/dialogs/sudo_password.py:62
+msgid "Podaj hasło sudo (wspólne dla sesji AI):"
+msgstr "Podaj hasło sudo (wspólne dla sesji AI):"
+
+#: bterminal/ui/dialogs/sudo_password.py:99
+msgid "Hasło nie może być puste"
+msgstr "Hasło nie może być puste"
+
+#: bterminal/ui/dialogs/sudo_password.py:110
+#, python-format
+msgid "Błędne hasło sudo. Próba %d/3"
+msgstr "Błędne hasło sudo. Próba %d/3"
 
 #: bterminal/ctx/dialogs.py:163
 msgid ""
@@ -370,55 +413,55 @@ msgstr ""
 "au fur et à mesure de votre travail et enregistrez les découvertes "
 "importantes : ctx set <project> <key> <value>"
 
-#: bterminal/app.py:193 bterminal/app.py:225 bterminal/app.py:466
+#: bterminal/app.py:199 bterminal/app.py:231 bterminal/app.py:472
 msgid "Sessions"
 msgstr "Sessions"
 
-#: bterminal/app.py:196 bterminal/app.py:225 bterminal/app.py:467
+#: bterminal/app.py:202 bterminal/app.py:231 bterminal/app.py:473
 msgid "Ctx"
 msgstr "Ctx"
 
-#: bterminal/app.py:199 bterminal/app.py:226 bterminal/app.py:468
+#: bterminal/app.py:205 bterminal/app.py:232 bterminal/app.py:474
 msgid "Consult"
 msgstr "Consult"
 
-#: bterminal/app.py:202 bterminal/app.py:226 bterminal/app.py:469
+#: bterminal/app.py:208 bterminal/app.py:232 bterminal/app.py:475
 msgid "Tasks"
 msgstr "Tâches"
 
-#: bterminal/app.py:205 bterminal/app.py:227
+#: bterminal/app.py:211 bterminal/app.py:233
 msgid "Memory"
 msgstr "Mémoire"
 
-#: bterminal/app.py:208 bterminal/app.py:227
+#: bterminal/app.py:214 bterminal/app.py:233
 msgid "Skills"
 msgstr "Skills"
 
-#: bterminal/app.py:211 bterminal/app.py:228
+#: bterminal/app.py:217 bterminal/app.py:234
 msgid "Files"
 msgstr "Fichiers"
 
-#: bterminal/app.py:214 bterminal/app.py:228 bterminal/app.py:470
+#: bterminal/app.py:220 bterminal/app.py:234 bterminal/app.py:476
 msgid "Plugins"
 msgstr "Plugins"
 
-#: bterminal/app.py:246
+#: bterminal/app.py:252
 msgid "Hide sidebar (Ctrl+B)"
 msgstr "Masquer la barre latérale (Ctrl+B)"
 
-#: bterminal/app.py:323
+#: bterminal/app.py:329
 msgid "Show sidebar (Ctrl+B)"
 msgstr "Afficher la barre latérale (Ctrl+B)"
 
-#: bterminal/app.py:333
+#: bterminal/app.py:339
 msgid "Toggle light/dark theme"
 msgstr "Basculer thème clair/sombre"
 
-#: bterminal/app.py:339
+#: bterminal/app.py:345
 msgid "Show Git panel (Ctrl+G)"
 msgstr "Afficher le panneau Git (Ctrl+G)"
 
-#: bterminal/app.py:388
+#: bterminal/app.py:394
 #, python-brace-format
 msgid ""
 "The file ~/.config/bterminal/options.json was corrupted — default settings "
@@ -431,70 +474,89 @@ msgstr ""
 "\n"
 "Cause : {exc_type} : {exc}"
 
-#: bterminal/app.py:450
+#: bterminal/app.py:456
 msgid "New local tab"
 msgstr "Nouvel onglet local"
 
-#: bterminal/app.py:451
+#: bterminal/app.py:457
 msgid "New SSH session…"
 msgstr "Nouvelle session SSH…"
 
-#: bterminal/app.py:452
-#, fuzzy
+#: bterminal/app.py:458
 msgid "New AI session…"
-msgstr "Nouvelle session SSH…"
+msgstr "Nouvelle session IA…"
 
-#: bterminal/app.py:454
+#: bterminal/app.py:460
 msgid "Options…"
 msgstr "Options…"
 
-#: bterminal/app.py:456
+#: bterminal/app.py:462
 msgid "Quit"
 msgstr "Quitter"
 
-#: bterminal/app.py:457
+#: bterminal/app.py:463
 msgid "File"
 msgstr "Fichier"
 
-#: bterminal/app.py:461
+#: bterminal/app.py:467
 msgid "Toggle sidebar (Ctrl+B)"
 msgstr "Basculer la barre latérale (Ctrl+B)"
 
-#: bterminal/app.py:462
+#: bterminal/app.py:468
 msgid "Toggle Git panel (Ctrl+G)"
 msgstr "Basculer le panneau Git (Ctrl+G)"
 
-#: bterminal/app.py:463
+#: bterminal/app.py:469
 msgid "Toggle theme ☀/🌙"
 msgstr "Basculer le thème ☀/🌙"
 
-#: bterminal/app.py:479
+#: bterminal/app.py:485
 msgid "View"
 msgstr "Affichage"
 
-#: bterminal/app.py:483
+#: bterminal/app.py:489
 msgid "Check for updates"
 msgstr "Rechercher les mises à jour"
 
-#: bterminal/app.py:484
+#: bterminal/app.py:490
 msgid "Errata…"
 msgstr "Errata…"
 
-#: bterminal/app.py:487
+#: bterminal/app.py:493
 msgid "Diagnostics…"
-msgstr ""
+msgstr "Diagnostic…"
 
-#: bterminal/app.py:494
+#: bterminal/app.py:500
 msgid "Install dependencies…"
-msgstr ""
+msgstr "Installer les dépendances…"
 
-#: bterminal/app.py:503
+#: bterminal/app.py:509
 msgid "Configure local model (aider)…"
-msgstr ""
+msgstr "Configurer le modèle local (aider)…"
 
-#: bterminal/app.py:507
+#: bterminal/app.py:521
+msgid "Set sudo password…"
+msgstr "Set sudo password…"
+
+#: bterminal/app.py:525
+msgid "Clear sudo password"
+msgstr "Clear sudo password"
+
+#: bterminal/app.py:534
 msgid "Tools"
 msgstr "Outils"
+
+#: bterminal/app.py:825
+msgid ""
+"tools/aider_setup_wizard nie znaleziony. Uruchom install.sh aby "
+"zaktualizować instalację."
+msgstr ""
+"tools/aider_setup_wizard introuvable. Lancez install.sh pour mettre à jour "
+"l'installation."
+
+#: bterminal/app.py:1663
+msgid "Hasło sudo wyczyszczone z pamięci"
+msgstr "Hasło sudo wyczyszczone z pamięci"
 
 #~ msgid "New Claude Code session…"
 #~ msgstr "Nouvelle session Claude Code…"

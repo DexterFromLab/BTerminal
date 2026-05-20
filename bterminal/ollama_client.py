@@ -24,6 +24,8 @@ import subprocess
 import urllib.error
 import urllib.request
 
+from bterminal.i18n import _
+
 
 # BUG#10 fix: ollama emits CSI cursor-control sequences in its
 # progress output even when stdout is not a TTY. Strip them before
@@ -53,8 +55,10 @@ def _friendly_pull_error(stderr: str, model_name: str) -> str:
     if "pull model manifest: file does not exist" in cleaned_lower \
        or "manifest unknown" in cleaned_lower \
        or "no such manifest" in cleaned_lower:
-        return (f"Model {model_name!r} nie istnieje w bibliotece "
-                f"Ollama. Sprawdź pisownię na ollama.com/library.")
+        return _(
+            "Model {model!r} nie istnieje w bibliotece Ollama. "
+            "Sprawdź pisownię na ollama.com/library."
+        ).format(model=model_name)
 
     # Pattern 2: daemon offline
     if ("connection refused" in cleaned_lower
@@ -70,8 +74,9 @@ def _friendly_pull_error(stderr: str, model_name: str) -> str:
     # Pattern 4: timeout / network failure
     if ("context deadline exceeded" in cleaned_lower
             or "i/o timeout" in cleaned_lower):
-        return (f"Timeout pobierania {model_name!r}. Sprawdź "
-                f"połączenie internetowe.")
+        return _(
+            "Timeout pobierania {model!r}. Sprawdź połączenie internetowe."
+        ).format(model=model_name)
 
     # Fallback: extract the LAST `Error:` line, trimmed.
     error_lines = [l for l in cleaned.splitlines()

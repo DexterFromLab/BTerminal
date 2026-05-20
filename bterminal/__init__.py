@@ -51,6 +51,7 @@ from bterminal.models import (
     AISessionManager, ConsultManager, JsonListManager, SessionManager,
     SessionPasswordCache,
 )
+from bterminal.sudo_askpass import SudoAskpassCache
 
 from bterminal.ctx.helpers import (
     _GENERIC_SUBDIRS, _collect_claude_log, _is_ctx_available,

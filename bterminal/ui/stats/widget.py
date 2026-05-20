@@ -113,7 +113,7 @@ class SessionStatsBar(Gtk.Box):
             ("s3b",      " ",            None),
             ("tok_out",  "↓ 0",          "Output tokens"),
             ("s4",       " │ ",          None),
-            ("cache",    "📦 0%",        "Cache hit rate"),
+            ("cache",    "♻️ 0%",         "Cache hit rate — % of input tokens served from cache"),
             ("s5",       " │ ",          None),
             ("cost",     "💰 $0.00",     "Estimated cost"),
             ("s6",       " │ ",          None),
@@ -161,8 +161,10 @@ class SessionStatsBar(Gtk.Box):
         if s.first_ts:
             end = s.last_ts or datetime.now(timezone.utc)
             dur = (end - s.first_ts).total_seconds()
-        total_tok = s.input + s.cache_write + s.cache_read + s.output
-        tok_h = total_tok / (dur / 3600) if dur > 1 else 0
+        # tok/h counts only freshly-processed tokens (not cheap cache reads)
+        # so the rate is comparable to the visible ↑ / ↓ counters.
+        billed_tok = s.input + s.cache_write + s.output
+        tok_h = billed_tok / (dur / 3600) if dur > 1 else 0
         total_in = s.input + s.cache_write
         cache_pct = int(s.cache_read / (total_in + s.cache_read) * 100) \
             if (total_in + s.cache_read) else 0
@@ -172,7 +174,7 @@ class SessionStatsBar(Gtk.Box):
         self._labels["resp"].set_text(f"🤖 {s.responses}")
         self._labels["tok_in"].set_text(f"↑ {_fmt_tok(total_in)}")
         self._labels["tok_out"].set_text(f"↓ {_fmt_tok(s.output)}")
-        self._labels["cache"].set_text(f"📦 {cache_pct}%")
+        self._labels["cache"].set_text(f"♻️ {cache_pct}%")
         if self._cost_unavailable:
             # #94: providers with cost_in_log=False (Aider, local LLM)
             # show 'n/a' instead of '$0.0000' so users know the field
