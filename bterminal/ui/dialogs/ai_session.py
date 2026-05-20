@@ -330,7 +330,8 @@ class AISessionDialog(ClaudeCodeDialog):
 
         if widget_type == "checkbox":
             widget = Gtk.CheckButton(label=label)
-            widget.set_active(bool(initial.get(key, False)))
+            default = bool(extras[0]) if extras else False
+            widget.set_active(bool(initial.get(key, default)))
             self._schema_container.pack_start(widget, False, False, 0)
             self._schema_widgets[key] = {"widget": widget, "type": "checkbox"}
 

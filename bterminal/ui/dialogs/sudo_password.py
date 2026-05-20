@@ -107,7 +107,7 @@ class SudoPasswordDialog(Gtk.Dialog):
                 if attempts >= _MAX_ATTEMPTS:
                     return False
                 self._show_error(
-                    _("Błędne hasło sudo. Próba %d/3") % (attempts + 1)
+                    _("Błędne hasło sudo. Próba %d/3") % attempts
                 )
                 self.entry.set_text("")
                 self.entry.grab_focus()

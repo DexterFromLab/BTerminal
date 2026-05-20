@@ -481,14 +481,11 @@ class TerminalTab(Gtk.Box):
         # askpass script holds a bogus password. Skip the verify-then-fallback
         # branch in that env so component tests can validate the happy path
         # end-to-end without granting the test runner root.
-        return (
-            f'export SUDO_ASKPASS={quoted}\n'
-            'if [ "$BTERMINAL_TEST_FAKE_SUDO" != "1" ] && ! sudo -A true 2>/dev/null; then\n'
-            '  echo "Sudo cache expired — please re-enter password."\n'
-            '  unset SUDO_ASKPASS\n'
-            + TerminalTab._INTERACTIVE_SUDO_READ_LOOP +
-            'fi\n'
-        )
+        # No `sudo -A true` pre-check: ensure() already validated the password
+        # and a `sudo -A true` call in bash hangs on some systems (PAM/D-Bus
+        # blocking without a proper PTY context). SUDO_ASKPASS is set; sudo
+        # calls the script automatically when it needs the password.
+        return f'export SUDO_ASKPASS={quoted}\n'
 
     @staticmethod
     def _build_binary_not_found_script(provider):

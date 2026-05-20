@@ -246,15 +246,16 @@ class ClaudeProvider(AIProvider):
     def get_dialog_schema(self) -> list[tuple]:
         """Provider-specific fields rendered in AISessionDialog.
 
-        Each tuple: (config_key, widget_type, label[, options]).
-        Widget types supported: "checkbox", "combo", "text".
-        Combo entries pass options as the 4th element.
+        Each tuple: (config_key, widget_type, label[, default|options]).
+        Widget types: "checkbox" — 4th element is bool default (False if
+        omitted); "combo" — 4th element is the options list; "text" — 4th
+        element is placeholder string.
         """
         return [
             ("resume", "checkbox", "Resume last session (--resume)"),
             ("skip_permissions", "checkbox",
              "Skip permission prompts (--dangerously-skip-permissions)"),
-            ("sudo", "checkbox", "Use sudo askpass"),
+            ("sudo", "checkbox", "Use sudo askpass", True),
         ]
 
     # ─── Idle detection (default OK for Claude — overridden later if T4 needs it) ─

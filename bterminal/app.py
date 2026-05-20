@@ -970,6 +970,12 @@ class BTerminalApp(Gtk.Window):
         # provider_options is a nested dict — copy it too so future
         # widget mutations on the saved config don't bleed through.
         opts = dict(cloned.get("provider_options") or {})
+        # Migrate any top-level legacy keys (sudo, resume, …) into opts
+        # so they survive when force_options makes provider_options truthy.
+        from bterminal.models import _LEGACY_PROVIDER_OPTION_KEYS
+        for key in _LEGACY_PROVIDER_OPTION_KEYS:
+            if key in cloned and key not in opts:
+                opts[key] = cloned[key]
         if force_options:
             opts.update(force_options)
         # Always assign so the cloned dict has its own provider_options
