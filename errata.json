@@ -1,6 +1,17 @@
 [
   {
     "date": "2026-05-20",
+    "message": "BTerminal v1.3.4 — sudo dialog fixes after the v1.3.3 rollout on Pop_OS!. The shared askpass cache worked on Mint but the first AI tab on Pop_OS! froze after the password dialog closed: the bash prologue's `sudo -A true` warm-up hung under PAM/mail_badpass without a real PTY. Drop the redundant bash check (ensure() already validated the password in Python), fix the off-by-one in the attempt counter, migrate legacy provider keys in the 'Resume last session' shortcut, honour the schema's default for the sudo checkbox, and default new Claude sessions to sudo=True. Recommended: run install.sh to pick up the new dialogs.",
+    "changes": [
+      "fix(sudo): drop `sudo -A true` pre-check from _build_shared_askpass_prologue — was redundant and stalled the AI tab on hosts where sudo blocks under PAM/mail_badpass without a TTY",
+      "fix(sudo): SudoPasswordDialog error counter shows the attempt that just failed ('Próba 1/3' after the first wrong entry) instead of the next one",
+      "fix(app): open_ai_tab_one_off migrates legacy top-level provider keys into provider_options before applying force_options — 'Resume last session' no longer drops the sudo flag on legacy sessions",
+      "fix(dialog): AISessionDialog._add_schema_field honours the optional 4th schema element as the checkbox default",
+      "feat(claude): default sudo checkbox to True in ClaudeProvider.get_dialog_schema so new sessions get the askpass wired up by default"
+    ]
+  },
+  {
+    "date": "2026-05-20",
     "message": "BTerminal v1.3.3 — shared sudo password cache (BUG#31), rules-injection typing guard, and stats bar accuracy fixes. AI sessions that need root now share a single sudo password dialog at the window level — subsequent tabs reuse the cached askpass helper without prompting again. A new typing guard prevents rules/ctx injection from firing while the user is composing a message. The stats bar ♻️ cache-hit label and tok/h metric are now accurate. Recommended: run install.sh to pick up the new sudo dialog and locale strings.",
     "changes": [
       "feat(sudo): shared SudoAskpassCache — lazy per-window, populated on first sudo AI tab; reused by all subsequent tabs without re-prompting (BUG#31)",
