@@ -368,7 +368,11 @@ class TaskListPanel(Gtk.Box):
             db = sqlite3.connect(CTX_DB)
             db.row_factory = sqlite3.Row
             projects = db.execute(
-                "SELECT name FROM sessions ORDER BY name"
+                "SELECT DISTINCT name FROM ("
+                "  SELECT name FROM sessions"
+                "  UNION"
+                "  SELECT DISTINCT project AS name FROM tasks"
+                ") ORDER BY name"
             ).fetchall()
             db.close()
             active_idx = 0
