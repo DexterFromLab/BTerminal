@@ -50,6 +50,7 @@ def _ensure_tasks_tables():
             task_id TEXT NOT NULL,
             description TEXT NOT NULL,
             status TEXT DEFAULT 'open',
+            position INTEGER,
             created_at TEXT DEFAULT (datetime('now')),
             updated_at TEXT DEFAULT (datetime('now')),
             UNIQUE(project, task_id)
@@ -66,7 +67,45 @@ def _ensure_tasks_tables():
             PRIMARY KEY (project, task_id)
         );
     """)
+    _migrate_add_position(db)
     db.close()
+
+
+def _migrate_add_position(db):
+    """Add position column to existing tasks table (idempotent)."""
+    cols = [r[1] for r in db.execute("PRAGMA table_info(tasks)").fetchall()]
+    if "position" not in cols:
+        db.execute("ALTER TABLE tasks ADD COLUMN position INTEGER")
+        db.commit()
+    _backfill_positions(db)
+
+
+def _backfill_positions(db):
+    """Assign position to tasks that have NULL position after migration."""
+    projects = [
+        r[0] for r in db.execute(
+            "SELECT DISTINCT project FROM tasks WHERE position IS NULL"
+        ).fetchall()
+    ]
+    for project in projects:
+        null_rows = db.execute(
+            "SELECT task_id FROM tasks WHERE project = ? AND position IS NULL",
+            (project,),
+        ).fetchall()
+        max_row = db.execute(
+            "SELECT MAX(position) FROM tasks WHERE project = ? AND position IS NOT NULL",
+            (project,),
+        ).fetchone()
+        start = (max_row[0] or 0) + 1
+        for i, tid in enumerate(
+            sorted([r[0] for r in null_rows], key=_task_sort_key), start=start
+        ):
+            db.execute(
+                "UPDATE tasks SET position = ? WHERE project = ? AND task_id = ? AND position IS NULL",
+                (i, project, tid),
+            )
+    if projects:
+        db.commit()
 
 
 def _task_sort_key(task_id):
@@ -182,6 +221,18 @@ class TaskListPanel(Gtk.Box):
         btn_del.get_style_context().add_class("sidebar-btn")
         btn_del.connect("clicked", lambda _: self._on_delete_task())
         btn_box.pack_start(btn_del, True, True, 0)
+
+        btn_up = Gtk.Button(label="\u2191")
+        btn_up.get_style_context().add_class("sidebar-btn")
+        btn_up.set_tooltip_text("Move task up")
+        btn_up.connect("clicked", lambda _: self._on_reorder_task("up"))
+        btn_box.pack_start(btn_up, False, False, 0)
+
+        btn_down = Gtk.Button(label="\u2193")
+        btn_down.get_style_context().add_class("sidebar-btn")
+        btn_down.set_tooltip_text("Move task down")
+        btn_down.connect("clicked", lambda _: self._on_reorder_task("down"))
+        btn_box.pack_start(btn_down, False, False, 0)
 
         btn_more = Gtk.MenuButton(label="\u22ee")
         btn_more.get_style_context().add_class("sidebar-btn")
@@ -346,16 +397,15 @@ class TaskListPanel(Gtk.Box):
         db = sqlite3.connect(CTX_DB)
         db.row_factory = sqlite3.Row
         rows = db.execute(
-            "SELECT task_id, description, status FROM tasks WHERE project = ?",
+            "SELECT task_id, description, status FROM tasks WHERE project = ? "
+            "ORDER BY position NULLS LAST, task_id",
             (project,),
         ).fetchall()
         db.close()
 
-        # Split into active (newest first) and done (at bottom)
+        # Split into active and done — DB already sorted by position
         active = [r for r in rows if r["status"] != "done"]
         done = [r for r in rows if r["status"] == "done"]
-        active.sort(key=lambda r: _task_sort_key(r["task_id"]))
-        done.sort(key=lambda r: _task_sort_key(r["task_id"]))
 
         restore_path = None
         for t in active:
@@ -477,6 +527,93 @@ class TaskListPanel(Gtk.Box):
                 GLib.timeout_add(100, lambda t=_t: t.feed_child(b"\r") or False)
         db.close()
 
+    def _on_reorder_task(self, direction):
+        """Swap the selected task's position with its neighbour (up or down).
+
+        Operates within same-status peers so moving an open task skips
+        done tasks and vice-versa.
+        """
+        project = self._get_selected_project()
+        sel = self.tree.get_selection()
+        model, it = sel.get_selected()
+        if not it or not project:
+            return
+        if model[it][4]:  # separator row
+            return
+
+        task_id = model[it][1]
+        if not task_id:
+            return
+
+        db = sqlite3.connect(CTX_DB)
+        db.row_factory = sqlite3.Row
+
+        task = db.execute(
+            "SELECT task_id, position, status FROM tasks WHERE project = ? AND task_id = ?",
+            (project, task_id),
+        ).fetchone()
+        if not task:
+            db.close()
+            return
+
+        current_pos = task["position"]
+        status = task["status"]
+
+        peers = db.execute(
+            "SELECT task_id, position FROM tasks "
+            "WHERE project = ? AND status = ? "
+            "ORDER BY position NULLS LAST, task_id",
+            (project, status),
+        ).fetchall()
+
+        peer_ids = [r["task_id"] for r in peers]
+        try:
+            idx = peer_ids.index(task_id)
+        except ValueError:
+            db.close()
+            return
+
+        if direction == "up":
+            if idx == 0:
+                db.close()
+                return
+            swap_idx = idx - 1
+        else:
+            if idx == len(peers) - 1:
+                db.close()
+                return
+            swap_idx = idx + 1
+
+        swap_id = peer_ids[swap_idx]
+        swap_pos = peers[swap_idx]["position"]
+
+        # If either task was added without a position (e.g. via GUI before this
+        # fix), assign sequential integers to all peers before swapping so we
+        # never write NULL into a neighbour's position column.
+        if current_pos is None or swap_pos is None:
+            for i, r in enumerate(peers, start=1):
+                db.execute(
+                    "UPDATE tasks SET position = ? WHERE project = ? AND task_id = ?",
+                    (i, project, r["task_id"]),
+                )
+            db.commit()
+            current_pos = idx + 1
+            swap_pos = swap_idx + 1
+
+        db.execute(
+            "UPDATE tasks SET position = ?, updated_at = datetime('now') "
+            "WHERE project = ? AND task_id = ?",
+            (swap_pos, project, task_id),
+        )
+        db.execute(
+            "UPDATE tasks SET position = ?, updated_at = datetime('now') "
+            "WHERE project = ? AND task_id = ?",
+            (current_pos, project, swap_id),
+        )
+        db.commit()
+        db.close()
+        self._load_tasks()
+
     def _on_add_task(self):
         project = self._get_selected_project()
         if not project:
@@ -537,10 +674,14 @@ class TaskListPanel(Gtk.Box):
                             pass
                     task_id = str(max_num + 1)
                 try:
+                    pos_row = db.execute(
+                        "SELECT MAX(position) FROM tasks WHERE project = ?", (project,)
+                    ).fetchone()
+                    next_pos = (pos_row[0] or 0) + 1
                     db.execute(
-                        """INSERT INTO tasks (project, task_id, description, status)
-                           VALUES (?, ?, ?, 'open')""",
-                        (project, task_id, description),
+                        """INSERT INTO tasks (project, task_id, description, status, position)
+                           VALUES (?, ?, ?, 'open', ?)""",
+                        (project, task_id, description, next_pos),
                     )
                     db.commit()
                 except sqlite3.IntegrityError:

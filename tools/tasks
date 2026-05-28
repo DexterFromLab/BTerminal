@@ -52,6 +52,7 @@ def init_db():
             task_id TEXT NOT NULL,
             description TEXT NOT NULL,
             status TEXT DEFAULT 'open',
+            position INTEGER,
             created_at TEXT DEFAULT (datetime('now')),
             updated_at TEXT DEFAULT (datetime('now')),
             UNIQUE(project, task_id)
@@ -70,7 +71,45 @@ def init_db():
             PRIMARY KEY (project, task_id, session_id)
         );
     """)
+    _migrate_add_position(db)
     db.close()
+
+
+def _migrate_add_position(db):
+    """Add position column to existing tasks tables (idempotent)."""
+    cols = [r[1] for r in db.execute("PRAGMA table_info(tasks)").fetchall()]
+    if "position" not in cols:
+        db.execute("ALTER TABLE tasks ADD COLUMN position INTEGER")
+        db.commit()
+    _backfill_positions(db)
+
+
+def _backfill_positions(db):
+    """Assign position to tasks that have NULL position (existing rows after migration)."""
+    projects = [
+        r[0] for r in db.execute(
+            "SELECT DISTINCT project FROM tasks WHERE position IS NULL"
+        ).fetchall()
+    ]
+    for project in projects:
+        null_rows = db.execute(
+            "SELECT task_id FROM tasks WHERE project = ? AND position IS NULL",
+            (project,),
+        ).fetchall()
+        max_row = db.execute(
+            "SELECT MAX(position) FROM tasks WHERE project = ? AND position IS NOT NULL",
+            (project,),
+        ).fetchone()
+        start = (max_row[0] or 0) + 1
+        for i, tid in enumerate(
+            sorted([r[0] for r in null_rows], key=task_sort_key), start=start
+        ):
+            db.execute(
+                "UPDATE tasks SET position = ? WHERE project = ? AND task_id = ? AND position IS NULL",
+                (i, project, tid),
+            )
+    if projects:
+        db.commit()
 
 
 def task_sort_key(task_id):
@@ -138,10 +177,14 @@ def cmd_add(args):
 
     db = get_db()
     try:
+        row = db.execute(
+            "SELECT MAX(position) FROM tasks WHERE project = ?", (project,)
+        ).fetchone()
+        next_pos = (row[0] or 0) + 1
         db.execute(
-            """INSERT INTO tasks (project, task_id, description, status)
-               VALUES (?, ?, ?, 'open')""",
-            (project, task_id, description),
+            """INSERT INTO tasks (project, task_id, description, status, position)
+               VALUES (?, ?, ?, 'open', ?)""",
+            (project, task_id, description, next_pos),
         )
         db.commit()
         print(f"[{project}] Task {task_id} added: {description}")
@@ -207,7 +250,8 @@ def cmd_list(args):
     project = args[0]
     db = get_db()
     rows = db.execute(
-        "SELECT task_id, description, status FROM tasks WHERE project = ?",
+        "SELECT task_id, description, status FROM tasks WHERE project = ? "
+        "ORDER BY position NULLS LAST, task_id",
         (project,),
     ).fetchall()
     db.close()
@@ -216,13 +260,11 @@ def cmd_list(args):
         print(f"No tasks for project '{project}'.")
         return
 
-    tasks = sorted(rows, key=lambda r: task_sort_key(r["task_id"]))
-
-    open_count = sum(1 for t in tasks if t["status"] == "open")
-    done_count = sum(1 for t in tasks if t["status"] == "done")
+    open_count = sum(1 for t in rows if t["status"] == "open")
+    done_count = sum(1 for t in rows if t["status"] == "done")
     print(f"Tasks for '{project}': {open_count} open, {done_count} done\n")
 
-    for t in tasks:
+    for t in rows:
         check = "\u2713" if t["status"] == "done" else " "
         indent = "  " if "." in t["task_id"] else ""
         print(f"  [{check}] {indent}{t['task_id']:6s} {t['description']}")
@@ -271,7 +313,8 @@ def cmd_context(args):
     project = args[0]
     db = get_db()
     rows = db.execute(
-        "SELECT task_id, description, status FROM tasks WHERE project = ?",
+        "SELECT task_id, description, status FROM tasks WHERE project = ? "
+        "ORDER BY position NULLS LAST, task_id",
         (project,),
     ).fetchall()
     db.close()
@@ -280,21 +323,20 @@ def cmd_context(args):
         print(f"No tasks for project '{project}'.")
         return
 
-    tasks = sorted(rows, key=lambda r: task_sort_key(r["task_id"]))
-    open_count = sum(1 for t in tasks if t["status"] == "open")
-    done_count = sum(1 for t in tasks if t["status"] == "done")
+    open_count = sum(1 for t in rows if t["status"] == "open")
+    done_count = sum(1 for t in rows if t["status"] == "done")
 
     print(f"=== TASK LIST: {project} ===")
     print(f"Status: {open_count} open, {done_count} done\n")
 
-    for t in tasks:
+    for t in rows:
         check = "\u2713" if t["status"] == "done" else " "
         indent = "  " if "." in t["task_id"] else ""
         print(f"[{check}] {indent}{t['task_id']:6s} {t['description']}")
 
-    # Find next open task
+    # Find next open task (rows already sorted by position)
     next_task = None
-    for t in tasks:
+    for t in rows:
         if t["status"] == "open":
             next_task = t
             break
@@ -365,6 +407,91 @@ def cmd_reset(args):
 
 # ─── Main ───────────────────────────────────────────────────────────────
 
+def cmd_reorder(args):
+    """Move a task up or down in execution order. Usage: tasks reorder <project> <task_id> up|down"""
+    if len(args) < 3:
+        print("Usage: tasks reorder <project> <task_id> up|down")
+        sys.exit(1)
+
+    project, task_id, direction = args[0], args[1], args[2].lower()
+
+    if direction not in ("up", "down"):
+        print(f"Error: direction must be \'up\' or \'down\', got {direction!r}.")
+        sys.exit(1)
+
+    db = get_db()
+
+    task = db.execute(
+        "SELECT task_id, position, status FROM tasks WHERE project = ? AND task_id = ?",
+        (project, task_id),
+    ).fetchone()
+
+    if not task:
+        print(f"Error: Task {task_id} not found in project \'{project}\'.")
+        db.close()
+        sys.exit(1)
+
+    current_pos = task["position"]
+    status = task["status"]
+
+    # Reorder stays within the same-status group so moving an open task
+    # skips over done tasks and vice-versa.
+    peers = db.execute(
+        "SELECT task_id, position FROM tasks "
+        "WHERE project = ? AND status = ? "
+        "ORDER BY position NULLS LAST, task_id",
+        (project, status),
+    ).fetchall()
+
+    peer_ids = [r["task_id"] for r in peers]
+    try:
+        idx = peer_ids.index(task_id)
+    except ValueError:
+        print(f"Error: Task {task_id} not found among {status!r} peers (status may have changed).")
+        db.close()
+        sys.exit(1)
+
+    if direction == "up":
+        if idx == 0:
+            print(f"[{project}] Task {task_id} is already first.")
+            db.close()
+            return
+        swap_idx = idx - 1
+    else:
+        if idx == len(peers) - 1:
+            print(f"[{project}] Task {task_id} is already last.")
+            db.close()
+            return
+        swap_idx = idx + 1
+
+    swap_id = peer_ids[swap_idx]
+    swap_pos = peers[swap_idx]["position"]
+
+    # If either task lacks a position, normalize all peers before swapping.
+    if current_pos is None or swap_pos is None:
+        for i, r in enumerate(peers, start=1):
+            db.execute(
+                "UPDATE tasks SET position = ? WHERE project = ? AND task_id = ?",
+                (i, project, r["task_id"]),
+            )
+        db.commit()
+        current_pos = idx + 1
+        swap_pos = swap_idx + 1
+
+    db.execute(
+        "UPDATE tasks SET position = ?, updated_at = datetime('now') WHERE project = ? AND task_id = ?",
+        (swap_pos, project, task_id),
+    )
+    db.execute(
+        "UPDATE tasks SET position = ?, updated_at = datetime('now') WHERE project = ? AND task_id = ?",
+        (current_pos, project, swap_id),
+    )
+    db.commit()
+    arrow = "\u2191" if direction == "up" else "\u2193"
+    print(f"[{project}] Task {task_id} moved {direction} {arrow}")
+    db.close()
+
+
 COMMANDS = {
     "add": cmd_add,
     "done": cmd_done,
@@ -376,6 +503,7 @@ COMMANDS = {
     "pending": cmd_pending,
     "edit": cmd_edit,
     "reset": cmd_reset,
+    "reorder": cmd_reorder,
 }
 
 
@@ -392,6 +520,7 @@ def print_help():
     print("  clear <project>              Remove all done tasks")
     print("  pending <project>            Count of open tasks")
     print("  reset <project>              Reset all tasks to open")
+    print("  reorder <project> <id> up|down    Move task up or down in execution order")
     print()
     print("Task IDs: use numbers (1, 2, 3) for main tasks,")
     print("          number.letter (1.a, 1.b) for subtasks.")
