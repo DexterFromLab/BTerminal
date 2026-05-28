@@ -492,6 +492,66 @@ def cmd_reorder(args):
     db.close()
 
 
+def cmd_move(args):
+    """Move a task to an absolute position. Usage: tasks move <project> <task_id> <position>"""
+    if len(args) < 3:
+        print("Usage: tasks move <project> <task_id> <position>")
+        sys.exit(1)
+
+    project, task_id = args[0], args[1]
+    try:
+        target = int(args[2])
+    except ValueError:
+        print(f"Error: position must be an integer, got {args[2]!r}.")
+        sys.exit(1)
+
+    db = get_db()
+
+    task = db.execute(
+        "SELECT task_id, status FROM tasks WHERE project = ? AND task_id = ?",
+        (project, task_id),
+    ).fetchone()
+
+    if not task:
+        print(f"Error: Task {task_id} not found in project '{project}'.")
+        db.close()
+        sys.exit(1)
+
+    status = task["status"]
+
+    peers = db.execute(
+        "SELECT task_id FROM tasks "
+        "WHERE project = ? AND status = ? "
+        "ORDER BY position NULLS LAST, task_id",
+        (project, status),
+    ).fetchall()
+
+    peer_ids = [r["task_id"] for r in peers]
+    try:
+        current_idx = peer_ids.index(task_id)
+    except ValueError:
+        print(f"Error: Task {task_id} not found among {status!r} peers.")
+        db.close()
+        sys.exit(1)
+
+    # Clamp to valid range (1-based → 0-based index)
+    target_idx = max(0, min(target - 1, len(peer_ids) - 1))
+
+    # Reorder the list in Python, then renumber sequentially
+    peer_ids.pop(current_idx)
+    peer_ids.insert(target_idx, task_id)
+
+    for i, tid in enumerate(peer_ids, start=1):
+        db.execute(
+            "UPDATE tasks SET position = ?, updated_at = datetime('now') "
+            "WHERE project = ? AND task_id = ?",
+            (i, project, tid),
+        )
+    db.commit()
+    print(f"[{project}] Task {task_id} moved to position {target_idx + 1}")
+    db.close()
+
+
 COMMANDS = {
     "add": cmd_add,
     "done": cmd_done,
@@ -504,6 +564,7 @@ COMMANDS = {
     "edit": cmd_edit,
     "reset": cmd_reset,
     "reorder": cmd_reorder,
+    "move": cmd_move,
 }
 
 
@@ -521,6 +582,7 @@ def print_help():
     print("  pending <project>            Count of open tasks")
     print("  reset <project>              Reset all tasks to open")
     print("  reorder <project> <id> up|down    Move task up or down in execution order")
+    print("  move <project> <id> <position>    Move task to absolute position (1 = first)")
     print()
     print("Task IDs: use numbers (1, 2, 3) for main tasks,")
     print("          number.letter (1.a, 1.b) for subtasks.")
