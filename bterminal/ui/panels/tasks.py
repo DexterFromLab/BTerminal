@@ -177,6 +177,24 @@ class TaskListPanel(Gtk.Box):
         tree_scroll = Gtk.ScrolledWindow()
         tree_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         tree_scroll.add(self.tree)
+
+        # ── Reorder bar (above the task list) ──
+        reorder_box = Gtk.Box(spacing=4)
+        reorder_box.set_border_width(4)
+
+        btn_up = Gtk.Button(label="↑  Move up")
+        btn_up.get_style_context().add_class("sidebar-btn")
+        btn_up.set_tooltip_text("Move selected task up")
+        btn_up.connect("clicked", lambda _: self._on_reorder_task("up"))
+        reorder_box.pack_start(btn_up, True, True, 0)
+
+        btn_down = Gtk.Button(label="↓  Move down")
+        btn_down.get_style_context().add_class("sidebar-btn")
+        btn_down.set_tooltip_text("Move selected task down")
+        btn_down.connect("clicked", lambda _: self._on_reorder_task("down"))
+        reorder_box.pack_start(btn_down, True, True, 0)
+
+        self.pack_start(reorder_box, False, False, 0)
         self.pack_start(tree_scroll, True, True, 0)
 
         # ── Auto-trigger controls ──
@@ -221,18 +239,6 @@ class TaskListPanel(Gtk.Box):
         btn_del.get_style_context().add_class("sidebar-btn")
         btn_del.connect("clicked", lambda _: self._on_delete_task())
         btn_box.pack_start(btn_del, True, True, 0)
-
-        btn_up = Gtk.Button(label="\u2191")
-        btn_up.get_style_context().add_class("sidebar-btn")
-        btn_up.set_tooltip_text("Move task up")
-        btn_up.connect("clicked", lambda _: self._on_reorder_task("up"))
-        btn_box.pack_start(btn_up, False, False, 0)
-
-        btn_down = Gtk.Button(label="\u2193")
-        btn_down.get_style_context().add_class("sidebar-btn")
-        btn_down.set_tooltip_text("Move task down")
-        btn_down.connect("clicked", lambda _: self._on_reorder_task("down"))
-        btn_box.pack_start(btn_down, False, False, 0)
 
         btn_more = Gtk.MenuButton(label="\u22ee")
         btn_more.get_style_context().add_class("sidebar-btn")
