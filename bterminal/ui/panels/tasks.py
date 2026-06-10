@@ -36,6 +36,11 @@ from bterminal.config import (
     show_error_dialog,
     show_info_dialog,
 )
+from bterminal.tasks_db import migrate_add_position
+
+# Index of the is_separator boolean in the Gtk.ListStore row tuple.
+# (Schema: bool done, str task_id, str description, str status, bool is_separator)
+_COL_SEPARATOR = 4
 
 
 def _ensure_tasks_tables():
@@ -67,57 +72,8 @@ def _ensure_tasks_tables():
             PRIMARY KEY (project, task_id)
         );
     """)
-    _migrate_add_position(db)
+    migrate_add_position(db)
     db.close()
-
-
-def _migrate_add_position(db):
-    """Add position column to existing tasks table (idempotent)."""
-    cols = [r[1] for r in db.execute("PRAGMA table_info(tasks)").fetchall()]
-    if "position" not in cols:
-        db.execute("ALTER TABLE tasks ADD COLUMN position INTEGER")
-        db.commit()
-    _backfill_positions(db)
-
-
-def _backfill_positions(db):
-    """Assign position to tasks that have NULL position after migration."""
-    projects = [
-        r[0] for r in db.execute(
-            "SELECT DISTINCT project FROM tasks WHERE position IS NULL"
-        ).fetchall()
-    ]
-    for project in projects:
-        null_rows = db.execute(
-            "SELECT task_id FROM tasks WHERE project = ? AND position IS NULL",
-            (project,),
-        ).fetchall()
-        max_row = db.execute(
-            "SELECT MAX(position) FROM tasks WHERE project = ? AND position IS NOT NULL",
-            (project,),
-        ).fetchone()
-        start = (max_row[0] or 0) + 1
-        for i, tid in enumerate(
-            sorted([r[0] for r in null_rows], key=_task_sort_key), start=start
-        ):
-            db.execute(
-                "UPDATE tasks SET position = ? WHERE project = ? AND task_id = ? AND position IS NULL",
-                (i, project, tid),
-            )
-    if projects:
-        db.commit()
-
-
-def _task_sort_key(task_id):
-    """Natural sort key for hierarchical task IDs like 1, 1.a, 1.b, 2, 10."""
-    parts = task_id.split(".")
-    result = []
-    for p in parts:
-        try:
-            result.append((0, int(p), ""))
-        except ValueError:
-            result.append((1, 0, p))
-    return result
 
 
 class TaskListPanel(Gtk.Box):
@@ -443,7 +399,7 @@ class TaskListPanel(Gtk.Box):
     @staticmethod
     def _row_separator_func(model, iter_, data=None):
         """Return True for separator rows."""
-        return model[iter_][4]
+        return model[iter_][_COL_SEPARATOR]
 
     @staticmethod
     def _style_cell(column, cell, model, iter_, data=None):
@@ -474,7 +430,7 @@ class TaskListPanel(Gtk.Box):
         if not project:
             return
         it = self.store.get_iter(path)
-        if self.store[it][4]:  # separator row
+        if self.store[it][_COL_SEPARATOR]:
             return
         task_id = self.store[it][1]
         current_done = self.store[it][0]
@@ -548,7 +504,7 @@ class TaskListPanel(Gtk.Box):
         model, it = sel.get_selected()
         if not it or not project:
             return
-        if model[it][4]:  # separator row
+        if model[it][_COL_SEPARATOR]:
             return
 
         task_id = model[it][1]
@@ -597,31 +553,39 @@ class TaskListPanel(Gtk.Box):
         swap_id = peer_ids[swap_idx]
         swap_pos = peers[swap_idx]["position"]
 
-        # If either task was added without a position (e.g. via GUI before this
-        # fix), assign sequential integers to all peers before swapping so we
-        # never write NULL into a neighbour's position column.
-        if current_pos is None or swap_pos is None:
-            for i, r in enumerate(peers, start=1):
+        # Atomic swap: wrap both UPDATE-s in one transaction so a mid-swap
+        # crash never leaves two tasks claiming the same position.
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            # If either task was added without a position (legacy NULL rows),
+            # renumber all peers contiguously. The swap is then expressed as
+            # the post-renumber peer order with `task_id` and `swap_id` flipped.
+            if current_pos is None or swap_pos is None:
+                new_order = list(peer_ids)
+                new_order[idx], new_order[swap_idx] = new_order[swap_idx], new_order[idx]
+                for i, tid in enumerate(new_order, start=1):
+                    db.execute(
+                        "UPDATE tasks SET position = ?, updated_at = datetime('now') "
+                        "WHERE project = ? AND task_id = ?",
+                        (i, project, tid),
+                    )
+            else:
                 db.execute(
-                    "UPDATE tasks SET position = ? WHERE project = ? AND task_id = ?",
-                    (i, project, r["task_id"]),
+                    "UPDATE tasks SET position = ?, updated_at = datetime('now') "
+                    "WHERE project = ? AND task_id = ?",
+                    (swap_pos, project, task_id),
+                )
+                db.execute(
+                    "UPDATE tasks SET position = ?, updated_at = datetime('now') "
+                    "WHERE project = ? AND task_id = ?",
+                    (current_pos, project, swap_id),
                 )
             db.commit()
-            current_pos = idx + 1
-            swap_pos = swap_idx + 1
-
-        db.execute(
-            "UPDATE tasks SET position = ?, updated_at = datetime('now') "
-            "WHERE project = ? AND task_id = ?",
-            (swap_pos, project, task_id),
-        )
-        db.execute(
-            "UPDATE tasks SET position = ?, updated_at = datetime('now') "
-            "WHERE project = ? AND task_id = ?",
-            (current_pos, project, swap_id),
-        )
-        db.commit()
-        db.close()
+        except sqlite3.Error:
+            db.rollback()
+            raise
+        finally:
+            db.close()
         self._load_tasks()
 
     def _on_add_task(self):

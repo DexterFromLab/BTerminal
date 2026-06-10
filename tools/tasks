@@ -16,6 +16,28 @@ from pathlib import Path
 
 DB_PATH = Path.home() / ".claude-context" / "context.db"
 
+# Try to import shared helpers from the bterminal package so the CLI and the
+# in-app TaskListPanel can't drift apart. Probe both the repo layout
+# (tools/tasks → repo root) and the installed layout (~/.local/share/bterminal/
+# tasks → same dir as the bterminal package). Falls back to inline copies if
+# the package is unavailable (e.g. when the CLI is run standalone).
+_SCRIPT_DIR = Path(__file__).resolve().parent
+for _candidate in (_SCRIPT_DIR.parent, _SCRIPT_DIR):
+    if (_candidate / "bterminal" / "tasks_db.py").exists():
+        if str(_candidate) not in sys.path:
+            sys.path.insert(0, str(_candidate))
+        break
+
+try:
+    from bterminal.tasks_db import (
+        backfill_positions as _backfill_positions_shared,
+        migrate_add_position as _migrate_add_position_shared,
+        task_sort_key as _task_sort_key_shared,
+    )
+    _HAS_SHARED_DB = True
+except ImportError:
+    _HAS_SHARED_DB = False
+
 
 def _ensure_secure_perms(path):
     """Force 0o600 on the CTX DB file + 0o700 on its parent dir
@@ -75,53 +97,59 @@ def init_db():
     db.close()
 
 
-def _migrate_add_position(db):
-    """Add position column to existing tasks tables (idempotent)."""
-    cols = [r[1] for r in db.execute("PRAGMA table_info(tasks)").fetchall()]
-    if "position" not in cols:
-        db.execute("ALTER TABLE tasks ADD COLUMN position INTEGER")
-        db.commit()
-    _backfill_positions(db)
+# Shared with bterminal.tasks_db when importable (see top-of-file probe);
+# inline definitions below act as a standalone fallback so the CLI keeps
+# working when the bterminal package isn't on sys.path.
+if _HAS_SHARED_DB:
+    _migrate_add_position = _migrate_add_position_shared
+    _backfill_positions = _backfill_positions_shared
+    task_sort_key = _task_sort_key_shared
+else:
+    def task_sort_key(task_id):
+        """Natural sort key for hierarchical task IDs like 1, 1.a, 1.b, 2, 10."""
+        parts = task_id.split(".")
+        result = []
+        for p in parts:
+            try:
+                result.append((0, int(p), ""))
+            except ValueError:
+                result.append((1, 0, p))
+        return result
 
+    def _backfill_positions(db):
+        """Assign position to tasks with NULL position (fallback copy)."""
+        projects = [
+            r[0] for r in db.execute(
+                "SELECT DISTINCT project FROM tasks WHERE position IS NULL"
+            ).fetchall()
+        ]
+        for project in projects:
+            null_rows = db.execute(
+                "SELECT task_id FROM tasks WHERE project = ? AND position IS NULL",
+                (project,),
+            ).fetchall()
+            max_row = db.execute(
+                "SELECT MAX(position) FROM tasks WHERE project = ? AND position IS NOT NULL",
+                (project,),
+            ).fetchone()
+            start = (max_row[0] or 0) + 1
+            for i, tid in enumerate(
+                sorted([r[0] for r in null_rows], key=task_sort_key), start=start
+            ):
+                db.execute(
+                    "UPDATE tasks SET position = ? WHERE project = ? AND task_id = ? AND position IS NULL",
+                    (i, project, tid),
+                )
+        if projects:
+            db.commit()
 
-def _backfill_positions(db):
-    """Assign position to tasks that have NULL position (existing rows after migration)."""
-    projects = [
-        r[0] for r in db.execute(
-            "SELECT DISTINCT project FROM tasks WHERE position IS NULL"
-        ).fetchall()
-    ]
-    for project in projects:
-        null_rows = db.execute(
-            "SELECT task_id FROM tasks WHERE project = ? AND position IS NULL",
-            (project,),
-        ).fetchall()
-        max_row = db.execute(
-            "SELECT MAX(position) FROM tasks WHERE project = ? AND position IS NOT NULL",
-            (project,),
-        ).fetchone()
-        start = (max_row[0] or 0) + 1
-        for i, tid in enumerate(
-            sorted([r[0] for r in null_rows], key=task_sort_key), start=start
-        ):
-            db.execute(
-                "UPDATE tasks SET position = ? WHERE project = ? AND task_id = ? AND position IS NULL",
-                (i, project, tid),
-            )
-    if projects:
-        db.commit()
-
-
-def task_sort_key(task_id):
-    """Natural sort key for hierarchical task IDs like 1, 1.a, 1.b, 2, 10."""
-    parts = task_id.split(".")
-    result = []
-    for p in parts:
-        try:
-            result.append((0, int(p), ""))
-        except ValueError:
-            result.append((1, 0, p))
-    return result
+    def _migrate_add_position(db):
+        """Add position column (idempotent) + backfill — fallback copy."""
+        cols = [r[1] for r in db.execute("PRAGMA table_info(tasks)").fetchall()]
+        if "position" not in cols:
+            db.execute("ALTER TABLE tasks ADD COLUMN position INTEGER")
+            db.commit()
+        _backfill_positions(db)
 
 
 def next_task_id(db, project, parent=None):
@@ -467,26 +495,35 @@ def cmd_reorder(args):
     swap_id = peer_ids[swap_idx]
     swap_pos = peers[swap_idx]["position"]
 
-    # If either task lacks a position, normalize all peers before swapping.
-    if current_pos is None or swap_pos is None:
-        for i, r in enumerate(peers, start=1):
+    # Atomic swap: wrap in one transaction so a mid-swap crash never leaves
+    # two tasks claiming the same position. The legacy-NULL branch builds the
+    # post-swap order in Python and renumbers in one pass \u2014 no wasted writes.
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        if current_pos is None or swap_pos is None:
+            new_order = list(peer_ids)
+            new_order[idx], new_order[swap_idx] = new_order[swap_idx], new_order[idx]
+            for i, tid in enumerate(new_order, start=1):
+                db.execute(
+                    "UPDATE tasks SET position = ?, updated_at = datetime('now') "
+                    "WHERE project = ? AND task_id = ?",
+                    (i, project, tid),
+                )
+        else:
             db.execute(
-                "UPDATE tasks SET position = ? WHERE project = ? AND task_id = ?",
-                (i, project, r["task_id"]),
+                "UPDATE tasks SET position = ?, updated_at = datetime('now') "
+                "WHERE project = ? AND task_id = ?",
+                (swap_pos, project, task_id),
+            )
+            db.execute(
+                "UPDATE tasks SET position = ?, updated_at = datetime('now') "
+                "WHERE project = ? AND task_id = ?",
+                (current_pos, project, swap_id),
             )
         db.commit()
-        current_pos = idx + 1
-        swap_pos = swap_idx + 1
-
-    db.execute(
-        "UPDATE tasks SET position = ?, updated_at = datetime('now') WHERE project = ? AND task_id = ?",
-        (swap_pos, project, task_id),
-    )
-    db.execute(
-        "UPDATE tasks SET position = ?, updated_at = datetime('now') WHERE project = ? AND task_id = ?",
-        (current_pos, project, swap_id),
-    )
-    db.commit()
+    except sqlite3.Error:
+        db.rollback()
+        raise
     arrow = "\u2191" if direction == "up" else "\u2193"
     print(f"[{project}] Task {task_id} moved {direction} {arrow}")
     db.close()
@@ -537,17 +574,23 @@ def cmd_move(args):
     # Clamp to valid range (1-based → 0-based index)
     target_idx = max(0, min(target - 1, len(peer_ids) - 1))
 
-    # Reorder the list in Python, then renumber sequentially
+    # Reorder the list in Python, then renumber sequentially under one
+    # transaction so a mid-renumber crash never leaves a partial order.
     peer_ids.pop(current_idx)
     peer_ids.insert(target_idx, task_id)
 
-    for i, tid in enumerate(peer_ids, start=1):
-        db.execute(
-            "UPDATE tasks SET position = ?, updated_at = datetime('now') "
-            "WHERE project = ? AND task_id = ?",
-            (i, project, tid),
-        )
-    db.commit()
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        for i, tid in enumerate(peer_ids, start=1):
+            db.execute(
+                "UPDATE tasks SET position = ?, updated_at = datetime('now') "
+                "WHERE project = ? AND task_id = ?",
+                (i, project, tid),
+            )
+        db.commit()
+    except sqlite3.Error:
+        db.rollback()
+        raise
     print(f"[{project}] Task {task_id} moved to position {target_idx + 1}")
     db.close()
 

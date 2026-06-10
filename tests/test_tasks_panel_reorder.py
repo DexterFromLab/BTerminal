@@ -59,7 +59,7 @@ def _make_db(db_path: Path, project: str = "myproj",
         CREATE TABLE task_config (project TEXT PRIMARY KEY, autorun INTEGER DEFAULT 0);
         CREATE TABLE task_claims (
             project TEXT NOT NULL, task_id TEXT NOT NULL, session_id TEXT NOT NULL,
-            PRIMARY KEY (project, task_id)
+            PRIMARY KEY (project, task_id, session_id)
         );
         CREATE TABLE sessions (name TEXT PRIMARY KEY, description TEXT, work_dir TEXT);
         CREATE TABLE contexts (
@@ -110,7 +110,7 @@ def test_panel_source_has_reorder_method():
 def test_panel_source_has_up_button():
     """Source must reference an Up reorder button (↑ or label containing 'up')."""
     src = PANEL_SRC.read_text()
-    has_arrow = "↑" in src or "↑" in src
+    has_arrow = "↑" in src
     has_label = "up" in src.lower() and ("btn_up" in src or "reorder" in src.lower())
     assert has_arrow or has_label, (
         "TaskListPanel source has no ↑ button for reorder — "
@@ -121,7 +121,7 @@ def test_panel_source_has_up_button():
 def test_panel_source_has_down_button():
     """Source must reference a Down reorder button (↓ or label containing 'down')."""
     src = PANEL_SRC.read_text()
-    has_arrow = "↓" in src or "↓" in src
+    has_arrow = "↓" in src
     has_label = "down" in src.lower() and ("btn_down" in src or "reorder" in src.lower())
     assert has_arrow or has_label, (
         "TaskListPanel source has no ↓ button for reorder — "
@@ -385,7 +385,7 @@ def test_panel_has_up_button_in_widget_tree(tmp_path):
         panel = TaskListPanel(app)
 
     labels = _collect_buttons(panel)
-    assert any("↑" in lbl or "↑" in lbl for lbl in labels), (
+    assert any("↑" in lbl for lbl in labels), (
         f"No ↑ button found in TaskListPanel widget tree. Button labels: {labels}"
     )
 
@@ -406,7 +406,7 @@ def test_panel_has_down_button_in_widget_tree(tmp_path):
         panel = TaskListPanel(app)
 
     labels = _collect_buttons(panel)
-    assert any("↓" in lbl or "↓" in lbl for lbl in labels), (
+    assert any("↓" in lbl for lbl in labels), (
         f"No ↓ button found in TaskListPanel widget tree. Button labels: {labels}"
     )
 
@@ -442,10 +442,10 @@ def test_panel_up_down_buttons_have_tooltips(tmp_path):
 
     buttons = collect_buttons_with_tooltips(panel)
     up_btn = next(
-        (t for lbl, t in buttons if "↑" in lbl or "↑" in lbl), None
+        (t for lbl, t in buttons if "↑" in lbl), None
     )
     down_btn = next(
-        (t for lbl, t in buttons if "↓" in lbl or "↓" in lbl), None
+        (t for lbl, t in buttons if "↓" in lbl), None
     )
     assert up_btn is not None, "No ↑ button with tooltip found"
     assert down_btn is not None, "No ↓ button with tooltip found"
