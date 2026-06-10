@@ -36,6 +36,11 @@ from bterminal.config import (
     show_error_dialog,
     show_info_dialog,
 )
+from bterminal.tasks_db import migrate_add_position
+
+# Index of the is_separator boolean in the Gtk.ListStore row tuple.
+# (Schema: bool done, str task_id, str description, str status, bool is_separator)
+_COL_SEPARATOR = 4
 
 
 def _ensure_tasks_tables():
@@ -50,6 +55,7 @@ def _ensure_tasks_tables():
             task_id TEXT NOT NULL,
             description TEXT NOT NULL,
             status TEXT DEFAULT 'open',
+            position INTEGER,
             created_at TEXT DEFAULT (datetime('now')),
             updated_at TEXT DEFAULT (datetime('now')),
             UNIQUE(project, task_id)
@@ -66,19 +72,8 @@ def _ensure_tasks_tables():
             PRIMARY KEY (project, task_id)
         );
     """)
+    migrate_add_position(db)
     db.close()
-
-
-def _task_sort_key(task_id):
-    """Natural sort key for hierarchical task IDs like 1, 1.a, 1.b, 2, 10."""
-    parts = task_id.split(".")
-    result = []
-    for p in parts:
-        try:
-            result.append((0, int(p), ""))
-        except ValueError:
-            result.append((1, 0, p))
-    return result
 
 
 class TaskListPanel(Gtk.Box):
@@ -138,6 +133,24 @@ class TaskListPanel(Gtk.Box):
         tree_scroll = Gtk.ScrolledWindow()
         tree_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         tree_scroll.add(self.tree)
+
+        # ── Reorder bar (above the task list) ──
+        reorder_box = Gtk.Box(spacing=4)
+        reorder_box.set_border_width(4)
+
+        btn_up = Gtk.Button(label="↑  Move up")
+        btn_up.get_style_context().add_class("sidebar-btn")
+        btn_up.set_tooltip_text("Move selected task up")
+        btn_up.connect("clicked", lambda _: self._on_reorder_task("up"))
+        reorder_box.pack_start(btn_up, True, True, 0)
+
+        btn_down = Gtk.Button(label="↓  Move down")
+        btn_down.get_style_context().add_class("sidebar-btn")
+        btn_down.set_tooltip_text("Move selected task down")
+        btn_down.connect("clicked", lambda _: self._on_reorder_task("down"))
+        reorder_box.pack_start(btn_down, True, True, 0)
+
+        self.pack_start(reorder_box, False, False, 0)
         self.pack_start(tree_scroll, True, True, 0)
 
         # ── Auto-trigger controls ──
@@ -317,7 +330,11 @@ class TaskListPanel(Gtk.Box):
             db = sqlite3.connect(CTX_DB)
             db.row_factory = sqlite3.Row
             projects = db.execute(
-                "SELECT name FROM sessions ORDER BY name"
+                "SELECT DISTINCT name FROM ("
+                "  SELECT name FROM sessions"
+                "  UNION"
+                "  SELECT DISTINCT project AS name FROM tasks"
+                ") ORDER BY name"
             ).fetchall()
             db.close()
             active_idx = 0
@@ -346,16 +363,15 @@ class TaskListPanel(Gtk.Box):
         db = sqlite3.connect(CTX_DB)
         db.row_factory = sqlite3.Row
         rows = db.execute(
-            "SELECT task_id, description, status FROM tasks WHERE project = ?",
+            "SELECT task_id, description, status FROM tasks WHERE project = ? "
+            "ORDER BY position NULLS LAST, task_id",
             (project,),
         ).fetchall()
         db.close()
 
-        # Split into active (newest first) and done (at bottom)
+        # Split into active and done — DB already sorted by position
         active = [r for r in rows if r["status"] != "done"]
         done = [r for r in rows if r["status"] == "done"]
-        active.sort(key=lambda r: _task_sort_key(r["task_id"]))
-        done.sort(key=lambda r: _task_sort_key(r["task_id"]))
 
         restore_path = None
         for t in active:
@@ -383,7 +399,7 @@ class TaskListPanel(Gtk.Box):
     @staticmethod
     def _row_separator_func(model, iter_, data=None):
         """Return True for separator rows."""
-        return model[iter_][4]
+        return model[iter_][_COL_SEPARATOR]
 
     @staticmethod
     def _style_cell(column, cell, model, iter_, data=None):
@@ -414,7 +430,7 @@ class TaskListPanel(Gtk.Box):
         if not project:
             return
         it = self.store.get_iter(path)
-        if self.store[it][4]:  # separator row
+        if self.store[it][_COL_SEPARATOR]:
             return
         task_id = self.store[it][1]
         current_done = self.store[it][0]
@@ -477,6 +493,101 @@ class TaskListPanel(Gtk.Box):
                 GLib.timeout_add(100, lambda t=_t: t.feed_child(b"\r") or False)
         db.close()
 
+    def _on_reorder_task(self, direction):
+        """Swap the selected task's position with its neighbour (up or down).
+
+        Operates within same-status peers so moving an open task skips
+        done tasks and vice-versa.
+        """
+        project = self._get_selected_project()
+        sel = self.tree.get_selection()
+        model, it = sel.get_selected()
+        if not it or not project:
+            return
+        if model[it][_COL_SEPARATOR]:
+            return
+
+        task_id = model[it][1]
+        if not task_id:
+            return
+
+        db = sqlite3.connect(CTX_DB)
+        db.row_factory = sqlite3.Row
+
+        task = db.execute(
+            "SELECT task_id, position, status FROM tasks WHERE project = ? AND task_id = ?",
+            (project, task_id),
+        ).fetchone()
+        if not task:
+            db.close()
+            return
+
+        current_pos = task["position"]
+        status = task["status"]
+
+        peers = db.execute(
+            "SELECT task_id, position FROM tasks "
+            "WHERE project = ? AND status = ? "
+            "ORDER BY position NULLS LAST, task_id",
+            (project, status),
+        ).fetchall()
+
+        peer_ids = [r["task_id"] for r in peers]
+        try:
+            idx = peer_ids.index(task_id)
+        except ValueError:
+            db.close()
+            return
+
+        if direction == "up":
+            if idx == 0:
+                db.close()
+                return
+            swap_idx = idx - 1
+        else:
+            if idx == len(peers) - 1:
+                db.close()
+                return
+            swap_idx = idx + 1
+
+        swap_id = peer_ids[swap_idx]
+        swap_pos = peers[swap_idx]["position"]
+
+        # Atomic swap: wrap both UPDATE-s in one transaction so a mid-swap
+        # crash never leaves two tasks claiming the same position.
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            # If either task was added without a position (legacy NULL rows),
+            # renumber all peers contiguously. The swap is then expressed as
+            # the post-renumber peer order with `task_id` and `swap_id` flipped.
+            if current_pos is None or swap_pos is None:
+                new_order = list(peer_ids)
+                new_order[idx], new_order[swap_idx] = new_order[swap_idx], new_order[idx]
+                for i, tid in enumerate(new_order, start=1):
+                    db.execute(
+                        "UPDATE tasks SET position = ?, updated_at = datetime('now') "
+                        "WHERE project = ? AND task_id = ?",
+                        (i, project, tid),
+                    )
+            else:
+                db.execute(
+                    "UPDATE tasks SET position = ?, updated_at = datetime('now') "
+                    "WHERE project = ? AND task_id = ?",
+                    (swap_pos, project, task_id),
+                )
+                db.execute(
+                    "UPDATE tasks SET position = ?, updated_at = datetime('now') "
+                    "WHERE project = ? AND task_id = ?",
+                    (current_pos, project, swap_id),
+                )
+            db.commit()
+        except sqlite3.Error:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+        self._load_tasks()
+
     def _on_add_task(self):
         project = self._get_selected_project()
         if not project:
@@ -537,10 +648,14 @@ class TaskListPanel(Gtk.Box):
                             pass
                     task_id = str(max_num + 1)
                 try:
+                    pos_row = db.execute(
+                        "SELECT MAX(position) FROM tasks WHERE project = ?", (project,)
+                    ).fetchone()
+                    next_pos = (pos_row[0] or 0) + 1
                     db.execute(
-                        """INSERT INTO tasks (project, task_id, description, status)
-                           VALUES (?, ?, ?, 'open')""",
-                        (project, task_id, description),
+                        """INSERT INTO tasks (project, task_id, description, status, position)
+                           VALUES (?, ?, ?, 'open', ?)""",
+                        (project, task_id, description, next_pos),
                     )
                     db.commit()
                 except sqlite3.IntegrityError:
