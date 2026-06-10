@@ -1,9 +1,11 @@
 # BTerminal ライセンス契約
 
-**バージョン 1.0** — 2026-05-04 より有効
+**バージョン 1.1** — 2026-06-10 より有効
 
-Copyright (c) 2024-2026 **Bartosz Czarnota**
+Copyright (c) 2024-2026 **Bartosz Czarnota**, **Jakub Szpak**, **Paweł Jesionkowski**
 連絡先: <bartoszczarnota1@gmail.com>
+<jakub.szpak@gmail.com>
+<jesionkow.pawel@gmail.com>
 
 ---
 
@@ -19,8 +21,8 @@ Copyright (c) 2024-2026 **Bartosz Czarnota**
 **原著作者の帰属情報を完全かつ変更せずに再現する**必要があります。
 具体的には、以下の識別情報を各配布物において表示し続ける必要があります。
 
-- 著作者氏名: **Bartosz Czarnota**
-- 著作者連絡先: **<bartoszczarnota1@gmail.com>**
+- 著作者氏名: **Bartosz Czarnota**, **Jakub Szpak**, **Paweł Jesionkowski**
+- 著作者連絡先: **<bartoszczarnota1@gmail.com>**, **<jakub.szpak@gmail.com>**, **<jesionkow.pawel@gmail.com>**
 - 元プロジェクト: **BTerminal**
 
 上記の情報は、再配布または派生著作物の以下の**すべての**箇所に
@@ -66,8 +68,14 @@ BTerminal のライセンスダイアログで **「同意する」** をクリ�
 
 ## 6. 所有者
 
-**Bartosz Czarnota**
+**Bartosz Czarnota** (主著者)
 <bartoszczarnota1@gmail.com>
+
+**Jakub Szpak** (共著者)
+<jakub.szpak@gmail.com>
+
+**Paweł Jesionkowski** (共著者)
+<jesionkow.pawel@gmail.com>
 
 この著作権表示およびこれらの条件は、本ソフトウェアのすべての複製
 または重要な部分に含めなければなりません。

@@ -1,9 +1,11 @@
 # Ліцензійна угода BTerminal
 
-**Версія 1.0** — чинна з 2026-05-04
+**Версія 1.1** — чинна з 2026-06-10
 
-Copyright (c) 2024-2026 **Bartosz Czarnota**
+Copyright (c) 2024-2026 **Bartosz Czarnota**, **Jakub Szpak**, **Paweł Jesionkowski**
 Контакт: <bartoszczarnota1@gmail.com>
+<jakub.szpak@gmail.com>
+<jesionkow.pawel@gmail.com>
 
 ---
 
@@ -22,8 +24,8 @@ Copyright (c) 2024-2026 **Bartosz Czarnota**
 інформацію про авторство оригінального автора**. Зокрема, наступні
 ідентифікатори мають залишатися видимими в кожному розповсюдженні:
 
-- Ім'я автора: **Bartosz Czarnota**
-- Контакт автора: **<bartoszczarnota1@gmail.com>**
+- Ім'я автора: **Bartosz Czarnota**, **Jakub Szpak**, **Paweł Jesionkowski**
+- Контакт автора: **<bartoszczarnota1@gmail.com>**, **<jakub.szpak@gmail.com>**, **<jesionkow.pawel@gmail.com>**
 - Оригінальний проєкт: **BTerminal**
 
 Зазначена інформація повинна з'являтися в **усіх** наведених нижче
@@ -74,8 +76,14 @@ Copyright (c) 2024-2026 **Bartosz Czarnota**
 
 ## 6. Власник
 
-**Bartosz Czarnota**
+**Bartosz Czarnota** (головний автор)
 <bartoszczarnota1@gmail.com>
+
+**Jakub Szpak** (співавтор)
+<jakub.szpak@gmail.com>
+
+**Paweł Jesionkowski** (співавтор)
+<jesionkow.pawel@gmail.com>
 
 Це повідомлення про авторське право та ці умови повинні бути
 включені в усі копії або істотні частини Програмного забезпечення.

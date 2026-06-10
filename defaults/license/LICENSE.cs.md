@@ -1,9 +1,11 @@
 # Licenční smlouva BTerminal
 
-**Verze 1.0** — platná od 2026-05-04
+**Verze 1.1** — platná od 2026-06-10
 
-Copyright (c) 2024-2026 **Bartosz Czarnota**
+Copyright (c) 2024-2026 **Bartosz Czarnota**, **Jakub Szpak**, **Paweł Jesionkowski**
 Kontakt: <bartoszczarnota1@gmail.com>
+<jakub.szpak@gmail.com>
+<jesionkow.pawel@gmail.com>
 
 ---
 
@@ -21,8 +23,8 @@ Všechny kopie Softwaru, včetně podstatných částí a odvozených děl,
 původního autora**. Konkrétně musí v každé distribuci zůstat
 viditelné následující identifikátory:
 
-- Jméno autora: **Bartosz Czarnota**
-- Kontakt autora: **<bartoszczarnota1@gmail.com>**
+- Jméno autora: **Bartosz Czarnota**, **Jakub Szpak**, **Paweł Jesionkowski**
+- Kontakt autora: **<bartoszczarnota1@gmail.com>**, **<jakub.szpak@gmail.com>**, **<jesionkow.pawel@gmail.com>**
 - Původní projekt: **BTerminal**
 
 Výše uvedené informace se musí objevit ve **všech** následujících
@@ -72,8 +74,14 @@ Pokud odmítnete, aplikace se zavře nebo bude aktualizace zrušena.
 
 ## 6. Vlastník
 
-**Bartosz Czarnota**
+**Bartosz Czarnota** (hlavní autor)
 <bartoszczarnota1@gmail.com>
+
+**Jakub Szpak** (spoluautor)
+<jakub.szpak@gmail.com>
+
+**Paweł Jesionkowski** (spoluautor)
+<jesionkow.pawel@gmail.com>
 
 Toto upozornění o autorských právech a tyto podmínky musí být
 zahrnuty ve všech kopiích nebo podstatných částech Softwaru.

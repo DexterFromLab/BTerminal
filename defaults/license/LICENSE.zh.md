@@ -1,9 +1,11 @@
 # BTerminal 许可协议
 
-**版本 1.0** — 自 2026-05-04 起生效
+**版本 1.1** — 自 2026-06-10 起生效
 
-Copyright (c) 2024-2026 **Bartosz Czarnota**
+Copyright (c) 2024-2026 **Bartosz Czarnota**, **Jakub Szpak**, **Paweł Jesionkowski**
 联系方式：<bartoszczarnota1@gmail.com>
+<jakub.szpak@gmail.com>
+<jesionkow.pawel@gmail.com>
 
 ---
 
@@ -17,8 +19,8 @@ Copyright (c) 2024-2026 **Bartosz Czarnota**
 本软件的所有副本，包括其重要部分和衍生作品，**必须完整且不加更改地复制
 原作者的署名信息**。具体而言，以下标识必须在每次分发中保持可见：
 
-- 作者姓名：**Bartosz Czarnota**
-- 作者联系方式：**<bartoszczarnota1@gmail.com>**
+- 作者姓名：**Bartosz Czarnota**, **Jakub Szpak**, **Paweł Jesionkowski**
+- 作者联系方式：**<bartoszczarnota1@gmail.com>**, **<jakub.szpak@gmail.com>**, **<jesionkow.pawel@gmail.com>**
 - 原始项目：**BTerminal**
 
 上述信息必须出现在任何再分发或衍生作品的**所有**以下位置：
@@ -55,7 +57,13 @@ Copyright (c) 2024-2026 **Bartosz Czarnota**
 
 ## 6. 所有者
 
-**Bartosz Czarnota**
+**Bartosz Czarnota** (主要作者)
 <bartoszczarnota1@gmail.com>
+
+**Jakub Szpak** (联合作者)
+<jakub.szpak@gmail.com>
+
+**Paweł Jesionkowski** (联合作者)
+<jesionkow.pawel@gmail.com>
 
 此版权声明和这些条件应包含在本软件的所有副本或重要部分中。

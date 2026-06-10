@@ -1,9 +1,11 @@
 # Contratto di licenza BTerminal
 
-**Versione 1.0** — in vigore dal 2026-05-04
+**Versione 1.1** — in vigore dal 2026-06-10
 
-Copyright (c) 2024-2026 **Bartosz Czarnota**
+Copyright (c) 2024-2026 **Bartosz Czarnota**, **Jakub Szpak**, **Paweł Jesionkowski**
 Contatto: <bartoszczarnota1@gmail.com>
+<jakub.szpak@gmail.com>
+<jesionkow.pawel@gmail.com>
 
 ---
 
@@ -23,8 +25,8 @@ le informazioni di paternità dell'autore originale**. In particolare,
 i seguenti identificativi devono rimanere visibili in ogni
 distribuzione:
 
-- Nome dell'autore: **Bartosz Czarnota**
-- Contatto dell'autore: **<bartoszczarnota1@gmail.com>**
+- Nome dell'autore: **Bartosz Czarnota**, **Jakub Szpak**, **Paweł Jesionkowski**
+- Contatto dell'autore: **<bartoszczarnota1@gmail.com>**, **<jakub.szpak@gmail.com>**, **<jesionkow.pawel@gmail.com>**
 - Progetto originale: **BTerminal**
 
 Le suddette informazioni devono comparire in **tutte** le seguenti
@@ -76,8 +78,14 @@ verrà annullato.
 
 ## 6. Proprietario
 
-**Bartosz Czarnota**
+**Bartosz Czarnota** (autore principale)
 <bartoszczarnota1@gmail.com>
+
+**Jakub Szpak** (coautore)
+<jakub.szpak@gmail.com>
+
+**Paweł Jesionkowski** (coautore)
+<jesionkow.pawel@gmail.com>
 
 La presente nota di copyright e le presenti condizioni devono essere
 incluse in tutte le copie o porzioni sostanziali del Software.
