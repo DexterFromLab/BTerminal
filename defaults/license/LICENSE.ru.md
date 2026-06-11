@@ -2,10 +2,11 @@
 
 **Версия 1.1** — действует с 2026-06-10
 
-Copyright (c) 2024-2026 **Bartosz Czarnota**, **Jakub Szpak**, **Paweł Jesionkowski**
+Copyright (c) 2024-2026 **Bartosz Czarnota**, **Jakub Szpak**, **Paweł Jesionkowski**, **Tomasz Frankowski**
 Контакт: <bartoszczarnota1@gmail.com>
 <jakub.szpak@gmail.com>
 <jesionkow.pawel@gmail.com>
+<tomaszfrankowski@icloud.com>
 
 ---
 
@@ -25,8 +26,8 @@ Copyright (c) 2024-2026 **Bartosz Czarnota**, **Jakub Szpak**, **Paweł Jesionko
 В частности, следующие идентификаторы должны оставаться видимыми в
 каждом распространении:
 
-- Имя автора: **Bartosz Czarnota**, **Jakub Szpak**, **Paweł Jesionkowski**
-- Контакт автора: **<bartoszczarnota1@gmail.com>**, **<jakub.szpak@gmail.com>**, **<jesionkow.pawel@gmail.com>**
+- Имя автора: **Bartosz Czarnota**, **Jakub Szpak**, **Paweł Jesionkowski**, **Tomasz Frankowski**
+- Контакт автора: **<bartoszczarnota1@gmail.com>**, **<jakub.szpak@gmail.com>**, **<jesionkow.pawel@gmail.com>**, **<tomaszfrankowski@icloud.com>**
 - Оригинальный проект: **BTerminal**
 
 Указанная информация должна присутствовать **во всех** следующих
@@ -86,6 +87,9 @@ Copyright (c) 2024-2026 **Bartosz Czarnota**, **Jakub Szpak**, **Paweł Jesionko
 
 **Paweł Jesionkowski** (соавтор)
 <jesionkow.pawel@gmail.com>
+
+**Tomasz Frankowski** (соавтор)
+<tomaszfrankowski@icloud.com>
 
 Данное уведомление об авторских правах и эти условия должны
 включаться во все копии или существенные части Программного

@@ -2,66 +2,38 @@
 
 A GTK 3 terminal emulator built for developers who work with SSH servers and AI coding CLIs (Claude Code, GitHub Copilot CLI, Aider). Combines session management, macro automation, a persistent context database, multi-model AI consultation, task orchestration, git awareness, a skills library and a global rules system in a single window. Ships with Catppuccin Mocha (dark) and Latte (light) themes.
 
-**Current release: v1.3.1**
+**Current release: v1.3.5**
 
 ![BTerminal](screenshot.png)
 
-## What's new in v1.3.1
+## What's new
 
-Stability & UX bug-fix release driven by manual QA in Polish locale.
-All fixes verified end-to-end on real VM with semi-automatic UI driver
-(`tools/_e2e_ui_driver.sh` + `tools/_e2e_atspi_driver.py`).
+**v1.3.5** — safer auto-update: when the working tree has uncommitted local
+changes, the updater now asks before discarding them (`git reset --hard` +
+`git clean -fd`) instead of auto-stashing and crashing on stash-pop conflicts.
 
-**Aider provider:**
-- Aider session now receives `--read AIDER.md` (or `CLAUDE.md` fallback)
-  at spawn, so the LLM sees project conventions from prompt #1 instead
-  of relying on auto-discovery (which aider 0.86.2 does not do).
-- Active ctx rules are materialized to a per-spawn temp file and
-  passed via `--read` — rules reach the LLM context immediately
-  rather than waiting for the periodic PTY-feed threshold.
+**v1.3.4** — sudo fixes after the v1.3.3 rollout: AI tab spawn no longer
+freezes on Pop!\_OS, the password-attempt counter is correct, and new Claude
+sessions default to sudo enabled.
 
-**Pull Ollama model dialog:**
-- Curated dropdown of 7 recommended tags (qwen2.5-coder, deepseek-coder-v2,
-  codellama, llama3.1, qwen2.5, llava) plus free-form Entry for new
-  releases.
-- "Browse all models on ollama.com →" link button.
-- Warning dialog before pulling models below 3 B parameters (qwen 0.5b
-  cannot follow Aider's edit format).
-- Pull failure messages now stripped of ANSI cursor sequences and
-  mapped to short Polish text (`Model 'X' nie istnieje w bibliotece
-  Ollama. Sprawdź pisownię na ollama.com/library.` etc.) instead of
-  multi-line stderr dumps.
+**v1.3.3** — shared sudo password cache: AI sessions that need root share one
+password dialog per window, reused by every subsequent tab; Tools menu items
+to set/clear the cached password; a typing guard that blocks rules/ctx
+injection while you are composing a message; stats bar accuracy fixes
+(♻️ cache-hit label, `tok/h` now counts only freshly-processed tokens).
 
-**Options dialog:**
-- Wider default size (720 × content) + min size 680 × 480 + resizable
-  so longer Polish (and other non-English) labels fit without left-edge
-  cropping.
-- Persistent vertical scrollbar (≥ 12 px) with overlay-scrolling off so
-  expanded `AI providers` + `Local Models` sections stay navigable.
-- Theme combo Save now applies the picked target directly via a new
-  idempotent `_set_theme(target)` setter — fixes the Light → Dark
-  regression after Dark → Light.
+**v1.3.2** — Aider setup wizard (`tools/aider_setup_wizard`): detects missing
+Ollama models, presents the curated catalog and orchestrates pulls instead of
+dumping a raw LiteLLM stack trace; reachable from **Tools → Aider Setup
+Wizard…**; Memory panel **Apply Rules** now affects the current tab without a
+restart.
 
-**Polish locale completeness:**
-- `Diagnostyka…` / `Zainstaluj zależności…` Tools menu items.
-- `Dodaj wskazówkę vision przy wklejaniu obrazów do sesji Copilot`
-  Options checkbox.
-- `Pobierz model Ollama` / `Pobierz` / `Pobieranie nieudane` /
-  `Model pobrany` Pull dialog strings.
-- `Nowa sesja AI…` File menu (replaces `Nowa sesja Claude Code…` that
-  predated multi-provider work; clicking it opens the same
-  provider-picker the sidebar `Add ▾` uses).
+Since v1.3.5, `master` additionally ships task reordering (`tasks move
+<project> <id> <position>` plus reorder buttons in the Tasks panel) and
+License v1.1 (co-authors added).
 
-**Test infrastructure:**
-- `tools/_e2e_live_monitor.sh` rewritten to action-driven mode —
-  screenshots taken only on `tag <name>` instead of polling every
-  N seconds. Eliminates thousands of duplicate frames per test run.
-- New `tools/_e2e_atspi_driver.py` accessibility-tree driver lets pin
-  tests click GTK widgets by label (XPath-equivalent) instead of
-  flaky `xdotool mousemove` coordinates.
-- 14 new pytest pin tests under `tests/e2e/test_*` — one per fixed
-  bug — each combining structural source/catalog parsing with
-  behavioural xvfb-driven contract checks.
+Full per-release change lists live in [`errata.json`](errata.json) — the same
+data the in-app update dialog shows.
 
 ## Features
 
@@ -211,12 +183,15 @@ provider-aware reference into the prompt:
   default phrasing too verbose).
 - **Per-session override** — Edit any AI session and fill in the
   "Image paste template (optional):" Entry. Examples:
+
   ```
   Take a careful look at: {path} — describe UI elements only.
   ```
+
   ```
   Image attached: {path} — focus on layout, ignore colors.
   ```
+
   The `{path}` placeholder gets substituted with the absolute saved
   image path. Leave the Entry empty to fall back to the provider
   default. The session-level override **bypasses** the global kill-
@@ -260,7 +235,7 @@ running BT to pick up changes without a full `install.sh`):
 
 `sync_install.sh` skips apt/npm/license/symlinks (handled once by
 `install.sh`); only the `bterminal/` package, CLI tools (`ctx`,
-`consult`, `tasks`, `claude_log`, `memory_wizard`, `mock_ai_cli`)
+`consult`, `tasks`, `claude_log`, `memory_wizard`, `aider_setup_wizard`, `mock_ai_cli`)
 and recompiled `.mo` translation catalogs are touched. Restart
 BTerminal to load the new code.
 
@@ -269,7 +244,7 @@ changes (Node, Python, GTK, gettext).
 
 ### Git Panel
 
-A right-side panel that appears only on Claude Code tabs (`Ctrl+G` to toggle). Auto-refreshes every 3 seconds and monitors `.git/` for changes.
+A right-side panel that appears on AI session tabs — any provider (`Ctrl+G` to toggle). Auto-refreshes every 3 seconds and monitors `.git/` for changes.
 
 Accordion sections: **Branch** (current branch + HEAD), **Changes** (unstaged/untracked with numstat), **Stash**, **LFS/Binary** (detection + setup), **Activity** (recent commits), **Log** (last 20 oneline entries). Includes a `git init` button for uninitialized repos.
 
@@ -332,12 +307,13 @@ Skills are never overwritten on update — user edits are preserved. New bundled
 
 The sidebar **Files** tab is a project file browser similar to the IntelliJ project tree.
 
-- **Project dropdown** — lists all saved Claude Code sessions with a `project_dir`; defaults to the active Claude Code tab. Switching the dropdown pins the tree to that project.
+- **Project dropdown** — lists all saved AI sessions with a `project_dir`; defaults to the active AI tab. Switching the dropdown pins the tree to that project.
 - **Auto git root** — if the session's project directory is a generic subdirectory (`docs/`, `src/`, `tests/`, etc.), the panel automatically walks up to the nearest git root and shows the full project.
 - **Double-click a file** — opens a diff dialog in meld
 - **Double-click a directory** — expand / collapse
 
 **Diff dialog** (meld):
+
 - Dropdown with the last 10 commits (short hash + subject)
 - Text field for any custom ref: full hash, branch name, `HEAD~5`, etc.
 - Extracts the historical version via `git show` and opens `meld <old> <current>`
@@ -407,10 +383,11 @@ tasks add myproject "description"
 tasks add myproject 1 "subtask"        # creates 1.a
 tasks done myproject <task_id>
 tasks pending myproject
+tasks move myproject 2 1               # reorder: move task to position 1
 tasks --help
 ```
 
-The sidebar **Tasks** tab shows a per-project task list with checkboxes, add/edit/delete, and a 2-second auto-refresh poll. An **auto-trigger** system (start/stop buttons) continuously feeds pending tasks to Claude Code sessions — task claims are atomic to prevent collisions in multi-session setups. Auto-trigger flags reset to OFF on every app startup for safety.
+The sidebar **Tasks** tab shows a per-project task list with checkboxes, add/edit/delete, reorder buttons, and a 2-second auto-refresh poll. The project dropdown also lists CLI-only projects (created with `tasks add` outside any saved session). An **auto-trigger** system (start/stop buttons) continuously feeds pending tasks to Claude Code sessions — task claims are atomic to prevent collisions in multi-session setups. Auto-trigger flags reset to OFF on every app startup for safety.
 
 ### Plugins
 
@@ -503,7 +480,8 @@ issue if you'd like it prioritized.
 
 - **Python 3.10+** with PyGObject, GTK 3 and VTE 2.91 bindings
 - **Node.js 22+** and **npm 10+**
-- **Claude Code** CLI — requires an active Claude subscription (Max or Pro); the installer sets it up automatically
+- **Claude Code** CLI — needed for the Claude provider; requires an active Claude subscription (Max or Pro); the installer sets it up automatically
+- **GitHub Copilot CLI / Aider** *(optional)* — alternative AI providers; Copilot requires a Copilot subscription (never auto-installed), Aider can run fully offline against local Ollama models
 - **OpenRouter account** *(optional)* — needed only for the Consult feature; requires API credits at [openrouter.ai](https://openrouter.ai)
 
 ## Installation
@@ -520,7 +498,7 @@ The installer reads `defaults/dependencies.json` and enforces version requiremen
 2. Install or update Claude Code CLI via npm; create a stable symlink at `~/.local/bin/claude`
 3. Install system tools: `git`, `ssh`, `meld`, `pandoc`, LaTeX tools (`pdflatex`, `latexmk`, `poppler-utils`) — all installed automatically via apt if missing
 4. Install GTK bindings: `python3-gi`, `gir1.2-gtk-3.0`, `gir1.2-vte-2.91`
-5. Copy the `bterminal/` Python package (recursively) and CLI tools (`ctx`, `consult`, `tasks`, `claude_log`, `memory_wizard` from `tools/`) to `~/.local/share/bterminal/`, and create a `bterminal-launcher` shell script that runs `python3 -m bterminal`
+5. Copy the `bterminal/` Python package (recursively) and CLI tools (`ctx`, `consult`, `tasks`, `claude_log`, `memory_wizard`, `aider_setup_wizard` from `tools/`) to `~/.local/share/bterminal/`, and create a `bterminal-launcher` shell script that runs `python3 -m bterminal`
 6. Create live symlinks for `defaults/`, `README.md`, `VERSION` — `git pull` takes effect immediately, no reinstall needed
 7. Install new bundled skills to `~/.claude/commands/` (never overwrites existing files)
 8. Create symlinks in `~/.local/bin/`
@@ -553,7 +531,7 @@ The sidebar has eight built-in tabs: **Sessions**, **Ctx**, **Consult**, **Tasks
 | `Ctrl+Tab` | Next tab (wraps around) |
 | `Ctrl+PageUp` / `Ctrl+PageDown` | Previous / next tab |
 | `Ctrl+B` | Toggle sidebar |
-| `Ctrl+G` | Toggle Git panel (Claude Code tabs) |
+| `Ctrl+G` | Toggle Git panel (AI tabs) |
 | `F5` | Refresh Git panel |
 | `Ctrl+Shift+C` | Copy |
 | `Ctrl+Shift+V` | Paste (detects clipboard images) |
@@ -565,7 +543,7 @@ Files in `~/.config/bterminal/`:
 | File | Contents |
 |------|----------|
 | `sessions.json` | SSH sessions and macros |
-| `claude_sessions.json` | Claude Code session configs |
+| `ai_sessions.json` | AI session configs (provider-aware schema R4.2); legacy `claude_sessions.json` is migrated automatically on first launch |
 | `consult.json` | OpenRouter API key, models and tribunal presets |
 | `install_errors.json` | Last installer run: errors and warnings |
 | `plugins.json` | Plugin enable/disable state |
@@ -578,8 +556,8 @@ Files in `~/.config/bterminal/`:
 |-----|---------|---------|
 | `language` | `null` | UI locale code (`en`, `pl`, `de`, ...) or `null` for **Auto-detect** (LANGUAGE / LANG env). Set via Options dialog. |
 | `tell_ai_language` | `true` | When ON and language ≠ `en`, appends a one-line user-language hint to AI session intro prompts. |
-| `license_accepted_hash` | _(unset)_ | SHA-256 of the LICENSE the user accepted. Hash mismatch (license updated, language switched) triggers re-prompt on next launch. |
-| `license_accepted_at` | _(unset)_ | ISO-8601 timestamp of acceptance. |
+| `license_accepted_hash` | *(unset)* | SHA-256 of the LICENSE the user accepted. Hash mismatch (license updated, language switched) triggers re-prompt on next launch. |
+| `license_accepted_at` | *(unset)* | ISO-8601 timestamp of acceptance. |
 
 Context database: `~/.claude-context/context.db`
 
@@ -637,7 +615,7 @@ bterminal/                     ← Python package (~50 modules)
 tools/                         ← standalone CLI scripts (installed flat to
 │                                ~/.local/share/bterminal/, symlinked to
 │                                ~/.local/bin/)
-├── ctx, consult, tasks, claude_log, memory_wizard
+├── ctx, consult, tasks, claude_log, memory_wizard, aider_setup_wizard
 ├── mock_ai_cli                ← test harness (provider-agnostic state machine)
 ├── test_all.sh                ← local test runner (unit/component/e2e/slow)
 ├── verify_e2e.sh              ← bash smoke test against running BTerminal
@@ -654,13 +632,13 @@ requirements with acceptance criteria.
 
 ## Testing
 
-The full suite runs **locally**, without a VM. 207 tests, ~26 s wall-clock
-on the dev machine.
+The full suite runs **locally**, without a VM — ~190 test files / 2,500+ test
+functions as of v1.3.5; `./tools/test_all.sh` prints current totals.
 
 ```bash
 ./tools/test_all.sh             # fast (~16 s, 205 tests, skips slow)
 ./tools/test_all.sh --quick     # unit only (~0.3 s, 135 tests, no xvfb)
-./tools/test_all.sh --slow      # full incl. exploration (~26 s, 207 tests)
+./tools/test_all.sh --slow      # full incl. exploration
 ./tools/test_all.sh --layer e2e # tests/e2e/ only (smoke battery + CLI tools)
 ./tools/test_all.sh --watch     # auto-rerun on changes (needs pytest-watch)
 ```
@@ -672,6 +650,9 @@ Local requirements:
 - GTK 3 + VTE 2.91 (`apt install gir1.2-vte-2.91 gir1.2-gtk-3.0`)
 
 ### Test layers
+
+Per-layer counts below are the v1.2.0 refactor baseline; the suite has grown
+every release since (pin tests are added for each fixed bug).
 
 | Layer | Count | Time | What it covers |
 |-------|-------|------|----------------|
@@ -740,6 +721,7 @@ in `locale/<lang>/LC_MESSAGES/bterminal.po`; the runtime loads compiled
 | `ko` | 한국어    | Korean     | 1-form |
 
 Each language ships:
+
 - `locale/<code>/LC_MESSAGES/bterminal.po` — UI catalog (~75 strings)
 - `defaults/license/LICENSE.<code>.md` — full legal translation
 
@@ -764,7 +746,7 @@ new Polish strings that were added without a `_()` / `N_()` wrapper, and
 completeness, plural-form correctness, and license attribution:
 
 ```bash
-./tools/test_all.sh --quick    # 314 tests, ~0.7s
+./tools/test_all.sh --quick    # unit layer, sub-second
 ```
 
 ### Add a new language
@@ -848,11 +830,20 @@ why switching language re-prompts: different file = different hash).
 The audit script (`tools/check_i18n.py`) does not flag PL in installer /
 docs / comments — only in user-facing UI strings inside `bterminal/`.
 
+## Contributing
+
+Contributions of every kind are welcome — bug reports, feature ideas,
+translations, documentation, screenshots and code. You do **not** need to know
+git or programming to help. Start with
+[CONTRIBUTING.md](CONTRIBUTING.md); questions go to
+[Discussions](https://github.com/DexterFromLab/BTerminal/discussions).
+
 ## License
 
-Copyright (c) 2024-2026 **Bartosz Czarnota** &lt;<bartoszczarnota1@gmail.com>&gt;
+Copyright (c) 2024-2026 **Bartosz Czarnota**, **Jakub Szpak**, **Paweł Jesionkowski**, **Tomasz Frankowski**
+Contact: <bartoszczarnota1@gmail.com>, <jakub.szpak@gmail.com>, <jesionkow.pawel@gmail.com>, <tomaszfrankowski@icloud.com>
 
-BTerminal is provided under a custom license requiring **attribution**.
+BTerminal is provided under a custom license (v1.1) requiring **attribution**.
 The full terms are in [LICENSE.md](LICENSE.md). In short: you may use,
 modify, and redistribute the Software, but every copy and derivative
 work must reproduce the original authorship information (author name,
