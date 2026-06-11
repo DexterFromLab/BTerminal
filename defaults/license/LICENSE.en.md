@@ -2,10 +2,11 @@
 
 **Version 1.1** — effective 2026-06-10
 
-Copyright (c) 2024-2026 **Bartosz Czarnota**, **Jakub Szpak**, **Paweł Jesionkowski**
+Copyright (c) 2024-2026 **Bartosz Czarnota**, **Jakub Szpak**, **Paweł Jesionkowski**, **Tomasz Frankowski**
 Contact: <bartoszczarnota1@gmail.com>
 <jakub.szpak@gmail.com>
 <jesionkow.pawel@gmail.com>
+<tomaszfrankowski@icloud.com>
 
 ---
 
@@ -23,8 +24,8 @@ derivative works, **must reproduce the authorship information of the
 original author** in full and unaltered. Specifically, the following
 identifiers must remain visible in every distribution:
 
-- Author name: **Bartosz Czarnota**, **Jakub Szpak**, **Paweł Jesionkowski**
-- Author contact: **<bartoszczarnota1@gmail.com>**, **<jakub.szpak@gmail.com>**, **<jesionkow.pawel@gmail.com>**
+- Author name: **Bartosz Czarnota**, **Jakub Szpak**, **Paweł Jesionkowski**, **Tomasz Frankowski**
+- Author contact: **<bartoszczarnota1@gmail.com>**, **<jakub.szpak@gmail.com>**, **<jesionkow.pawel@gmail.com>**, **<tomaszfrankowski@icloud.com>**
 - Original project: **BTerminal**
 
 The above information must appear in **all** of the following surfaces
@@ -81,6 +82,9 @@ performed.
 
 **Paweł Jesionkowski** (co-author)
 <jesionkow.pawel@gmail.com>
+
+**Tomasz Frankowski** (co-author)
+<tomaszfrankowski@icloud.com>
 
 This copyright notice and these conditions shall be included in all
 copies or substantial portions of the Software.

@@ -2,10 +2,11 @@
 
 **Wersja 1.1** — obowiązuje od 2026-06-10
 
-Copyright (c) 2024-2026 **Bartosz Czarnota**, **Jakub Szpak**, **Paweł Jesionkowski**
+Copyright (c) 2024-2026 **Bartosz Czarnota**, **Jakub Szpak**, **Paweł Jesionkowski**, **Tomasz Frankowski**
 Kontakt: <bartoszczarnota1@gmail.com>
 <jakub.szpak@gmail.com>
 <jesionkow.pawel@gmail.com>
+<tomaszfrankowski@icloud.com>
 
 ---
 
@@ -24,8 +25,8 @@ pochodne, **muszą w pełni i w niezmienionej formie zachowywać informacje
 o autorstwie oryginału**. W szczególności następujące dane muszą pozostać
 widoczne w każdej dystrybucji:
 
-- Imię i nazwisko autora: **Bartosz Czarnota**, **Jakub Szpak**, **Paweł Jesionkowski**
-- Kontakt z autorem: **<bartoszczarnota1@gmail.com>**, **<jakub.szpak@gmail.com>**, **<jesionkow.pawel@gmail.com>**
+- Imię i nazwisko autora: **Bartosz Czarnota**, **Jakub Szpak**, **Paweł Jesionkowski**, **Tomasz Frankowski**
+- Kontakt z autorem: **<bartoszczarnota1@gmail.com>**, **<jakub.szpak@gmail.com>**, **<jesionkow.pawel@gmail.com>**, **<tomaszfrankowski@icloud.com>**
 - Nazwa oryginalnego projektu: **BTerminal**
 
 Powyższe informacje muszą znaleźć się we **wszystkich** poniższych
@@ -84,6 +85,9 @@ przerwana.
 
 **Paweł Jesionkowski** (współautor)
 <jesionkow.pawel@gmail.com>
+
+**Tomasz Frankowski** (współautor)
+<tomaszfrankowski@icloud.com>
 
 Niniejsza nota o prawach autorskich wraz z powyższymi warunkami musi być
 zawarta we wszystkich kopiach lub istotnych częściach Oprogramowania.

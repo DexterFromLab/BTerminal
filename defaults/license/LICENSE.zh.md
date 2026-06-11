@@ -2,10 +2,11 @@
 
 **版本 1.1** — 自 2026-06-10 起生效
 
-Copyright (c) 2024-2026 **Bartosz Czarnota**, **Jakub Szpak**, **Paweł Jesionkowski**
+Copyright (c) 2024-2026 **Bartosz Czarnota**, **Jakub Szpak**, **Paweł Jesionkowski**, **Tomasz Frankowski**
 联系方式：<bartoszczarnota1@gmail.com>
 <jakub.szpak@gmail.com>
 <jesionkow.pawel@gmail.com>
+<tomaszfrankowski@icloud.com>
 
 ---
 
@@ -19,8 +20,8 @@ Copyright (c) 2024-2026 **Bartosz Czarnota**, **Jakub Szpak**, **Paweł Jesionko
 本软件的所有副本，包括其重要部分和衍生作品，**必须完整且不加更改地复制
 原作者的署名信息**。具体而言，以下标识必须在每次分发中保持可见：
 
-- 作者姓名：**Bartosz Czarnota**, **Jakub Szpak**, **Paweł Jesionkowski**
-- 作者联系方式：**<bartoszczarnota1@gmail.com>**, **<jakub.szpak@gmail.com>**, **<jesionkow.pawel@gmail.com>**
+- 作者姓名：**Bartosz Czarnota**, **Jakub Szpak**, **Paweł Jesionkowski**, **Tomasz Frankowski**
+- 作者联系方式：**<bartoszczarnota1@gmail.com>**, **<jakub.szpak@gmail.com>**, **<jesionkow.pawel@gmail.com>**, **<tomaszfrankowski@icloud.com>**
 - 原始项目：**BTerminal**
 
 上述信息必须出现在任何再分发或衍生作品的**所有**以下位置：
@@ -65,5 +66,8 @@ Copyright (c) 2024-2026 **Bartosz Czarnota**, **Jakub Szpak**, **Paweł Jesionko
 
 **Paweł Jesionkowski** (联合作者)
 <jesionkow.pawel@gmail.com>
+
+**Tomasz Frankowski** (联合作者)
+<tomaszfrankowski@icloud.com>
 
 此版权声明和这些条件应包含在本软件的所有副本或重要部分中。

@@ -2,10 +2,11 @@
 
 **Verze 1.1** — platná od 2026-06-10
 
-Copyright (c) 2024-2026 **Bartosz Czarnota**, **Jakub Szpak**, **Paweł Jesionkowski**
+Copyright (c) 2024-2026 **Bartosz Czarnota**, **Jakub Szpak**, **Paweł Jesionkowski**, **Tomasz Frankowski**
 Kontakt: <bartoszczarnota1@gmail.com>
 <jakub.szpak@gmail.com>
 <jesionkow.pawel@gmail.com>
+<tomaszfrankowski@icloud.com>
 
 ---
 
@@ -23,8 +24,8 @@ Všechny kopie Softwaru, včetně podstatných částí a odvozených děl,
 původního autora**. Konkrétně musí v každé distribuci zůstat
 viditelné následující identifikátory:
 
-- Jméno autora: **Bartosz Czarnota**, **Jakub Szpak**, **Paweł Jesionkowski**
-- Kontakt autora: **<bartoszczarnota1@gmail.com>**, **<jakub.szpak@gmail.com>**, **<jesionkow.pawel@gmail.com>**
+- Jméno autora: **Bartosz Czarnota**, **Jakub Szpak**, **Paweł Jesionkowski**, **Tomasz Frankowski**
+- Kontakt autora: **<bartoszczarnota1@gmail.com>**, **<jakub.szpak@gmail.com>**, **<jesionkow.pawel@gmail.com>**, **<tomaszfrankowski@icloud.com>**
 - Původní projekt: **BTerminal**
 
 Výše uvedené informace se musí objevit ve **všech** následujících
@@ -82,6 +83,9 @@ Pokud odmítnete, aplikace se zavře nebo bude aktualizace zrušena.
 
 **Paweł Jesionkowski** (spoluautor)
 <jesionkow.pawel@gmail.com>
+
+**Tomasz Frankowski** (spoluautor)
+<tomaszfrankowski@icloud.com>
 
 Toto upozornění o autorských právech a tyto podmínky musí být
 zahrnuty ve všech kopiích nebo podstatných částech Softwaru.
